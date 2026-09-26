@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { MessageSquare, Mic } from 'lucide-react'
 import { ChatPanel } from '@/components/ChatPanel'
 import { AddPlaceSheet } from '@/components/AddPlaceSheet'
+import { useI18n } from '@/components/I18nProvider'
 import { MapView, type RouteInfo } from '@/components/MapView'
 import { PlaceCardStrip } from '@/components/PlaceCardStrip'
 import { CollapsedReply } from '@/components/CollapsedReply'
@@ -142,6 +143,7 @@ interface HistoryItem {
 }
 
 export default function LandingPage() {
+  const { t } = useI18n()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [gate, setGate] = useState<GateState | null>(null)
 
@@ -422,7 +424,7 @@ export default function LandingPage() {
     [savedPlaceIds],
   )
 
-  const handleSend = useCallback(async (text: string, opts?: { speak?: boolean }) => {
+  const handleSend = useCallback(async (text: string, opts?: { speak?: boolean; display?: string }) => {
     cancelSpeech()
     const wantSpeak = !!opts?.speak
 
@@ -446,7 +448,7 @@ export default function LandingPage() {
         ? `${text}\n[User city: ${manualCity}]`
         : text
 
-    const userMsg: ChatMessage = { id: uid(), role: 'user', content: text }
+    const userMsg: ChatMessage = { id: uid(), role: 'user', content: opts?.display ?? text }
     setMessages((prev) => [...prev, userMsg])
 
     const visiblePlaces: Place[] = itinerary?.stops?.length
@@ -1216,8 +1218,11 @@ export default function LandingPage() {
       nextLocal ? 'prefer_local:' : '',
       nextAccess ? 'require_accessible:' : '',
     ].filter(Boolean)
-    if (tokens.length) handleSend(`${tokens.join(' ')} places in Kigali`)
-  }, [preferLocal, requireAccessible, handleSend])
+    if (tokens.length) {
+      const label = [nextLocal ? t('filters.local') : '', nextAccess ? t('filters.accessible') : ''].filter(Boolean).join(' · ')
+      handleSend(`${tokens.join(' ')} places in Kigali`, { display: label })
+    }
+  }, [preferLocal, requireAccessible, handleSend, t])
 
   const chatPanel = (
     <ChatPanel
