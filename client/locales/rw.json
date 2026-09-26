@@ -1,0 +1,79 @@
+{
+  "app": {
+    "name": "Ikarita ya Bose",
+    "tagline": "Ikarita igaragara ibyo umujyi wibagiwe."
+  },
+  "header": {
+    "newChat": "Ikiganiro gishya",
+    "saved": "Ahantu nabitswe",
+    "recent": "Ibiheruka",
+    "searchChats": "Shakisha ibiganiro…",
+    "logout": "Sohoka",
+    "account": "Konti yawe",
+    "signedIn": "Winjiye",
+    "theme": "Isura",
+    "language": "Ururimi"
+  },
+  "composer": {
+    "placeholder": "Ugiye he?",
+    "cityPlaceholder": "urugero: Kigali",
+    "send": "Ohereza",
+    "stop": "Hagarika"
+  },
+  "chips": {
+    "kigali": "Amasaha 4 i Kigali munsi ya $60",
+    "vegetarian": "Ibiryo by’imboga hafi",
+    "food": "Ibiryo n’ahantu heza hafi",
+    "plan": "Tegura urugendo rwanjye uyu munsi"
+  },
+  "filters": {
+    "local": "Ubucuruzi bw’aho",
+    "accessible": "Abafite ubumuga"
+  },
+  "add": {
+    "open": "Ongeraho ahantu",
+    "title": "Ongeraho ahantu",
+    "name": "Izina ry’ahantu",
+    "category": "Icyiciro",
+    "local": "Ubucuruzi bw’aho?",
+    "accessible": "Abafite ubumuga bashobora kuhagera?",
+    "photo": "Ifoto (si ngombwa)",
+    "photoTooBig": "Ifoto ni nini cyane (150 KB). Ushobora kuyirenga.",
+    "useLocation": "Koresha aho ndi",
+    "lat": "Latitude",
+    "lng": "Longitude",
+    "tap": "Cyangwa kanda ku ikarita uhindure ahantu.",
+    "submit": "Ohereza",
+    "submitting": "Kohereza…",
+    "thanks": "Murakoze! Ahantu hawe hari mu igenzura.",
+    "needAuth": "Injira mbere yo kongeraho ahantu.",
+    "error": "Ntabwo twabashije kubika aha hantu.",
+    "close": "Funga"
+  },
+  "badges": {
+    "local": "Ubucuruzi bw’aho",
+    "accessible": "Abafite ubumuga"
+  },
+  "categories": {
+    "market": "Isoko",
+    "restaurant": "Resitora",
+    "cafe": "Kafe",
+    "shop": "Iduka",
+    "pharmacy": "Farumasi",
+    "attraction": "Ahantu ho gusura",
+    "other": "Ikindi"
+  },
+  "admin": {
+    "title": "Igenzura",
+    "pending": "Bitegereje",
+    "validate": "Emeza",
+    "reject": "Wange",
+    "reason": "Impamvu (si ngombwa)",
+    "empty": "Nta hantu hategereje igenzura.",
+    "denied": "Iyi konti si iy’umuyobozi.",
+    "total": "Ahantu",
+    "rate": "Igipimo cy’ibyemejwe",
+    "local": "Ubucuruzi bw’aho",
+    "accessible": "Abafite ubumuga"
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "app": {
+    "name": "Ikarita ya Bose",
+    "tagline": "La carte qui rend visible ce que la ville oublie."
+  },
+  "header": {
+    "newChat": "Nouvelle conversation",
+    "saved": "Lieux enregistrés",
+    "recent": "Récents",
+    "searchChats": "Rechercher…",
+    "logout": "Se déconnecter",
+    "account": "Ton compte",
+    "signedIn": "Connecté",
+    "theme": "Thème",
+    "language": "Langue"
+  },
+  "composer": {
+    "placeholder": "Où aller ?",
+    "cityPlaceholder": "ex. Kigali",
+    "send": "Envoyer",
+    "stop": "Arrêter"
+  },
+  "chips": {
+    "kigali": "4 heures à Kigali sous 60 $",
+    "vegetarian": "Cuisine végétarienne à proximité",
+    "food": "Meilleure cuisine et visites à proximité",
+    "plan": "Planifier ma journée"
+  },
+  "filters": {
+    "local": "Commerces locaux",
+    "accessible": "Accessible"
+  },
+  "add": {
+    "open": "Ajouter un lieu",
+    "title": "Ajouter un lieu",
+    "name": "Nom du lieu",
+    "category": "Catégorie",
+    "local": "Commerce local ?",
+    "accessible": "Accessible aux personnes à mobilité réduite ?",
+    "photo": "Photo (optionnelle)",
+    "photoTooBig": "Photo trop lourde (150 Ko max). Tu peux l’ignorer.",
+    "useLocation": "Utiliser ma position",
+    "lat": "Latitude",
+    "lng": "Longitude",
+    "tap": "Ou touche la carte pour ajuster le point.",
+    "submit": "Envoyer",
+    "submitting": "Envoi…",
+    "thanks": "Merci ! Ton lieu est en cours de validation.",
+    "needAuth": "Connecte-toi pour ajouter un lieu.",
+    "error": "Impossible d’enregistrer ce lieu pour le moment.",
+    "close": "Fermer"
+  },
+  "badges": {
+    "local": "Commerce local",
+    "accessible": "Accessible"
+  },
+  "categories": {
+    "market": "Marché",
+    "restaurant": "Restaurant",
+    "cafe": "Café",
+    "shop": "Boutique",
+    "pharmacy": "Pharmacie",
+    "attraction": "Lieu à visiter",
+    "other": "Autre"
+  },
+  "admin": {
+    "title": "Modération",
+    "pending": "En attente",
+    "validate": "Valider",
+    "reject": "Rejeter",
+    "reason": "Motif (optionnel)",
+    "empty": "Aucun lieu en attente.",
+    "denied": "Ce compte n’est pas administrateur.",
+    "total": "Lieux",
+    "rate": "Taux de validation",
+    "local": "Commerces locaux",
+    "accessible": "Accessibles"
+  }
+}

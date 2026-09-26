@@ -23,6 +23,16 @@ export interface Place {
   /** Legacy photo references or absolute URLs */
   photos?: string[]
   photo_reference?: string
+  /** Informal / neighbourhood business (MapForAll). */
+  local_business?: boolean
+  /** Physically accessible to wheelchair users. */
+  accessible?: boolean
+  status?: string
+  source?: string
+  added_by?: string
+  confirmations_count?: number
+  created_at?: string
+  rejection_reason?: string
 }
 
 export interface TravelLeg {

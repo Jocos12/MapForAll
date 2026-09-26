@@ -7,7 +7,11 @@ import {
   CalendarPlus,
   Check,
   ChevronDown,
+  Clock,
+  Compass,
+  Globe,
   History,
+  Leaf,
   LocateFixed,
   LogOut,
   Map as MapIcon,
@@ -26,8 +30,11 @@ import {
   Sun,
   Trash2,
   Users,
+  Utensils,
   Volume2,
   VolumeX,
+  Accessibility,
+  Store,
 } from 'lucide-react'
 import type { ChatMessage, Place, Theme } from '@/lib/types'
 import type { MapSnapshot } from '@/lib/mapHistory'
@@ -41,6 +48,7 @@ import { googleCalendarUrl } from '@/lib/calendar'
 import { shownMessages } from '@/lib/animationMemory'
 import { focusRing } from '@/lib/design/tokens'
 import { DUR, EASE } from './ui/motion'
+import { useI18n, type Lang } from './I18nProvider'
 
 interface Props {
   messages: ChatMessage[]
@@ -48,6 +56,10 @@ interface Props {
   thinkingSteps: string[]
   streamingStarted: boolean
   onSend: (text: string) => void
+  /** Quick inclusion filters. The parent fetches places and sends the agent tokens. */
+  onInclusionFilter?: (mode: 'local' | 'accessible') => void
+  inclusionLocal?: boolean
+  inclusionAccessible?: boolean
   /** Single shared voice instance, owned by the parent (avoids duplicate recorders). */
   voiceState?: VoiceState
   voiceSupported?: boolean
@@ -106,10 +118,10 @@ interface Props {
 }
 
 const CHIPS = [
-  '4 hours in Kigali under $60',
-  'Vegetarian food nearby',
-  'Best food and sights nearby',
-  'Plan my trip today',
+  { key: 'chips.kigali', query: '4 hours in Kigali under $60', Icon: Clock },
+  { key: 'chips.vegetarian', query: 'Vegetarian food nearby', Icon: Leaf },
+  { key: 'chips.food', query: 'Best food and sights nearby', Icon: Utensils },
+  { key: 'chips.plan', query: 'Plan my trip today', Icon: Compass },
 ]
 
 export function ChatPanel({
@@ -118,6 +130,9 @@ export function ChatPanel({
   thinkingSteps,
   streamingStarted,
   onSend,
+  onInclusionFilter,
+  inclusionLocal = false,
+  inclusionAccessible = false,
   voiceState = 'idle',
   voiceSupported = false,
   voiceWarning,
@@ -164,6 +179,7 @@ export function ChatPanel({
   onOpenCommunity,
   communityInviteCount,
 }: Props) {
+  const { t, lang, setLang } = useI18n()
   const inputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -409,8 +425,8 @@ export function ChatPanel({
       )}
       <form onSubmit={handleSubmit}>
         <div
-          className={`flex items-center gap-2 rounded-full border bg-[var(--bg-header)]/90 px-4 py-1 shadow-[0_2px_12px_rgba(0,0,0,0.06)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-[#F56A00]/60 focus-within:ring-2 focus-within:ring-[#F56A00]/25 motion-reduce:transition-none dark:shadow-[0_2px_12px_rgba(0,0,0,0.5)] ${
-            voiceActive ? 'border-[#F56A00]/60' : 'border-[var(--border)]'
+          className={`flex items-center gap-2 rounded-full border bg-[var(--bg-header)]/95 px-2 py-1 shadow-[0_14px_36px_-18px_rgba(90,40,0,0.45)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-[#F56A00]/70 focus-within:shadow-[0_0_0_4px_rgba(245,106,0,0.16),0_16px_36px_-16px_rgba(245,106,0,0.45)] motion-reduce:transition-none dark:shadow-[0_16px_40px_-18px_rgba(0,0,0,0.7)] dark:focus-within:shadow-[0_0_0_4px_rgba(245,106,0,0.24),0_16px_36px_-16px_rgba(245,106,0,0.35)] sm:px-3 ${
+            voiceActive ? 'border-[#F56A00]/60' : 'border-black/10 dark:border-white/10'
           }`}
         >
           {voiceSupported && onVoiceToggle && (
@@ -437,8 +453,9 @@ export function ChatPanel({
               : voiceState === 'thinking' ? 'Thinking…'
               : voiceState === 'speaking' ? 'Hodari is speaking…'
               : voiceState === 'paused' ? 'Paused — tap Stop or the mic'
-              : 'Time, budget, preferences, location…'
+              : t('composer.placeholder')
             }
+            aria-label={t('composer.placeholder')}
             className={`min-w-0 flex-1 bg-transparent py-3 text-[16px] text-[var(--text-primary)] outline-none md:text-[14px] ${
               voiceActive ? 'placeholder:text-[#F56A00]/80' : 'placeholder:text-[var(--text-secondary)]'
             }`}
@@ -459,28 +476,47 @@ export function ChatPanel({
             <button
               type="submit"
               disabled={loading}
-              aria-label="Send message"
-              className="btn-press flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F56A00] text-white shadow-[0_2px_10px_rgba(245,106,0,0.35)] transition-colors duration-[var(--dur-fast)] hover:bg-[#e05a1a] disabled:opacity-40 motion-reduce:transition-none max-md:h-11 max-md:w-11"
+              aria-label={t('composer.send')}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F56A00] text-white shadow-[0_6px_16px_-6px_rgba(245,106,0,0.7)] transition-[transform,background-color,box-shadow] duration-150 ease-out hover:scale-105 hover:bg-terracotta hover:shadow-[0_10px_20px_-8px_rgba(196,92,38,0.75)] active:scale-95 disabled:opacity-40 disabled:hover:scale-100 motion-reduce:transition-none motion-reduce:hover:scale-100 max-md:h-11 max-md:w-11"
             >
               <Send className="h-4 w-4" />
             </button>
           )}
         </div>
       </form>
-      {messages.length === 0 && (
-        <div className="mt-3 flex flex-wrap justify-center gap-2">
-          {CHIPS.map((s) => (
+      <div className="mt-3 flex max-w-full flex-wrap justify-center gap-2">
+        {onInclusionFilter && (
+          <>
             <button
-              key={s}
               type="button"
-              onClick={() => onSend(s)}
-              className="rounded-full border border-[var(--border)] px-3.5 py-1.5 text-[13px] text-[var(--text-primary)] transition-colors hover:border-[#F56A00]/40 hover:bg-[#F56A00]/[0.06] dark:hover:bg-[#F56A00]/10"
+              onClick={() => onInclusionFilter('local')}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] ${inclusionLocal ? 'border-terracotta bg-terracotta/15 text-terracotta' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#F56A00]/45`}
             >
-              {s}
+              <Store className="h-3.5 w-3.5 text-terracotta" aria-hidden />
+              {t('filters.local')}
             </button>
-          ))}
-        </div>
-      )}
+            <button
+              type="button"
+              onClick={() => onInclusionFilter('accessible')}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] ${inclusionAccessible ? 'border-[#0F6E56] bg-[#0F6E56]/15 text-[#0F6E56]' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#0F6E56]/45`}
+            >
+              <Accessibility className="h-3.5 w-3.5 text-[#0F6E56]" aria-hidden />
+              {t('filters.accessible')}
+            </button>
+          </>
+        )}
+        {messages.length === 0 && CHIPS.map(({ key, query, Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onSend(query)}
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/80 px-3 py-1.5 text-left text-[12px] leading-snug text-[var(--text-primary)] shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-200 ease-out hover:scale-[1.03] hover:border-[#F56A00]/45 hover:bg-[#F56A00]/10 hover:shadow-[0_8px_18px_-12px_rgba(245,106,0,0.7)] motion-reduce:transition-none motion-reduce:hover:scale-100 sm:px-3.5 sm:text-[13px]"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-terracotta dark:text-[#FF8C2F]" aria-hidden="true" />
+            <span className="min-w-0">{t(key)}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 
@@ -490,12 +526,22 @@ export function ChatPanel({
         <div ref={scrollRef} onScroll={handleScroll} className="chat-scroll h-full min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
           <div className="mx-auto w-full max-w-[720px] space-y-5">
             {isEmpty && (
-              <div className="flex flex-col items-center px-2 pb-6 pt-[8vh] text-center sm:pt-[10vh]">
-                <p className="font-display text-5xl font-semibold italic tracking-tight text-[#F56A00]/25 dark:text-[#FF8C2F]/20">Where to?</p>
-                <p className="mx-auto mt-5 max-w-sm text-[13px] leading-relaxed text-[var(--text-secondary)]">
+              <motion.div
+                initial={reduced ? false : { opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: reduced ? 0 : 0.45, ease: EASE }}
+                className="flex flex-col items-center px-2 pb-6 pt-[6vh] text-center sm:pt-[8vh]"
+              >
+                <div className="hodari-orb relative mb-6 flex h-[88px] w-[88px] items-center justify-center motion-reduce:animate-none">
+                  <span className="absolute -inset-3 rounded-full bg-[#F56A00]/15 blur-md dark:bg-[#F56A00]/20" />
+                  <span className="absolute inset-0 rounded-full bg-gradient-to-br from-[#FF8C2F] via-[#F56A00] to-terracotta shadow-[0_18px_40px_-12px_rgba(196,92,38,0.7)]" />
+                  <Globe className="relative h-9 w-9 text-white" strokeWidth={1.5} aria-hidden="true" />
+                </div>
+                <p className="font-display text-[clamp(2.4rem,6vw,3rem)] font-semibold italic tracking-tight text-ink dark:text-cream">Where to?</p>
+                <p className="mx-auto mt-4 max-w-sm text-[14px] leading-relaxed text-[var(--text-secondary)]">
                   Tell me your time, budget, and preferences, and I&apos;ll build your matchday plan.
                 </p>
-              </div>
+              </motion.div>
             )}
 
             {messages.map((msg, i) => (
@@ -643,20 +689,26 @@ export function ChatPanel({
         </AnimatePresence>
       </div>
 
-      <div className="relative z-10 shrink-0 border-t border-[var(--border)] bg-[var(--bg-chat)]/95 px-4 py-4 backdrop-blur-md sm:px-6">
+      <div className="pb-safe relative z-10 shrink-0 border-t border-[var(--border)] bg-[var(--bg-chat)]/90 px-4 py-3 backdrop-blur-md sm:px-6 sm:py-4">
         {composer}
       </div>
     </>
   )
 
   const modeToggle = onEnterChatMode && onEnterVoiceMode ? (
-    <div className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/90 p-1 shadow-sm backdrop-blur-sm">
+    <div className="relative grid grid-cols-2 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/90 p-1 shadow-sm backdrop-blur-sm">
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full bg-[#F56A00] shadow-[0_2px_8px_rgba(245,106,0,0.35)] transition-transform duration-300 ease-[var(--ease-glide)] motion-reduce:transition-none ${
+          uiMode === 'voice' ? 'translate-x-full' : 'translate-x-0'
+        }`}
+      />
       <button
         type="button"
         onClick={onEnterChatMode}
         aria-pressed={uiMode === 'chat'}
-        className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors sm:px-3.5 sm:text-[12px] ${
-          uiMode === 'chat' ? 'bg-[#F56A00] text-white shadow-[0_2px_8px_rgba(245,106,0,0.35)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+        className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors duration-300 sm:px-3.5 sm:text-[12px] ${
+          uiMode === 'chat' ? 'text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
         }`}
       >
         <MessageSquare className="h-3.5 w-3.5" />
@@ -666,8 +718,8 @@ export function ChatPanel({
         type="button"
         onClick={onEnterVoiceMode}
         aria-pressed={uiMode === 'voice'}
-        className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors sm:px-3.5 sm:text-[12px] ${
-          uiMode === 'voice' ? 'bg-[#F56A00] text-white shadow-[0_2px_8px_rgba(245,106,0,0.35)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+        className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors duration-300 sm:px-3.5 sm:text-[12px] ${
+          uiMode === 'voice' ? 'text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
         }`}
       >
         <Mic className="h-3.5 w-3.5" />
@@ -690,16 +742,15 @@ export function ChatPanel({
 
       <aside
         aria-hidden={!historyOpen}
-        className={`fixed left-0 top-0 z-50 flex h-full w-[240px] flex-col border-r border-[var(--border)] shadow-2xl transition-transform duration-[var(--dur-base)] ease-[var(--ease-glide)] ${
+        className={`fixed left-0 top-0 z-50 flex h-full w-[min(100%,272px)] flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)] shadow-[8px_0_40px_-16px_rgba(26,22,20,0.28)] transition-transform duration-300 ease-[var(--ease-glide)] motion-reduce:transition-none dark:shadow-[8px_0_40px_-12px_rgba(0,0,0,0.55)] ${
           historyOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
         }`}
-        style={{ backgroundColor: theme === 'dark' ? '#15151a' : '#ffffff' }}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3">
-          <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-[var(--text-secondary)] dark:text-gray-200">
-            <History className="h-3.5 w-3.5" /> History
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3.5">
+          <span className="font-display text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+            Hodari
           </span>
-          <button type="button" onClick={() => setHistoryOpen(false)} className="text-[var(--text-secondary)] transition-colors hover:text-[#F56A00]">
+          <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close chat history" className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00]">
             ×
           </button>
         </div>
@@ -708,23 +759,24 @@ export function ChatPanel({
             type="search"
             value={historyQuery}
             onChange={(e) => setHistoryQuery(e.target.value)}
-            placeholder="Search chats…"
+            placeholder={t('header.searchChats')}
             className="mb-3 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-header)] px-3 py-2 text-[16px] text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-[#F56A00]/60 focus:ring-2 focus:ring-[#F56A00]/20 motion-reduce:transition-none md:text-[13px] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
           />
           <button
             type="button"
             onClick={() => { onNewChat(); setHistoryOpen(false) }}
-            className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left text-[11px] uppercase tracking-wider text-[var(--text-primary)] transition-colors hover:border-[#F56A00]/40 hover:bg-[#F56A00]/[0.06] dark:border-[#F56A00]/50 dark:text-[#FF8C2F] dark:hover:bg-[#F56A00]/10"
+            className="flex w-full items-center gap-2 rounded-xl bg-[#F56A00] px-3 py-2.5 text-left text-[13px] font-semibold text-white shadow-[0_10px_22px_-12px_rgba(245,106,0,0.9)] transition-[transform,background-color] duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#e05a1a] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
           >
-            New chat
+            <MessageSquarePlus className="h-4 w-4 shrink-0" />
+            {t('header.newChat')}
           </button>
           <a
             href="/saved"
             onClick={() => setHistoryOpen(false)}
-            className="mt-2 flex w-full items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] uppercase tracking-wider text-[var(--text-primary)] transition-colors hover:border-[#F56A00]/40 hover:bg-[#F56A00]/[0.06] dark:text-[#FF8C2F] dark:hover:bg-[#F56A00]/10"
+            className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[#F56A00]/10"
           >
-            <Bookmark className="h-3.5 w-3.5 shrink-0" />
-            Saved places
+            <Bookmark className="h-4 w-4 shrink-0 text-terracotta dark:text-[#FF8C2F]" />
+            {t('header.saved')}
           </a>
           {mapArchive.length > 0 && (
             <div className="mt-5 border-t border-[var(--border)] pt-4">
@@ -748,7 +800,11 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          <div className="mt-4 space-y-1.5">
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 flex items-center gap-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+              <History className="h-3 w-3" /> {t('header.recent')}
+            </p>
+            <div className="space-y-1">
             {visibleHistoryItems.length === 0 ? (
               <p className="px-1 text-[13px] text-[var(--text-secondary)]">No recent chats yet.</p>
             ) : (
@@ -757,9 +813,9 @@ export function ChatPanel({
                   <button
                     type="button"
                     onClick={() => { onSelectHistory(item.id); setHistoryOpen(false) }}
-                    className="w-full rounded-lg px-2 py-2 pr-8 text-left transition-colors hover:bg-[#F56A00]/[0.06] dark:text-gray-300 dark:hover:bg-[#F56A00]/10"
+                    className="w-full rounded-xl px-2.5 py-2 pr-8 text-left transition-colors hover:bg-[#F56A00]/10"
                   >
-                    <span className="block truncate text-[13px] text-[var(--text-primary)] dark:text-gray-300">{item.title}</span>
+                    <span className="block truncate text-[13px] text-[var(--text-primary)]">{item.title}</span>
                     <span className="mt-0.5 block text-[11px] text-gray-500">
                       {new Date(item.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                     </span>
@@ -777,26 +833,27 @@ export function ChatPanel({
                 </div>
               ))
             )}
+            </div>
           </div>
         </div>
 
         {onLogout && (
           <div className="shrink-0 border-t border-[var(--border)] p-3">
-            <div className="flex items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-header)]/70 px-3 py-2.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F56A00] text-[12px] font-semibold text-white">
+            <div className="flex items-center gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--bg-header)] px-3 py-2.5 shadow-[0_8px_20px_-14px_rgba(26,22,20,0.45)]">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF8C2F] to-terracotta text-[13px] font-semibold text-white shadow-[0_6px_14px_-6px_rgba(196,92,38,0.8)] ring-2 ring-white dark:ring-[#3A322C]">
                 {(userName?.trim()?.[0] ?? 'U').toUpperCase()}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                  {userName || 'Signed in'}
+                  {userName || t('header.signedIn')}
                 </p>
-                <p className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)]">Your account</p>
+                <p className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)]">{t('header.account')}</p>
               </div>
               <button
                 type="button"
                 onClick={onLogout}
-                aria-label="Log out"
-                title="Log out"
+                aria-label={t('header.logout')}
+                title={t('header.logout')}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-red-500/10 hover:text-red-500"
               >
                 <LogOut className="h-4 w-4" />
@@ -811,26 +868,36 @@ export function ChatPanel({
           drawer width crushed the header. */}
       <div className="flex min-h-0 flex-1 flex-col bg-transparent">
         <div
-          className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-transparent px-4 pb-3 pt-3.5 sm:px-5"
-          style={{ backgroundColor: theme === 'dark' ? 'rgba(21, 21, 26, 0.35)' : 'rgba(255, 255, 255, 0.3)' }}
+          className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-3 pt-3.5 sm:px-5"
+          style={{ backgroundColor: theme === 'dark' ? 'rgba(28, 25, 22, 0.55)' : 'rgba(255, 251, 246, 0.62)' }}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
             <div className="min-w-0">
-              <h1 className="font-display text-lg font-semibold text-[var(--text-primary)]">Hodari</h1>
+              <h1 className="font-display text-lg font-semibold text-[var(--text-primary)]">{t('app.name')}</h1>
+              <div className="mt-0.5 flex gap-1" role="group" aria-label={t('header.language')}>
+                {(['fr', 'en', 'rw'] as Lang[]).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setLang(code)}
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${lang === code ? 'bg-[#F56A00] text-white' : 'text-[var(--text-secondary)] hover:bg-[#F56A00]/10'}`}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
             </div>
             {modeToggle}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {/* Below md: speak-replies, theme and the model switcher fold into
-                the "More" popover so the always-visible row (community,
-                new chat, history) keeps full 44px targets in ~360px. */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex items-center gap-0.5 rounded-full bg-white/70 p-1 ring-1 ring-black/[0.06] dark:bg-white/[0.06] dark:ring-white/10 max-md:hidden">
             {speechOutSupported && onToggleSpeakReplies && (
               <button
                 type="button"
                 onClick={onToggleSpeakReplies}
                 aria-label={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'}
                 title={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'}
-                className={`rounded-lg border p-1.5 transition-colors max-md:hidden ${speakReplies ? 'border-[#F56A00]/50 text-[#F56A00]' : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[#F56A00]/40 hover:text-[#F56A00]'}`}
+                className={`rounded-full p-1.5 transition-colors ${speakReplies ? 'bg-[#F56A00]/15 text-[#F56A00]' : 'text-[var(--text-secondary)] hover:bg-[#F56A00]/10 hover:text-[#F56A00]'}`}
               >
                 {speakReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
               </button>
@@ -839,10 +906,12 @@ export function ChatPanel({
               type="button"
               onClick={onToggleTheme}
               aria-label="Toggle theme"
-              className="rounded-lg border border-[var(--border)] p-1.5 text-[var(--text-secondary)] hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:hidden"
+              className="rounded-full p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00]"
             >
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
+            </div>
+            <div className="flex items-center gap-0.5 rounded-full bg-white/70 p-1 ring-1 ring-black/[0.06] dark:bg-white/[0.06] dark:ring-white/10">
             {onOpenCommunity && (
               <button
                 type="button"
@@ -853,7 +922,7 @@ export function ChatPanel({
                 }
                 title="Community"
                 onClick={onOpenCommunity}
-                className={`relative rounded-lg border border-[var(--border)] p-1.5 text-[var(--text-secondary)] hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${focusRing}`}
+                className={`relative rounded-full p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${focusRing}`}
               >
                 <Users className="h-4 w-4" />
                 {!!communityInviteCount && (
@@ -873,7 +942,7 @@ export function ChatPanel({
               aria-label="New chat"
               title="New chat"
               onClick={onNewChat}
-              className={`hidden rounded-lg border border-[var(--border)] text-[var(--text-secondary)] hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center ${focusRing}`}
+              className={`hidden rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center ${focusRing}`}
             >
               <MessageSquarePlus className="h-4 w-4" />
             </button>
@@ -881,10 +950,11 @@ export function ChatPanel({
               type="button"
               aria-label="Open chat history"
               onClick={() => setHistoryOpen((open) => !open)}
-              className={`rounded-lg border border-[var(--border)] p-1.5 text-[var(--text-secondary)] hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${focusRing}`}
+              className={`rounded-full p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${focusRing}`}
             >
               <Menu className="h-4 w-4" />
             </button>
+            </div>
             {hasMapData && (
               <button
                 type="button"

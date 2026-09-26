@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { APIProvider, Map, Map3D, Marker3D, MapMode, AltitudeMode, AdvancedMarker, InfoWindow, Pin, useMap, useMap3D, useMapsLibrary } from '@vis.gl/react-google-maps'
-import { AlertCircle, ChevronLeft, Compass, Earth, ExternalLink, Globe, Image as ImageIcon, Loader2, Map as MapGlyph, MapPin, Maximize2, Minimize2, Navigation, Rotate3d, RotateCcw, RotateCw, Satellite, Share2, Star, Users } from 'lucide-react'
+import { Accessibility, AlertCircle, ChevronLeft, Compass, Earth, ExternalLink, Globe, Image as ImageIcon, Loader2, Map as MapGlyph, MapPin, Maximize2, Minimize2, Navigation, Plus, Rotate3d, RotateCcw, RotateCw, Satellite, Share2, Star, Store, Users } from 'lucide-react'
 import type { ItineraryStop, Place, Theme } from '@/lib/types'
 import type { CustomRouteConfig, MapAnnotations, TravelMode } from '@/lib/mapActions'
 import type { CommunityMapPin, CommunityFriend } from '@/components/community/useCommunityMapLayer'
@@ -13,6 +13,7 @@ import {
   type LatLng,
 } from '@/lib/geo'
 import { PlaceImage } from './PlaceImage'
+import { PlaceBadges } from './PlaceBadges'
 import { cinematicMapKeys } from '@/lib/animationMemory'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { focusRing } from '@/lib/design/tokens'
@@ -192,6 +193,10 @@ interface Props {
   communityFocus?: LatLng | null
   /** Share action on the marker bubble / realistic card (opens the share picker). */
   onPlaceShare?: (place: Place) => void
+  /** Map tap while the add-place sheet is open. */
+  onMapClick?: (pos: { lat: number; lng: number }) => void
+  /** Floating “add a place” control. */
+  onAddPlace?: () => void
 }
 
 function RoutePolyline({ stops }: { stops: ItineraryStop[] }) {
@@ -960,6 +965,7 @@ function MapPlaceholder({
     >
       <MapPin className="h-10 w-10 text-[#F56A00]" strokeWidth={1.5} />
       <p className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">{place.name}</p>
+      <PlaceBadges place={place} />
       <div className="flex flex-wrap items-center justify-center gap-3 text-[13px] text-gray-500 dark:text-gray-400">
         {distanceLabel && <span>{distanceLabel}</span>}
         {durationLabel && <span>{durationLabel}</span>}
@@ -1051,6 +1057,8 @@ function MapMarkers({
         const isActive = activeStopIndex === i
         const pid = 'place_id' in item ? item.place_id : ''
         const hl = pid ? colors[pid] : undefined
+        const flags = item as Place
+        const border = flags.accessible ? '#0F6E56' : flags.local_business ? '#C45C26' : ROUTE_ORANGE
 
         // A plain (inactive, un-highlighted) pin that sits exactly on top of a
         // marker we've already rendered is a visual duplicate — skip it.
@@ -1072,7 +1080,16 @@ function MapMarkers({
             ) : isActive ? (
               <GlowMarkerContent color={ROUTE_ORANGE} glyph={String(i + 1)} />
             ) : (
-              <Pin background="#ffffff" borderColor={ROUTE_ORANGE} glyphColor={ROUTE_ORANGE} glyph={String(i + 1)} scale={1} />
+              <span className="relative inline-flex">
+                <Pin background="#ffffff" borderColor={border} glyphColor={border} glyph={String(i + 1)} scale={1} />
+                {(flags.local_business || flags.accessible) && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow ring-1 ring-black/10">
+                    {flags.accessible
+                      ? <Accessibility className="h-3 w-3 text-[#0F6E56]" aria-label="Accessible" />
+                      : <Store className="h-3 w-3 text-[#C45C26]" aria-label="Local business" />}
+                  </span>
+                )}
+              </span>
             )}
           </AdvancedMarker>
         )
@@ -1557,6 +1574,7 @@ function RealisticPlaceCard({
           </div>
         )}
         <p className="pr-6 text-[13px] font-semibold leading-snug text-gray-900 dark:text-white">{place.name}</p>
+        <PlaceBadges place={place} className="mt-1" />
         {place.address && (
           <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{place.address}</p>
         )}
@@ -1708,7 +1726,8 @@ function MapCanvas({
   onOpenProfile,
   communityFocus,
   onPlaceShare,
-}: Omit<Props, 'onExpand' | 'onCollapse' | 'selectedPlace' | 'loading' | 'error' | 'onRetry' | 'bottomSlot'>) {
+  onMapClick,
+}: Omit<Props, 'onExpand' | 'onCollapse' | 'selectedPlace' | 'loading' | 'error' | 'onRetry' | 'bottomSlot' | 'onAddPlace'>) {
   const markers = itinerary ?? places
   const placeCoords = markers
     .map((m) => m.coordinates)
@@ -1821,6 +1840,11 @@ function MapCanvas({
         fullscreenControl={false}
         clickableIcons={false}
         styles={MAP_STYLES}
+        onClick={(event) => {
+          const latLng = event.detail.latLng
+          if (!onMapClick || !latLng) return
+          onMapClick({ lat: latLng.lat, lng: latLng.lng })
+        }}
       >
         <MapUiOptions fullControls={size === 'full'} />
         <MapModeController mode={mapMode} size={size} />
@@ -1958,6 +1982,7 @@ export function MapView({
   onDirections,
   routeInfo = null,
   header,
+  onAddPlace,
   ...canvasProps
 }: Props) {
   const { places, itinerary } = canvasProps
@@ -2074,6 +2099,16 @@ export function MapView({
         <div className="absolute inset-0">
           <MapCanvas {...canvasProps} size={size} />
         </div>
+        {onAddPlace && (
+          <button
+            type="button"
+            onClick={onAddPlace}
+            aria-label="Add a place"
+            className="absolute bottom-4 right-4 z-[60] flex h-12 w-12 items-center justify-center rounded-full bg-[#F56A00] text-white shadow-[0_10px_24px_-8px_rgba(245,106,0,0.8)] transition-transform hover:scale-105 hover:bg-terracotta"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        )}
       </div>
       {size === 'compact' && selectedPlace && !hideInlinePlaceCard && <PlaceDetailBox place={selectedPlace} />}
       {size === 'full' && bottomSlot && (

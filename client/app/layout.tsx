@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from 'next'
+import { I18nProvider } from '@/components/I18nProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Hodari — FIFA World Cup 2026',
-  description: 'Your matchday guide to the 2026 FIFA World Cup cities.',
+  title: 'Ikarita ya Bose — MapForAll',
+  description: 'La carte qui rend visible ce que la ville oublie.',
   manifest: '/manifest.json',
 }
 
@@ -29,7 +30,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="font-sans bg-bg text-text antialiased">{children}</body>
+      <body className="font-sans bg-bg text-text antialiased">
+        <I18nProvider>{children}</I18nProvider>
+      </body>
     </html>
   )
 }

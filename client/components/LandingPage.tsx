@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import { MessageSquare, Mic } from 'lucide-react'
 import { ChatPanel } from '@/components/ChatPanel'
+import { AddPlaceSheet } from '@/components/AddPlaceSheet'
 import { MapView, type RouteInfo } from '@/components/MapView'
 import { PlaceCardStrip } from '@/components/PlaceCardStrip'
 import { CollapsedReply } from '@/components/CollapsedReply'
@@ -174,6 +175,11 @@ export default function LandingPage() {
   const [itinerary, setItinerary] = useState<Itinerary | null>(null)
   const [activeStop, setActiveStop] = useState<number | null>(null)
   const [mapVisible, setMapVisible] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [draftLat, setDraftLat] = useState('')
+  const [draftLng, setDraftLng] = useState('')
+  const [preferLocal, setPreferLocal] = useState(false)
+  const [requireAccessible, setRequireAccessible] = useState(false)
   const [mapExpanded, setMapExpanded] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const [uiMode, setUiMode] = useState<'chat' | 'voice'>('chat')
@@ -1170,6 +1176,49 @@ export default function LandingPage() {
     handleSend(newText)
   }, [loading, handleSend])
 
+  const locateDraft = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition((pos) => {
+      setDraftLat(pos.coords.latitude.toFixed(5))
+      setDraftLng(pos.coords.longitude.toFixed(5))
+    })
+  }, [])
+
+  const openAddPlace = useCallback(async () => {
+    setAddOpen(true)
+    locateDraft()
+    setMapVisible(true)
+    if (places.length > 0) return
+    try {
+      const res = await fetch('/api/places')
+      const data = await res.json()
+      if (Array.isArray(data.places) && data.places.length) setPlaces(data.places)
+    } catch { /* form still works with GPS */ }
+  }, [locateDraft, places.length])
+
+  const applyInclusion = useCallback(async (mode: 'local' | 'accessible') => {
+    const nextLocal = mode === 'local' ? !preferLocal : preferLocal
+    const nextAccess = mode === 'accessible' ? !requireAccessible : requireAccessible
+    setPreferLocal(nextLocal)
+    setRequireAccessible(nextAccess)
+    const params = new URLSearchParams()
+    if (nextLocal) params.set('local_business', '1')
+    if (nextAccess) params.set('accessible', '1')
+    try {
+      const res = await fetch(`/api/places?${params.toString()}`)
+      const data = await res.json()
+      if (Array.isArray(data.places)) {
+        setPlaces(data.places)
+        if (data.places.length) setMapVisible(true)
+      }
+    } catch { /* chips still reach the agent */ }
+    const tokens = [
+      nextLocal ? 'prefer_local:' : '',
+      nextAccess ? 'require_accessible:' : '',
+    ].filter(Boolean)
+    if (tokens.length) handleSend(`${tokens.join(' ')} places in Kigali`)
+  }, [preferLocal, requireAccessible, handleSend])
+
   const chatPanel = (
     <ChatPanel
       messages={messages}
@@ -1177,6 +1226,9 @@ export default function LandingPage() {
       thinkingSteps={thinkingSteps}
       streamingStarted={streamingStarted}
       onSend={handleSend}
+      onInclusionFilter={applyInclusion}
+      inclusionLocal={preferLocal}
+      inclusionAccessible={requireAccessible}
       voiceState={voice.voiceState}
       voiceSupported={voice.supported}
       voiceWarning={voice.warning}
@@ -1235,16 +1287,30 @@ export default function LandingPage() {
 
   return (
     <div className="app-shell relative w-screen overflow-hidden">
+      <AddPlaceSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        lat={draftLat}
+        lng={draftLng}
+        onUseLocation={locateDraft}
+        onSubmitted={() => { /* confirmation stays in the sheet */ }}
+      />
 
       {/* Mode toggle when chat panel is collapsed on full-screen map */}
       {!isMobile && mapExpanded && chatCollapsed && (
-        <div className="fixed top-3 left-4 z-[300] flex items-center gap-1 rounded-full border border-border bg-surface/95 p-1 shadow-lg backdrop-blur-md">
+        <div className="fixed top-3 left-4 z-[300] grid grid-cols-2 rounded-full border border-border bg-surface/95 p-1 shadow-lg backdrop-blur-md">
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full bg-amber-600 shadow transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+              uiMode === 'voice' ? 'translate-x-full' : 'translate-x-0'
+            }`}
+          />
           <button
             type="button"
             onClick={enterChatMode}
             aria-pressed={uiMode === 'chat'}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors ${
-              uiMode === 'chat' ? 'bg-amber-600 text-white shadow' : 'text-text2 hover:text-text'
+            className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors duration-300 ${
+              uiMode === 'chat' ? 'text-white' : 'text-text2 hover:text-text'
             }`}
           >
             <MessageSquare className="h-3.5 w-3.5" />
@@ -1254,8 +1320,8 @@ export default function LandingPage() {
             type="button"
             onClick={enterVoiceMode}
             aria-pressed={uiMode === 'voice'}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors ${
-              uiMode === 'voice' ? 'bg-amber-600 text-white shadow' : 'text-text2 hover:text-text'
+            className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors duration-300 ${
+              uiMode === 'voice' ? 'text-white' : 'text-text2 hover:text-text'
             }`}
           >
             <Mic className="h-3.5 w-3.5" />
@@ -1278,9 +1344,7 @@ export default function LandingPage() {
                   }}
                 />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="absolute h-[560px] w-[560px] rounded-full border border-gold/[0.04]" />
-                  <div className="absolute h-[380px] w-[380px] rounded-full border border-gold/[0.05]" />
-                  <div className="absolute h-[220px] w-[220px] rounded-full border border-gold/[0.07]" />
+                  <div className="h-[440px] w-[440px] rounded-full bg-[radial-gradient(circle,rgba(245,106,0,0.12),rgba(196,92,38,0.04)_46%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(245,106,0,0.18),transparent_68%)]" />
                 </div>
               </>
             )}
@@ -1301,6 +1365,8 @@ export default function LandingPage() {
                   userLocation={userLocation}
                   theme={theme}
                   showUserLocation={showUserOnMap}
+                  onAddPlace={() => { void openAddPlace() }}
+                  onMapClick={addOpen ? (pos) => { setDraftLat(pos.lat.toFixed(5)); setDraftLng(pos.lng.toFixed(5)) } : undefined}
                   routeFromUser={routeFromUser}
                   customRoute={customRoute}
                   routeMode={routeMode}
@@ -1352,6 +1418,8 @@ export default function LandingPage() {
             userLocation={userLocation}
             theme={theme}
             showUserLocation={showUserOnMap}
+            onAddPlace={() => { void openAddPlace() }}
+            onMapClick={addOpen ? (pos) => { setDraftLat(pos.lat.toFixed(5)); setDraftLng(pos.lng.toFixed(5)) } : undefined}
             routeFromUser={routeFromUser}
             customRoute={customRoute}
             routeMode={routeMode}
@@ -1485,6 +1553,8 @@ export default function LandingPage() {
               userLocation={userLocation}
               theme={theme}
               showUserLocation={showUserOnMap}
+              onAddPlace={() => { void openAddPlace() }}
+              onMapClick={addOpen ? (pos) => { setDraftLat(pos.lat.toFixed(5)); setDraftLng(pos.lng.toFixed(5)) } : undefined}
               routeFromUser={routeFromUser}
               customRoute={customRoute}
               routeMode={routeMode}

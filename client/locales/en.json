@@ -1,0 +1,79 @@
+{
+  "app": {
+    "name": "Ikarita ya Bose",
+    "tagline": "The map that makes visible what the city forgets."
+  },
+  "header": {
+    "newChat": "New chat",
+    "saved": "Saved places",
+    "recent": "Recent",
+    "searchChats": "Search chats…",
+    "logout": "Log out",
+    "account": "Your account",
+    "signedIn": "Signed in",
+    "theme": "Theme",
+    "language": "Language"
+  },
+  "composer": {
+    "placeholder": "Where to?",
+    "cityPlaceholder": "e.g. Kigali, or New York",
+    "send": "Send message",
+    "stop": "Stop"
+  },
+  "chips": {
+    "kigali": "4 hours in Kigali under $60",
+    "vegetarian": "Vegetarian food nearby",
+    "food": "Best food and sights nearby",
+    "plan": "Plan my trip today"
+  },
+  "filters": {
+    "local": "Local businesses",
+    "accessible": "Accessible"
+  },
+  "add": {
+    "open": "Add a place",
+    "title": "Add a place",
+    "name": "Place name",
+    "category": "Category",
+    "local": "Local business?",
+    "accessible": "Wheelchair accessible?",
+    "photo": "Photo (optional)",
+    "photoTooBig": "Photo is too large (150 KB max). You can skip it.",
+    "useLocation": "Use my location",
+    "lat": "Latitude",
+    "lng": "Longitude",
+    "tap": "Or tap the map to adjust the pin.",
+    "submit": "Submit",
+    "submitting": "Sending…",
+    "thanks": "Thanks! Your place is waiting for review.",
+    "needAuth": "Sign in to add a place.",
+    "error": "Could not save this place right now.",
+    "close": "Close"
+  },
+  "badges": {
+    "local": "Local business",
+    "accessible": "Accessible"
+  },
+  "categories": {
+    "market": "Market",
+    "restaurant": "Restaurant",
+    "cafe": "Café",
+    "shop": "Shop",
+    "pharmacy": "Pharmacy",
+    "attraction": "Attraction",
+    "other": "Other"
+  },
+  "admin": {
+    "title": "Moderation",
+    "pending": "Pending",
+    "validate": "Approve",
+    "reject": "Reject",
+    "reason": "Reason (optional)",
+    "empty": "No places waiting for review.",
+    "denied": "This account is not an admin.",
+    "total": "Places",
+    "rate": "Approval rate",
+    "local": "Local businesses",
+    "accessible": "Accessible"
+  }
+}

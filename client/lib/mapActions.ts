@@ -115,6 +115,10 @@ function normalizePlace(raw: unknown): Place | null {
     photos: Array.isArray(p.photos)
       ? (p.photos as unknown[]).filter((x): x is string => typeof x === 'string')
       : undefined,
+    local_business: p.local_business === true,
+    accessible: p.accessible === true,
+    status: typeof p.status === 'string' ? p.status : undefined,
+    source: typeof p.source === 'string' ? p.source : undefined,
     personalization_score: 0,
   } as Place & { personalization_score?: number }
 }
