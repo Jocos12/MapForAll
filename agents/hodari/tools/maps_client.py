@@ -172,4 +172,10 @@ def _normalize_place(place: dict[str, Any]) -> dict[str, Any]:
         ),
         "open_now": open_now,
         "personalization_score": 0.0,
+        "local_business": bool(place.get("local_business")),
+        "accessible": bool(place.get("accessible")),
+        "status": place.get("status") or "validated",
+        "source": place.get("source") or "official",
+        "photo_url": place.get("photo_url") or None,
+        "confirmations_count": place.get("confirmations_count") or 0,
     }

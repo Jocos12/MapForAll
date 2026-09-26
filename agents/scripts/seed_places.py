@@ -146,11 +146,22 @@ def seed_places(dry_run: bool = False) -> None:
             try:
                 embedding = _embed(embed_text)
                 doc_with_embedding = {**place, "embedding": embedding}
+                inclusion_defaults = {
+                    "local_business": False,
+                    "accessible": False,
+                    "status": "validated",
+                    "source": "official",
+                    "confirmations_count": 0,
+                }
+                # Re-seeding refreshes content but does not reset inclusion flags
+                # already stored on the document.
+                for key in inclusion_defaults:
+                    doc_with_embedding.pop(key, None)
 
                 col = _get_collection()
                 col.update_one(
                     {"place_id": place_id},
-                    {"$set": doc_with_embedding},
+                    {"$set": doc_with_embedding, "$setOnInsert": inclusion_defaults},
                     upsert=True,
                 )
                 inserted += 1

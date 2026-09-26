@@ -118,6 +118,12 @@ def find_places_by_vector(
                     "summary": "$description",
                     "maps_url": {"$ifNull": ["$maps_url", None]},
                     "personalization_score": 0.0,
+                    "local_business": {"$ifNull": ["$local_business", False]},
+                    "accessible": {"$ifNull": ["$accessible", False]},
+                    "status": {"$ifNull": ["$status", "validated"]},
+                    "source": {"$ifNull": ["$source", "official"]},
+                    "photo_url": {"$ifNull": ["$photo_url", None]},
+                    "confirmations_count": {"$ifNull": ["$confirmations_count", 0]},
                     "score": {"$meta": "vectorSearchScore"},
                 }
             },

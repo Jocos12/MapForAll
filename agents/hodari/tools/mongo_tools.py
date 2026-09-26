@@ -19,6 +19,8 @@ from typing import Any, Optional
 import requests
 from google.adk.tools import ToolContext
 
+from .place_schema import with_place_defaults
+
 logger = logging.getLogger(__name__)
 
 MDB_MCP_URL = os.getenv("MONGODB_MCP_URL", "http://localhost:3100/mcp")
@@ -616,3 +618,62 @@ def find_similar_preferences(
     except Exception as exc:
         logger.info("find_similar_preferences returned empty (index not ready?): %s", exc)
         return []
+
+
+def submit_community_place(
+    name: str,
+    category: str,
+    latitude: float,
+    longitude: float,
+    tool_context: ToolContext,
+    local_business: bool = False,
+    accessible: bool = False,
+    photo_url: str = "",
+    added_by: str = "",
+) -> dict:
+    """Insert a user-submitted place as pending moderation.
+
+    Does not translate the name. Missing inclusion fields are filled by
+    with_place_defaults(submitted=True): status=pending, source=user_submitted.
+
+    Args:
+        name: Place name in the contributor's language.
+        category: One category label (market, restaurant, shop, …).
+        latitude / longitude: WGS84 position.
+        local_business: True for an informal or neighbourhood business.
+        accessible: True when a wheelchair user can enter.
+        photo_url: Optional image URL or small data URL.
+        added_by: User id of the contributor.
+        tool_context: Injected by ADK.
+    """
+    clean_name = (name or "").strip()
+    if not clean_name:
+        return {"ok": False, "error": "name is required"}
+    try:
+        lat = float(latitude)
+        lng = float(longitude)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "invalid coordinates"}
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return {"ok": False, "error": "coordinates out of range"}
+
+    place_id = f"user_{uuid.uuid4().hex[:12]}"
+    doc = with_place_defaults(
+        {
+            "place_id": place_id,
+            "name": clean_name,
+            "city": "Kigali",
+            "country": "Rwanda",
+            "categories": [category.strip()] if category and category.strip() else ["other"],
+            "description": clean_name,
+            "location": {"type": "Point", "coordinates": [lng, lat]},
+            "local_business": bool(local_business),
+            "accessible": bool(accessible),
+            "photo_url": photo_url or None,
+            "added_by": added_by or _user_id(tool_context),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+        submitted=True,
+    )
+    _mcp_tool("insert-many", {"database": HODARI_DB, "collection": "places", "documents": [doc]})
+    return {"ok": True, "place_id": place_id, "status": doc["status"]}
