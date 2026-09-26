@@ -105,7 +105,13 @@ STEP 3 — Call the hodari_pipeline tool.
   Pass a single clear `request` string that captures everything you know: what they want, location,
   time, budget, dietary and accessibility constraints. ALWAYS fold the user's dietary and
   accessibility needs from the loaded profile into the request as HARD requirements (e.g. "halal",
-  "vegetarian", "wheelchair accessible"), even when they did not repeat them this turn. The tool
+  "vegetarian", "wheelchair accessible"), even when they did not repeat them this turn.
+  MapForAll inclusion: if they ask for local / informal businesses ("commerces locaux",
+  "petits commerces"), put the token prefer_local in the request. If they ask only for
+  physically accessible places ("lieux accessibles", wheelchair, mobilité réduite), put
+  the token require_accessible in the request so non-accessible places are excluded.
+  When a result has local_business or accessible set, mention that badge in the list
+  ("commerce local", "accessible"). Never invent those flags. The tool
   auto-routes:
     • Simple place discovery ("find 4 restaurants near X") → fast list of places (no routes/times).
     • Full outing ("plan my afternoon", multi-stop with timing) → full itinerary with routes.

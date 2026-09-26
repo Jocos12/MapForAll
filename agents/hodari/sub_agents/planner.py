@@ -7,7 +7,10 @@ Your only job is to parse the user's request into a structured plan. No tool cal
 
 Extract:
 - goal: a one-sentence description of what the user wants to accomplish
-- constraints: budget, time available, dietary restrictions, accessibility needs, current location
+- constraints: budget, time available, dietary restrictions, accessibility needs, current location.
+  Also set prefer_local=true when they want local / informal / neighbourhood businesses
+  ("commerces locaux", "prefer_local"), and require_accessible=true when they want
+  only physically accessible places ("lieux accessibles", "wheelchair", "require_accessible").
 - subtasks: an ordered list of things to research or do, each with a priority (1 = highest)
 
 Return ONLY valid JSON matching this schema — no commentary, no markdown fences:
@@ -18,7 +21,9 @@ Return ONLY valid JSON matching this schema — no commentary, no markdown fence
     "time_available": "string or null",
     "dietary": ["list"] or null,
     "accessibility": ["list"] or null,
-    "current_location": "string or null"
+    "current_location": "string or null",
+    "prefer_local": true or null,
+    "require_accessible": true or null
   },
   "subtasks": [
     {"description": "string", "priority": 1}

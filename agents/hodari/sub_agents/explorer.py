@@ -43,6 +43,15 @@ STEPS (follow in order):
          find_similar_preferences actually returned a related signal.
    - Deduplicate by name similarity — if a local result and a Maps result refer to the
      same venue, keep the one with more detail (usually the local result).
+   - INCLUSION SCORE (MapForAll / Ikarita ya Bose). Keep local_business and accessible
+     on every candidate you return (false when unknown).
+       • prefer_local: the user asked for local / informal / neighbourhood businesses
+         ("commerces locaux", "prefer_local"). Rank those places above formal chains
+         at equal relevance, and say so in the summary.
+       • require_accessible: the user asked for wheelchair / step-free / "lieux
+         accessibles" / "require_accessible". DROP places that are not accessible.
+         Do not merely lower their score. If too few remain, search again with
+         "wheelchair accessible" in the query.
 
 5. HARD-FILTER on dietary & accessibility constraints from the plan. These are
    requirements, not preferences: EXCLUDE any candidate that does not meet a
@@ -66,7 +75,9 @@ Return ONLY a valid JSON array — no markdown fences, no commentary:
     "price_level": "PRICE_LEVEL_MODERATE or null",
     "summary": "one sentence on why this matches the request",
     "maps_url": "string or null",
-    "personalization_score": 0.0
+    "personalization_score": 0.0,
+    "local_business": false,
+    "accessible": false
   }
 ]
 """

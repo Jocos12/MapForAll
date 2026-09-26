@@ -12,6 +12,7 @@ from google.adk.tools import ToolContext
 from ..intent import LIST_DISCOVERY
 from .maps_client import search_places_async
 from .mongo_tools import _user_id, enqueue_preference_saves
+from .place_schema import inclusion_bonus
 from .response_cache import get_response_cache
 
 logger = logging.getLogger(__name__)
@@ -56,11 +57,65 @@ def _budget_boost(price_level: str | None, request: str) -> float:
     return 0.0
 
 
-def rank_places(places: list[dict[str, Any]], request: str, limit: int) -> list[dict[str, Any]]:
+# Phrases (and explicit tokens from the client chips) that turn on inclusion modes.
+_LOCAL_HINT = re.compile(
+    r"prefer_local|local business|commerces? locaux|petit(?:s)? commerce|informel",
+    re.I,
+)
+_ACCESS_HINT = re.compile(
+    r"require_accessible|wheelchair|step-free|accessible|mobilit[eé] r[eé]duite",
+    re.I,
+)
+
+
+def inclusion_flags(
+    request: str,
+    *,
+    prefer_local: bool | None = None,
+    require_accessible: bool | None = None,
+) -> tuple[bool, bool]:
+    """Resolve inclusion search flags.
+
+    `prefer_local` boosts neighbourhood / informal businesses (full LOCAL_BONUS).
+    `require_accessible` drops places that are not marked accessible, instead of
+    only nudging their score. Explicit arguments win over text detection.
+    """
+    if prefer_local is None:
+        prefer_local = bool(_LOCAL_HINT.search(request or ""))
+    if require_accessible is None:
+        require_accessible = bool(_ACCESS_HINT.search(request or ""))
+    return prefer_local, require_accessible
+
+
+def rank_places(
+    places: list[dict[str, Any]],
+    request: str,
+    limit: int,
+    *,
+    prefer_local: bool | None = None,
+    require_accessible: bool | None = None,
+) -> list[dict[str, Any]]:
+    """Rank places by rating, budget fit, then an inclusion bonus.
+
+    prefer_local: when true (or when the request asks for local businesses),
+        local_business places receive the full MAPFORALL_LOCAL_BONUS. Otherwise
+        they still receive half of it, so they rise at equal relevance.
+    require_accessible: when true (or when the request asks for accessible
+        places), non-accessible places are excluded entirely. Accessible places
+        that remain also receive MAPFORALL_ACCESS_BONUS.
+    """
+    prefer, require = inclusion_flags(
+        request, prefer_local=prefer_local, require_accessible=require_accessible
+    )
+    pool = places
+    if require:
+        pool = [place for place in places if place.get("accessible") is True]
+
     scored: list[tuple[float, dict[str, Any]]] = []
-    for place in places:
+    for place in pool:
         rating = float(place.get("rating") or 0.0)
         score = rating + _budget_boost(place.get("price_level"), request)
+        score += inclusion_bonus(place, prefer_local=prefer)
         scored.append((score, place))
     scored.sort(key=lambda item: item[0], reverse=True)
 
@@ -93,7 +148,11 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         return cached
 
     limit = extract_place_limit(request)
-    logger.info("LIST_DISCOVERY fast path: limit=%d request=%r", limit, request[:120])
+    prefer_local, require_accessible = inclusion_flags(request)
+    logger.info(
+        "LIST_DISCOVERY fast path: limit=%d prefer_local=%s require_accessible=%s request=%r",
+        limit, prefer_local, require_accessible, request[:120],
+    )
 
     try:
         raw_places = await search_places_async(request)
@@ -107,7 +166,13 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
             }
         )
 
-    candidates = rank_places(raw_places, request, limit)
+    candidates = rank_places(
+        raw_places,
+        request,
+        limit,
+        prefer_local=prefer_local,
+        require_accessible=require_accessible,
+    )
 
     if not candidates:
         return json.dumps(

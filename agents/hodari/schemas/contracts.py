@@ -9,6 +9,8 @@ class Constraints(BaseModel):
     dietary: Optional[list[str]] = None
     accessibility: Optional[list[str]] = None
     current_location: Optional[str] = None
+    prefer_local: Optional[bool] = None
+    require_accessible: Optional[bool] = None
 
 
 class Subtask(BaseModel):
@@ -33,6 +35,12 @@ class Place(BaseModel):
     summary: Optional[str] = None
     maps_url: Optional[str] = None
     personalization_score: float = 0.0
+    local_business: bool = False
+    accessible: bool = False
+    status: Optional[str] = None
+    source: Optional[str] = None
+    photo_url: Optional[str] = None
+    confirmations_count: int = 0
 
 
 class CandidateSet(BaseModel):
