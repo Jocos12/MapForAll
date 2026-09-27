@@ -38,7 +38,9 @@ venv/
 *.png
 *.jpg
 *.jpeg
-image*
+image_*.png
+image_*.jpg
+image_*.jpeg
 # ...but shipped site assets are not screenshots
 !client/public/**/*.png
 !client/public/**/*.jpg
