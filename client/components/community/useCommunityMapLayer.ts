@@ -4,18 +4,16 @@
  * useCommunityMapLayer — data feed for the map's community layer.
  *
  * Two independent switches:
- *  - `pinsEnabled`   → fetch shared pins (GET /api/community/pins) on enable and
- *    every 60s. Pins carry the owner's attribution for the "shared by @handle"
- *    marker card.
- *  - `friendsEnabled` → every 15s: accepted connections → their profiles (the
- *    only endpoint that exposes a connection's location, and only when they
- *    share it) + bulk presence for the online ring. Also heartbeats the
- *    caller's own coordinates every 30s — the server persists them ONLY if the
- *    caller's own share_location toggle is on, so own visibility follows the
- *    profile setting with no client-side logic.
+ *  - `pinsEnabled`   → one fetch of shared pins (GET /api/community/pins) when
+ *    the switch turns on. Pins carry the owner's attribution for the
+ *    "shared by @handle" marker card. No interval: a slow Mongo call was
+ *    logging 500s in a loop during the demo.
+ *  - `friendsEnabled` → one lookup of accepted connections, their shared
+ *    locations, and presence, plus one heartbeat. The server persists
+ *    coordinates ONLY if the caller's share_location toggle is on.
  *
- * Both intervals stop as soon as their switch turns off, and all state is
- * cleared, so the core map/chat path pays nothing while the layer is unused.
+ * Turning a switch off clears its state, so the core map/chat path pays
+ * nothing while the layer is unused.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -52,9 +50,6 @@ export interface CommunityFriend {
   last_seen_at: string | null
 }
 
-const PINS_POLL_MS = 60_000
-const FRIENDS_POLL_MS = 15_000
-const HEARTBEAT_MS = 30_000
 /** Hide a connection whose location heartbeat is older than this. */
 const LOCATION_FRESH_MS = 30 * 60_000
 /** Cap per-tick profile lookups (one GET per connection). */
@@ -143,7 +138,7 @@ export function useCommunityMapLayer({ pinsEnabled, friendsEnabled, userLocation
     if (!pinsEnabledRef.current) return
     void fetchSharedPins()
       .then((next) => { if (pinsEnabledRef.current) setPins(next) })
-      .catch(() => { /* transient — next tick retries */ })
+      .catch(() => { /* one attempt — do not retry in a loop */ })
   }, [])
 
   // ── Shared pins ─────────────────────────────────────────────────────────────
@@ -153,8 +148,6 @@ export function useCommunityMapLayer({ pinsEnabled, friendsEnabled, userLocation
       return
     }
     refreshPins()
-    const interval = setInterval(refreshPins, PINS_POLL_MS)
-    return () => clearInterval(interval)
   }, [pinsEnabled, refreshPins])
 
   // ── Connection locations + presence ─────────────────────────────────────────
@@ -174,10 +167,8 @@ export function useCommunityMapLayer({ pinsEnabled, friendsEnabled, userLocation
         .finally(() => { inFlight = false })
     }
     tick()
-    const interval = setInterval(tick, FRIENDS_POLL_MS)
     return () => {
       cancelled = true
-      clearInterval(interval)
     }
   }, [friendsEnabled])
 
@@ -189,8 +180,6 @@ export function useCommunityMapLayer({ pinsEnabled, friendsEnabled, userLocation
       void sendHeartbeat(locationRef.current ?? undefined).catch(() => { /* best-effort */ })
     }
     beat()
-    const interval = setInterval(beat, HEARTBEAT_MS)
-    return () => clearInterval(interval)
   }, [friendsEnabled])
 
   return { pins, friends, refreshPins }

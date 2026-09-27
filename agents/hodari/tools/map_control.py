@@ -102,4 +102,15 @@ def map_control(
         tool_context.state["suppress_gps_context"] = ""
 
     logger.info("map_control: %s", payload[:200])
-    return json.dumps({"ok": True, "actions": normalized}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "ok": True,
+            "drawn": False,
+            "note": (
+                "Requested only. The map has not confirmed that any line, camera move, "
+                "or marker is visible. Do not tell the user the action is done."
+            ),
+            "actions": normalized,
+        },
+        ensure_ascii=False,
+    )

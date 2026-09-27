@@ -45,7 +45,7 @@ export function Reveal({
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`transition-all duration-700 motion-reduce:transition-none ${EASE} ${shown ? 'translate-y-0 opacity-100' : 'translate-y-7 opacity-0'} ${className}`}
+      className={`transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${shown ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'} ${className}`}
     >
       {children}
     </div>
@@ -101,10 +101,10 @@ export function LiveClock({ city = 'New York', timeZone = 'America/New_York' }: 
   )
 }
 
-export function HodariLogo({ className = 'w-9 h-9 sm:w-10 sm:h-10' }: { className?: string }) {
+export function MapForAllLogo({ className = 'w-9 h-9 sm:w-10 sm:h-10' }: { className?: string }) {
   return (
     <span className={`flex items-center justify-center rounded-full bg-gray-900 dark:bg-[#F56A00] ${className}`}>
-      <span className="text-[10px] sm:text-[11px] font-bold tracking-tight text-white">HD</span>
+      <span className="text-[10px] sm:text-[11px] font-bold tracking-tight text-white">MF</span>
     </span>
   )
 }
@@ -118,16 +118,23 @@ export function StarburstMark({ className = 'w-5 h-5 sm:w-6 sm:h-6' }: { classNa
   )
 }
 
-/** Sun/moon theme toggle pill. */
-export function ThemeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
+/**
+ * Until mount, the button is always the light-mode moon. `dark` comes from
+ * useLandingTheme, which itself stays false until a useEffect reads the
+ * saved theme — so server HTML and the first client render match.
+ */
+export function ThemeToggle({ dark = false, onToggle }: { dark?: boolean; onToggle: () => void }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+  const isDark = mounted && dark
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-900 transition-colors duration-300 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-100 dark:hover:bg-white/20"
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-900 transition-colors duration-150 hover:bg-gray-200 active:opacity-70 dark:bg-white/10 dark:text-gray-100 dark:hover:bg-white/20"
     >
-      {dark ? (
+      {isDark ? (
         <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth="2" strokeLinecap="round">
           <circle cx="12" cy="12" r="4" />
           <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />

@@ -6,43 +6,43 @@
 
 /* ── Hodari theme tokens (light default) ───────────────────────────────────── */
 :root {
-  --bg-chat: #F5F5F5;
-  --bg-sidebar: #ffffff;
-  --bg-header: #ffffff;
-  --text-primary: #111827;
-  --text-secondary: #6B7280;
-  --bubble-ai: #ffffff;
-  --bubble-user: #FFE8D5;
-  --border: #E5E7EB;
+  --bg-chat: #F6F0E6;
+  --bg-sidebar: #FFFBF6;
+  --bg-header: #FFFBF6;
+  --text-primary: #1A1614;
+  --text-secondary: #5A4E44;
+  --bubble-ai: #FFFBF6;
+  --bubble-user: #FFE4CC;
+  --border: #E2D4C2;
 
-  --color-bg:       245 245 245;
-  --color-surface:  255 255 255;
-  --color-surface2: 239 239 239;
-  --color-surface3: 229 229 229;
-  --color-text:     17 24 39;
-  --color-text2:    107 114 128;
-  --color-text3:    156 163 175;
-  --color-border:   229 231 235;
+  --color-bg:       246 240 230;
+  --color-surface:  255 251 246;
+  --color-surface2: 243 234 220;
+  --color-surface3: 230 217 200;
+  --color-text:     26 22 20;
+  --color-text2:    90 78 68;
+  --color-text3:    138 122 108;
+  --color-border:   226 212 194;
 }
 
 .dark {
-  --bg-chat: #0a0a0d;
-  --bg-sidebar: #15151a;
-  --bg-header: #15151a;
-  --text-primary: #F9FAFB;
-  --text-secondary: #9CA3AF;
-  --bubble-ai: #15151a;
-  --bubble-user: rgba(245, 106, 0, 0.18);
-  --border: #26262e;
+  --bg-chat: #12100E;
+  --bg-sidebar: #1C1916;
+  --bg-header: #221E1A;
+  --text-primary: #F6F0E6;
+  --text-secondary: #C4B5A4;
+  --bubble-ai: #221E1A;
+  --bubble-user: rgba(245, 106, 0, 0.22);
+  --border: #3A322C;
 
-  --color-bg:       10 10 13;
-  --color-surface:  21 21 26;
-  --color-surface2: 14 14 18;
-  --color-surface3: 38 38 46;
-  --color-text:     249 250 251;
-  --color-text2:    156 163 175;
-  --color-text3:    107 114 128;
-  --color-border:   38 38 46;
+  --color-bg:       18 16 14;
+  --color-surface:  28 25 22;
+  --color-surface2: 36 31 27;
+  --color-surface3: 58 50 44;
+  --color-text:     246 240 230;
+  --color-text2:    196 181 164;
+  --color-text3:    140 124 108;
+  --color-border:   58 50 44;
 }
 
 /* ── Page shell ─────────────────────────────────────────────────────────── */
@@ -57,6 +57,10 @@ html, body {
 .app-shell {
   height: 100vh;
   height: 100dvh;
+  isolation: isolate;
+}
+.app-shell > * {
+  z-index: 1;
 }
 
 /* Notch / home-indicator safe areas (viewport-fit=cover). */
@@ -81,14 +85,6 @@ html, body {
 body {
   background: var(--bg-chat);
   color: var(--text-primary);
-}
-
-.dark body {
-  background: radial-gradient(ellipse at 20% 15%, #111118 0%, #0a0a0d 55%, #08080b 100%);
-}
-
-:root:not(.dark) body {
-  background: radial-gradient(ellipse at 20% 15%, #FFFFFF 0%, #F5F5F5 50%, #EDEDED 100%);
 }
 
 /* ── Grain texture overlay ────────────────────────────────────────────────── */
@@ -136,6 +132,43 @@ body::before {
 .hero-chip-float { animation: hero-chip-float 7s ease-in-out infinite; }
 .hero-chip-float-late { animation: hero-chip-float 8.5s ease-in-out 1.6s infinite; }
 
+@keyframes mf-pin-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mf-pin-wrap.leaflet-div-icon { background: transparent; border: none; }
+.mf-pin { display: block; animation: mf-pin-in 280ms ease both; }
+.mf-pin-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #E8672A;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+.mf-pin-dot.is-ring {
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 3px #fff, 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+@keyframes mf-menu-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.mf-menu-in {
+  animation: mf-menu-in 150ms ease-out both;
+}
+
+/* Instant press feedback. :active wins over slower hover transitions. */
+button:active:not(:disabled),
+a:active,
+[role="button"]:active {
+  opacity: 0.72;
+  transition: opacity 40ms linear;
+}
+
 /* Feathered edges so the hero map melts into the page background */
 .hero-map-mask {
   -webkit-mask-image: radial-gradient(115% 115% at 50% 44%, #000 52%, transparent 76%);
@@ -159,6 +192,8 @@ body::before {
   .hero-sheen,
   .hero-chip-float,
   .hero-chip-float-late,
+  .mf-pin,
+  .mf-menu-in,
   .landing-marquee { animation: none; }
 }
 
@@ -230,6 +265,30 @@ body::before {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes place-card-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.place-card-in {
+  animation: place-card-in 150ms ease-out;
+  transform-origin: center bottom;
+}
+.gm-style .gm-style-iw-c {
+  border-radius: 16px !important;
+  padding: 0 !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38) !important;
+  animation: place-card-in 220ms ease-out;
+  transform-origin: center bottom;
+}
+.gm-style .gm-style-iw-d {
+  overflow: hidden !important;
+  border-radius: 16px !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .place-card-in,
+  .gm-style .gm-style-iw-c { animation: none; }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -302,6 +361,118 @@ body::before {
 .animate-message-in {
   animation: fadeUp var(--dur-fast) var(--ease-glide) both;
 }
+
+/* Business dashboard charts: bars rise from the baseline (staggered inline via
+   animation-delay) and the views line is revealed left-to-right, like a route. */
+@keyframes biz-bar-grow {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+@keyframes biz-reveal-x {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.biz-bar {
+  transform-origin: bottom;
+  animation: biz-bar-grow 300ms var(--ease-glide) both;
+}
+.biz-reveal {
+  animation: biz-reveal-x var(--dur-base) var(--ease-glide) 80ms both;
+}
+.biz-progress {
+  transition: width var(--dur-slow) var(--ease-glide);
+}
+@keyframes biz-bar-grow-x {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.biz-bar-x {
+  transform-origin: left;
+  animation: biz-bar-grow-x 300ms var(--ease-glide) both;
+}
+/* Skeleton escape hatch: only surfaces if the page script never replaced the
+   skeleton (e.g. a dev chunk failed to load), when no JS timer can run. */
+@keyframes biz-stuck-in {
+  from { opacity: 0; visibility: hidden; }
+  to   { opacity: 1; visibility: visible; }
+}
+.biz-stuck {
+  animation: biz-stuck-in var(--dur-base) ease-out 8s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .biz-bar,
+  .biz-bar-x,
+  .biz-reveal { animation: none; }
+  .biz-progress { transition: none; }
+  .biz-stuck { animation-duration: 0s; }
+}
+
+/* ── Business dashboard: dark theme ─────────────────────────────────────────
+   `html.biz-dark` is set before paint by the root layout script (key
+   `hodari_biz_theme`). Only the content column (.biz-surface) is remapped; the
+   sidebar and the Impact card are dark in both themes. `:where()` keeps each
+   rule at utility specificity so hover/focus variants still win. Orange and
+   green fills keep the brand values; orange/green/red TEXT is lightened
+   because #C2410C / #1F6B43 / #B91C1C fall under 4.5:1 on #2A2A2D. */
+:root {
+  --biz-grid: #E4E4E7;
+  --biz-ink: #18181B;
+  --biz-empty-bar: #E4E4E7;
+}
+html.biz-dark {
+  --biz-grid: #45454B;
+  --biz-ink: #F4F4F5;
+  --biz-empty-bar: #4A4A50;
+  color-scheme: dark;
+}
+html.biz-dark #biz-scroll { background-color: #1E1E20; }
+html.biz-dark header.biz-surface { background-color: rgb(30 30 32 / 0.95); border-color: #3A3A3F; }
+html.biz-theming #biz-scroll,
+html.biz-theming #biz-scroll * {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, fill 200ms ease, stroke 200ms ease !important;
+}
+
+:where(html.biz-dark .biz-surface) .bg-white:not(:where(.biz-native, .biz-native *)),
+:where(html.biz-dark .biz-surface) .focus\:bg-white:focus:not(:where(.biz-native, .biz-native *)) { background-color: #2A2A2D; }
+:where(html.biz-dark .biz-surface) .bg-white\/95 { background-color: rgb(30 30 32 / 0.95); }
+:where(html.biz-dark .biz-surface) .bg-white\/80 { background-color: rgb(42 42 45 / 0.85); }
+:where(html.biz-dark .biz-surface) :is(.bg-\[\#F4F4F5\], .bg-\[\#F7F7F8\], .bg-\[\#FAFAFA\], .bg-\[\#EEF0F2\], .bg-\[\#E4E4E7\]):not(:where(.biz-native, .biz-native *)) { background-color: #333337; }
+:where(html.biz-dark .biz-surface) :is(.hover\:bg-\[\#F4F4F5\], .hover\:bg-\[\#F7F7F8\], .hover\:bg-\[\#F1F1F3\], .hover\:bg-white):hover:not(:where(.biz-native, .biz-native *)) { background-color: #3A3A3F; }
+
+:where(html.biz-dark .biz-surface) :is(.border-\[\#E4E4E7\], .border-\[\#F4F4F5\], .border-\[\#F0F0F2\], .divide-\[\#F4F4F5\] > *):not(:where(.biz-native, .biz-native *)) { border-color: #3A3A3F; }
+:where(html.biz-dark .biz-surface) .border-\[\#D4D4D8\]:not(:where(.biz-native, .biz-native *)) { border-color: #4A4A50; }
+:where(html.biz-dark .biz-surface) .border-\[\#A1A1AA\] { border-color: #71717A; }
+:where(html.biz-dark .biz-surface) .hover\:border-\[\#A1A1AA\]:hover { border-color: #71717A; }
+
+:where(html.biz-dark .biz-surface) :is(.text-\[\#18181B\], .text-\[\#27272A\], .text-gray-900):not(:where(.biz-native, .biz-native *)) { color: #F4F4F5; }
+:where(html.biz-dark .biz-surface) .hover\:text-\[\#18181B\]:hover { color: #F4F4F5; }
+:where(html.biz-dark .biz-surface) :is(.text-\[\#3F3F46\], .text-gray-700):not(:where(.biz-native, .biz-native *)) { color: #D4D4D8; }
+:where(html.biz-dark .biz-surface) :is(.text-\[\#52525B\], .text-\[\#71717A\], .text-gray-600):not(:where(.biz-native, .biz-native *)) { color: #B4B4BB; }
+:where(html.biz-dark .biz-surface) .text-\[\#A1A1AA\]:not(:where(.biz-native, .biz-native *)) { color: #8B8B93; }
+:where(html.biz-dark .biz-surface) .placeholder\:text-\[\#A1A1AA\]::placeholder { color: #7C7C85; }
+
+:where(html.biz-dark .biz-surface) :is(.text-\[\#C2410C\], .text-\[\#9A3412\]):not(:where(.biz-native, .biz-native *)) { color: #FF9D66; }
+:where(html.biz-dark .biz-surface) .hover\:text-\[\#C2410C\]:hover { color: #FF9D66; }
+:where(html.biz-dark .biz-surface) :is(.bg-\[\#FDE8DC\], .bg-\[\#FFF7F2\]):not(:where(.biz-native, .biz-native *)) { background-color: rgb(232 103 42 / 0.16); }
+:where(html.biz-dark .biz-surface) .hover\:bg-\[\#FFF7F2\]:hover { background-color: rgb(232 103 42 / 0.16); }
+:where(html.biz-dark .biz-surface) :is(.text-\[\#1F6B43\], .text-\[\#2E8B57\]):not(:where(.biz-native, .biz-native *)) { color: #6FD39B; }
+:where(html.biz-dark .biz-surface) .bg-\[\#2E8B57\]\/10 { background-color: rgb(46 139 87 / 0.2); }
+:where(html.biz-dark .biz-surface) :is(.text-\[\#B91C1C\], .text-\[\#991B1B\], .text-\[\#DC2626\], .text-\[\#7F1D1D\]):not(:where(.biz-native, .biz-native *)) { color: #FCA5A5; }
+:where(html.biz-dark .biz-surface) .hover\:text-\[\#B91C1C\]:hover { color: #FCA5A5; }
+:where(html.biz-dark .biz-surface) :is(.bg-red-50, .bg-red-100, .bg-\[\#FEF2F2\]):not(:where(.biz-native, .biz-native *)) { background-color: rgb(220 38 38 / 0.16); }
+:where(html.biz-dark .biz-surface) .hover\:bg-\[\#FEF2F2\]:hover { background-color: rgb(220 38 38 / 0.16); }
+:where(html.biz-dark .biz-surface) .bg-red-50\/60 { background-color: rgb(220 38 38 / 0.1); }
+:where(html.biz-dark .biz-surface) :is(.border-red-200, .border-\[\#FECACA\], .border-\[\#FCA5A5\]) { border-color: rgb(248 113 113 / 0.4); }
+:where(html.biz-dark .biz-surface) .hover\:border-red-300:hover { border-color: rgb(248 113 113 / 0.6); }
+:where(html.biz-dark .biz-surface) :is(.bg-\[\#FFF8E1\], .bg-amber-50, .bg-amber-100):not(:where(.biz-native, .biz-native *)) { background-color: rgb(224 168 0 / 0.16); }
+:where(html.biz-dark .biz-surface) :is(.text-\[\#854D0E\], .text-\[\#713F12\], .text-amber-700, .text-amber-800, .text-amber-950):not(:where(.biz-native, .biz-native *)) { color: #FCD34D; }
+
+:where(html.biz-dark .biz-surface) .biz-primary { background-color: #F4F4F5; color: #18181B; }
+:where(html.biz-dark .biz-surface) .biz-primary:hover:not(:disabled) { background-color: #D4D4D8; }
+:where(html.biz-dark .biz-surface) .ring-white { --tw-ring-color: #2A2A2D; }
+:where(html.biz-dark .biz-surface) .border-white { border-color: #2A2A2D; }
+:where(html.biz-dark .biz-surface) .bg-\[\#2E8B57\]\/\[0\.07\] { background-color: rgb(46 139 87 / 0.16); }
+:where(html.biz-dark .biz-surface) .bg-\[\#2E8B57\]\/\[0\.06\] { background-color: rgb(46 139 87 / 0.12); }
 
 .ticket-perf {
   border-left: 2px dashed var(--border);
@@ -433,14 +604,31 @@ body::before {
   animation: caret-blink 1s steps(1, end) infinite, caret-fade-out 0.4s ease forwards;
 }
 
-.user-location-dot {
-  width: 14px;
-  height: 14px;
+.user-loc {
+  display: block;
+  position: relative;
+  width: 22px;
+  height: 22px;
+}
+.user-loc__dot {
+  position: absolute;
+  inset: 3px;
   border-radius: 50%;
   background: #4285F4;
-  border: 2.5px solid white;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  animation: location-pulse 1.8s ease-in-out infinite;
+  border: 2.5px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.user-loc__pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(66, 133, 244, 0.35);
+  animation: user-loc-pulse 2.2s ease-out infinite;
+}
+@keyframes user-loc-pulse {
+  0% { transform: scale(0.65); opacity: 0.65; }
+  70% { transform: scale(2.15); opacity: 0; }
+  100% { transform: scale(2.15); opacity: 0; }
 }
 
 .voice-orb-pulse  { animation: voice-orb-pulse  1s ease-in-out infinite; }
@@ -492,6 +680,41 @@ body::before {
   border-bottom: 2.5px solid #fff;
   transform: translateX(-50%) rotate(45deg);
 }
+.hodari-pin {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+}
+.hodari-pin .hodari-glow-marker__ring,
+.hodari-pin .hodari-glow-marker__tip {
+  opacity: 0;
+  animation: none;
+}
+.hodari-pin .hodari-glow-marker__dot {
+  background: #fff;
+  color: var(--mk, #F56A00);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.hodari-pin__badge {
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  display: flex;
+  height: 16px;
+  width: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.hodari-pin--pending .hodari-glow-marker__dot {
+  background: #fff;
+  color: #6b5e4e;
+  box-shadow: none;
+  border: 2px dashed #c4a35a;
+}
 @keyframes hodari-marker-ping {
   0%   { transform: scale(0.7); opacity: 0.55; }
   70%  { transform: scale(1.7); opacity: 0; }
@@ -517,7 +740,7 @@ body::before {
   .thinking-ring::after,
   .voice-orb-pulse,
   .voice-orb-pulse-2,
-  .user-location-dot,
+  .user-loc__pulse,
   .animate-presence-pulse,
   .hodari-glow-marker,
   .hodari-glow-marker__ring,

@@ -141,19 +141,23 @@ export function ConversationThread({
         setKeyError(err instanceof ConversationKeyError ? err.message : 'Encryption key unavailable on this device.')
       })
 
+    let failures = 0
+    let interval: ReturnType<typeof setInterval> | undefined
     const poll = async (initial: boolean) => {
       try {
         const { messages } = await fetchMessages(convId, lastSeqRef.current)
         if (cancelled) return
+        failures = 0
         appendRaw(messages)
       } catch {
-        /* transient poll failure — next tick retries */
+        failures += 1
+        if (failures >= 3 && interval) clearInterval(interval)
       } finally {
         if (!cancelled && initial) setLoadingInitial(false)
       }
     }
     void poll(true)
-    const interval = setInterval(() => void poll(false), POLL_MS)
+    interval = setInterval(() => void poll(false), POLL_MS)
 
     const urls = objectUrlsRef.current
     return () => {

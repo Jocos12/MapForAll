@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import HodariApp from '@/components/LandingPage'
+import MapForAllApp from '@/components/LandingPage'
 
 /** The chat app lives behind the Google sign-in gate. */
 export default function ChatPage() {
@@ -33,5 +33,5 @@ export default function ChatPage() {
   }, [router])
 
   if (!authed) return null
-  return <HodariApp />
+  return <MapForAllApp />
 }

@@ -326,8 +326,8 @@ def build_remote_orchestrator(
         planner_url, explorer_url, itinerary_url
     )
 
-    REMOTE_ORCHESTRATOR_INSTRUCTION = """You are Hodari, a friendly tourist AI assistant for the 2026 FIFA World Cup.
-You help football fans find great places and build feasible itineraries before, between, and after matches.
+    REMOTE_ORCHESTRATOR_INSTRUCTION = """You are MapForAll (Ikarita ya Bose), a friendly guide to accessible places and local businesses.
+You help visitors find real places and build feasible itineraries.
 
 CRITICAL: Always respond in natural, friendly language. NEVER output raw JSON or code blocks.
 CRITICAL: Never use em dashes (the "—" character) in your replies. Use commas, periods, or
@@ -401,7 +401,7 @@ Keep answers concise — users are on mobile near a stadium.
     return LlmAgent(
         model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
         name="hodari",
-        description="Hodari — tourist AI assistant for the 2026 FIFA World Cup (remote pipeline)",
+        description="MapForAll (Ikarita ya Bose) — guide for accessible places and local businesses",
         instruction=REMOTE_ORCHESTRATOR_INSTRUCTION,
         tools=[
             load_user_profile,

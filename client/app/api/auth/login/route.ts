@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyUserPassword } from '@/lib/users'
+import { destinationFor, verifyUserPassword } from '@/lib/users'
 import { isValidEmail } from '@/lib/password'
+import { isMcpUnavailable } from '@/lib/mcp'
 import { SESSION_COOKIE, SESSION_COOKIE_OPTS, signSession } from '@/lib/session'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
 
@@ -24,18 +25,29 @@ export async function POST(req: NextRequest) {
   const email = typeof body.email === 'string' ? body.email.trim() : ''
   const password = typeof body.password === 'string' ? body.password : ''
 
-  if (!isValidEmail(email) || !password) {
-    return NextResponse.json({ error: GENERIC_ERROR }, { status: 401 })
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: 'Please enter a valid email address.', code: 'invalid_email' }, { status: 400 })
+  }
+  if (!password) {
+    return NextResponse.json({ error: GENERIC_ERROR, code: 'bad_credentials' }, { status: 401 })
   }
 
   try {
     const user = await verifyUserPassword(email, password)
-    if (!user) return NextResponse.json({ error: GENERIC_ERROR }, { status: 401 })
-    const res = NextResponse.json({ ok: true, user: { name: user.name, email: user.email } })
+    if (!user) return NextResponse.json({ error: GENERIC_ERROR, code: 'bad_credentials' }, { status: 401 })
+    const redirect = await destinationFor(user)
+    const res = NextResponse.json({
+      ok: true,
+      redirect,
+      user: { name: user.name, email: user.email, role: user.role },
+    })
     res.cookies.set(SESSION_COOKIE, signSession(user.user_id, user.email), SESSION_COOKIE_OPTS)
     return res
   } catch (err) {
     console.error('[auth/login]', err)
+    if (isMcpUnavailable(err)) {
+      return NextResponse.json({ error: 'The account database is unavailable. Please try again in a moment.' }, { status: 503 })
+    }
     return NextResponse.json({ error: 'Sign-in failed. Please try again.' }, { status: 500 })
   }
 }

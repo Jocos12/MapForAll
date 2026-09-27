@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'node:crypto'
-import { GOOGLE_AUTH_URL, OAUTH_STATE_COOKIE, appUrl, redirectUri } from '@/lib/oauth'
+import { GOOGLE_AUTH_URL, OAUTH_STATE_COOKIE, appUrl, isGoogleOAuthConfigured, redirectUri } from '@/lib/oauth'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
 
 // Start of Google sign-in: redirect the user to Google's consent screen.
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   }
 
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
-  if (!clientId) {
+  if (!isGoogleOAuthConfigured() || !clientId) {
     return NextResponse.redirect(appUrl(req, '/login?error=oauth_unconfigured'))
   }
 

@@ -1,0 +1,142 @@
+/* ── Login: "Path & Paper" ─────────────────────────────────────────────────
+   Scoped to .pp-root so the palette never leaks into the rest of the app
+   (Tailwind's `gold` / `ink` already mean other colours there). */
+.pp-root {
+  --paper: #F3ECDD;
+  --ink: #1F2A22;
+  --clay: #B14A2E;
+  --gold: #D9A441;
+  --line: #C9BBA0;
+  --paper-dark: #E7DCC6;
+  /* Derived: muted body text (6.4:1 on paper) and error text (7.3:1). */
+  --ink-soft: #4B564C;
+  --error: #8F2B1C;
+  --field: #FBF7EF;
+
+  font-family: var(--font-inter), system-ui, sans-serif;
+  color: var(--ink);
+  background-color: var(--paper-dark);
+  color-scheme: light;
+}
+
+.pp-serif {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-variation-settings: 'SOFT' 60, 'opsz' 72;
+}
+
+.pp-paper {
+  background-color: var(--paper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.12 0 0 0 0 0.16 0 0 0 0 0.13 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Torn right edge on desktop. The wrapper's drop-shadows draw a hairline and
+   a soft lift along the tear (filters apply after the child's clip-path). */
+@media (min-width: 1024px) {
+  .pp-sheet-wrap {
+    filter: drop-shadow(1px 0 0 var(--line)) drop-shadow(12px 0 18px rgba(31, 42, 34, 0.13));
+  }
+  .pp-sheet {
+    clip-path: polygon(
+      0 0, calc(100% - 10px) 0, calc(100% - 4px) 3%, calc(100% - 12px) 5.5%, calc(100% - 6px) 8%,
+      calc(100% - 15px) 11%, calc(100% - 3px) 13.5%, calc(100% - 9px) 17%, calc(100% - 5px) 20%,
+      calc(100% - 14px) 23%, calc(100% - 7px) 26%, calc(100% - 11px) 29.5%, calc(100% - 2px) 32%,
+      calc(100% - 10px) 35%, calc(100% - 6px) 38.5%, calc(100% - 16px) 41%, calc(100% - 8px) 44%,
+      calc(100% - 4px) 47.5%, calc(100% - 12px) 50%, calc(100% - 7px) 53%, calc(100% - 13px) 56.5%,
+      calc(100% - 3px) 59%, calc(100% - 9px) 62%, calc(100% - 5px) 65.5%, calc(100% - 14px) 68%,
+      calc(100% - 8px) 71%, calc(100% - 11px) 74.5%, calc(100% - 4px) 77%, calc(100% - 10px) 80%,
+      calc(100% - 6px) 83.5%, calc(100% - 15px) 86%, calc(100% - 7px) 89%, calc(100% - 12px) 92.5%,
+      calc(100% - 3px) 95%, calc(100% - 9px) 98%, calc(100% - 6px) 100%, 0 100%
+    );
+  }
+}
+
+/* ── Form controls ── */
+.pp-field {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--ink);
+  padding: 11px 14px;
+  font-size: 16px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.pp-field::placeholder { color: #767061; }
+.pp-field:hover { border-color: #B3A487; }
+.pp-field:focus {
+  border-color: var(--clay);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--clay) 18%, transparent);
+}
+.pp-field[aria-invalid='true'] { border-color: var(--error); }
+
+.pp-focus:focus-visible {
+  outline: 2px solid var(--clay);
+  outline-offset: 3px;
+}
+
+.pp-primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(31, 42, 34, 0.3);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.pp-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -12px rgba(31, 42, 34, 0.6);
+}
+.pp-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 0 rgba(31, 42, 34, 0.3);
+}
+
+/* ── Load sequence: the trail draws, then each pin lands as the pen reaches it.
+   Duration and delays are set inline by TrailMap, which also times the pins. */
+.pp-trail-reveal {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation-name: pp-draw;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes pp-draw { to { stroke-dashoffset: 0; } }
+
+.pp-pin {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: pp-land 560ms cubic-bezier(0.25, 0.7, 0.3, 1) both;
+}
+@keyframes pp-land {
+  0%   { opacity: 0; transform: translateY(-34px); }
+  54%  { opacity: 1; transform: translateY(0); }
+  70%  { transform: translateY(-7px); }
+  84%  { transform: translateY(0); }
+  92%  { transform: translateY(-2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.pp-pin-shadow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pp-shadow 560ms ease-out both;
+}
+@keyframes pp-shadow {
+  0%   { opacity: 0; transform: scale(0.3); }
+  54%  { opacity: 0.2; transform: scale(1); }
+  100% { opacity: 0.2; transform: scale(1); }
+}
+
+.pp-card { animation: pp-card-in 260ms ease-out both; }
+@keyframes pp-card-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-trail-reveal { animation: none; stroke-dashoffset: 0; }
+  .pp-pin, .pp-pin-shadow, .pp-card { animation: none; }
+  .pp-field, .pp-primary { transition: none; }
+  .pp-primary:hover:not(:disabled) { transform: none; }
+}

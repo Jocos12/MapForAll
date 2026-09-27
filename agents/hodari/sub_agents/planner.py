@@ -1,7 +1,7 @@
 import os
 from google.adk.agents import LlmAgent
 
-PLANNER_INSTRUCTION = """You are the Planner for Hodari, a tourist AI assistant for the 2026 FIFA World Cup.
+PLANNER_INSTRUCTION = """You are the Planner for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
 
 Your only job is to parse the user's request into a structured plan. No tool calls. Pure reasoning.
 

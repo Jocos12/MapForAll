@@ -13,6 +13,7 @@ type Row = {
   accessible?: boolean
   created_at?: string
   added_by?: string
+  claimed_by_owner?: boolean
 }
 
 type Stats = {
@@ -99,6 +100,9 @@ export default function AdminPage() {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p className="font-medium">{row.name}</p>
+                  {row.claimed_by_owner && (
+                    <p className="mt-1 text-[12px] font-medium text-[#E8672A]">{t('admin.claimed')}</p>
+                  )}
                   <p className="text-[12px] text-ink/60 dark:text-cream/60">{row.categories.join(', ')} · {row.created_at ?? ''}</p>
                   <PlaceBadges place={row} className="mt-2" />
                 </div>

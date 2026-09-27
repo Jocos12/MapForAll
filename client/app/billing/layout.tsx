@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Billing — Hodari',
-  description: 'Manage your Hodari credits and subscription.',
+  title: 'Billing — MapForAll',
+  description: 'Manage your MapForAll credits and subscription.',
 }
 
 export default function BillingLayout({ children }: { children: React.ReactNode }) {

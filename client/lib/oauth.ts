@@ -10,6 +10,11 @@ export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 export const OAUTH_STATE_COOKIE = 'hodari_oauth_state'
 
+/** True only when both OAuth credentials are present. The login UI hides Google until then. */
+export function isGoogleOAuthConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET)
+}
+
 /** Public origin of the app, from the proxy headers Cloud Run sets. */
 export function baseUrl(req: NextRequest): string {
   const envBase = process.env.PUBLIC_BASE_URL

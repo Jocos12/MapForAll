@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ pins })
   } catch (err) {
     console.error('[community/pins GET]', err)
-    return NextResponse.json({ error: 'Could not load pins.' }, { status: 500 })
+    return NextResponse.json({ pins: [], unavailable: true })
   }
 }
 

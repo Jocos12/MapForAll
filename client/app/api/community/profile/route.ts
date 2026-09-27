@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionUser, asIdOrNull } from '@/lib/session'
+import { getSession, getSessionUser, asIdOrNull } from '@/lib/session'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
 import {
-  getCommunityProfile,
+  ensureOwnProfile,
+  defaultAvatarEmoji,
+  defaultHandle,
   getProfileByHandle,
   updateCommunityProfile,
   areConnected,
@@ -38,16 +40,38 @@ function projectProfile(p: CommunityProfile, viewerCanSeeLocation: boolean) {
 
 // GET /api/community/profile          → the caller's own profile
 // GET /api/community/profile?handle=x → someone else's, if connected or discoverable
+function fallbackProfile(uid: string, email?: string) {
+  const local = (email ?? '').split('@')[0] || uid
+  return {
+    user_id: uid,
+    handle: defaultHandle(uid),
+    name: local.replace(/[._]+/g, ' '),
+    bio: '',
+    avatar_emoji: defaultAvatarEmoji(uid),
+    discoverable: true,
+    share_location: false,
+    location: null,
+    online: false,
+    last_seen_at: null,
+    pubkey: null,
+  }
+}
+
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const session = getSession(req)
+  const uid = session?.uid ?? null
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   try {
     const handle = asIdOrNull(req.nextUrl.searchParams.get('handle'))
     if (!handle) {
-      const me = await getCommunityProfile(uid)
-      if (!me) return NextResponse.json({ error: 'Profile not found.' }, { status: 404 })
-      return NextResponse.json({ profile: projectProfile(me, true) })
+      try {
+        const me = await ensureOwnProfile(uid, { email: session?.email })
+        return NextResponse.json({ profile: projectProfile(me, true) })
+      } catch (err) {
+        console.error('[community/profile GET own]', err)
+        return NextResponse.json({ profile: fallbackProfile(uid, session?.email), unavailable: true })
+      }
     }
 
     const other = await getProfileByHandle(handle.toLowerCase())

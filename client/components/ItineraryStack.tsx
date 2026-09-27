@@ -218,7 +218,7 @@ export function ItineraryStack({ stops, activeIndex, onSelect, voiceSummary, onF
               {/* Ask chips — continue the conversation about THIS place */}
               {onAsk && (
                 <div className="mb-3">
-                  <p className="font-mono text-[9px] tracking-widest uppercase text-text3 mb-1.5">Ask Hodari</p>
+                  <p className="font-mono text-[9px] tracking-widest uppercase text-text3 mb-1.5">Ask MapForAll</p>
                   <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
                     {askChips(active, activeIndex ?? 0).map((chip) => (
                       <button

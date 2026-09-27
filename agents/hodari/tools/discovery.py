@@ -6,12 +6,19 @@ import json
 import logging
 import re
 from typing import Any
+from urllib.parse import quote
 
 from google.adk.tools import ToolContext
 
 from ..intent import LIST_DISCOVERY
+from .category_match import (
+    category_search_query,
+    empty_category_message,
+    keep_for_category,
+    requested_category,
+)
 from .maps_client import search_places_async
-from .mongo_tools import _user_id, enqueue_preference_saves
+from .mongo_tools import HODARI_DB, _mcp_tool, _parse_docs, _user_id, enqueue_preference_saves
 from .place_schema import inclusion_bonus
 from .response_cache import get_response_cache
 
@@ -111,63 +118,138 @@ def rank_places(
     if require:
         pool = [place for place in places if place.get("accessible") is True]
 
-    scored: list[tuple[float, dict[str, Any]]] = []
-    for place in pool:
-        rating = float(place.get("rating") or 0.0)
-        score = rating + _budget_boost(place.get("price_level"), request)
-        score += inclusion_bonus(place, prefer_local=prefer)
-        scored.append((score, place))
-    scored.sort(key=lambda item: item[0], reverse=True)
+    indexed = list(enumerate(pool))
 
+    def base_key(item: tuple[int, dict[str, Any]]) -> tuple[float, int]:
+        index, place = item
+        rating = float(place.get("rating") or 0.0)
+        return (-(rating + _budget_boost(place.get("price_level"), request)), index)
+
+    def boost_key(item: tuple[int, dict[str, Any]]) -> tuple[float, int]:
+        index, place = item
+        rating = float(place.get("rating") or 0.0)
+        extra = inclusion_bonus(place, prefer_local=prefer)
+        return (-(rating + _budget_boost(place.get("price_level"), request) + extra), index)
+
+    base_rank = {
+        id(place): rank
+        for rank, (_, place) in enumerate(sorted(indexed, key=base_key))
+    }
     seen: set[str] = set()
     ranked: list[dict[str, Any]] = []
-    for _, place in scored:
+    for rank, (_, place) in enumerate(sorted(indexed, key=boost_key)):
         pid = place.get("place_id") or place.get("name")
         if not pid or pid in seen:
             continue
         seen.add(pid)
-        ranked.append(place)
+        extra = inclusion_bonus(place, prefer_local=prefer)
+        moved = rank < base_rank.get(id(place), rank)
+        copy = dict(place)
+        copy["prioritized"] = extra > 0 and moved
+        ranked.append(copy)
         if len(ranked) >= limit:
             break
     return ranked
 
 
-async def discover_places(request: str, tool_context: ToolContext) -> str:
-    """Search Maps once, rank in Python, store candidates; no itinerary agent."""
-    cache = get_response_cache()
-    cached = cache.get(request)
-    if cached is not None:
-        logger.info("LIST_DISCOVERY cache hit for %r", request[:80])
-        tool_context.state["intent_type"] = LIST_DISCOVERY
-        cached_data = json.loads(cached)
-        tool_context.state["candidates"] = json.dumps(
-            cached_data.get("candidates", []), ensure_ascii=False
-        )
-        tool_context.state["itinerary"] = ""
-        tool_context.state["plan"] = ""
-        return cached
-
-    limit = extract_place_limit(request)
-    prefer_local, require_accessible = inclusion_flags(request)
-    logger.info(
-        "LIST_DISCOVERY fast path: limit=%d prefer_local=%s require_accessible=%s request=%r",
-        limit, prefer_local, require_accessible, request[:120],
-    )
-
+def _catalog_by_category(category: str) -> list[dict[str, Any]]:
+    """Validated Kigali rows whose stored category matches. Empty if Mongo is down."""
     try:
-        raw_places = await search_places_async(request)
-    except Exception as exc:
-        logger.exception("LIST_DISCOVERY Maps search failed")
-        return json.dumps(
+        result = _mcp_tool(
+            "find",
             {
-                "intent_type": LIST_DISCOVERY,
-                "error": f"Maps search failed: {exc}",
-                "candidates": [],
+                "database": HODARI_DB,
+                "collection": "places",
+                "filter": {
+                    "categories": category,
+                    "city": "Kigali",
+                    "status": {"$nin": ["pending", "rejected"]},
+                    "paused": {"$ne": True},
+                },
+                "projection": {"photos": 0},
+                "sort": {"claimed_by_owner": -1, "created_at": -1},
+                "limit": 12,
+            },
+        )
+    except Exception as exc:
+        logger.info("catalog category lookup skipped: %s", exc)
+        return []
+    places: list[dict[str, Any]] = []
+    for doc in _parse_docs(result):
+        coords = (doc.get("location") or {}).get("coordinates") or [None, None]
+        lng, lat = coords[0], coords[1]
+        if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+            continue
+        place_id = doc.get("place_id") or ""
+        photo_url = doc.get("photo_url")
+        # Owner covers are stored inline as base64; hand the model a URL, not the image.
+        if isinstance(photo_url, str) and photo_url.startswith("data:image/"):
+            photo_url = f"/api/places/photo?placeId={quote(place_id)}&i=0"
+        places.append(
+            {
+                "place_id": place_id,
+                "name": doc.get("name") or "",
+                "address": doc.get("address") or "Kigali",
+                "coordinates": {"lat": float(lat), "lng": float(lng)},
+                "categories": doc.get("categories") or [category],
+                "rating": doc.get("rating"),
+                "price_level": doc.get("price_level"),
+                "summary": doc.get("summary") or doc.get("description") or "",
+                "maps_url": doc.get("maps_url"),
+                "photo_url": photo_url,
+                "local_business": bool(doc.get("local_business")),
+                "accessible": bool(doc.get("accessible")),
+                "status": doc.get("status"),
+                "source": doc.get("source"),
+                "personalization_score": 0.0,
             }
         )
+    return places
+
+
+async def discover_places(request: str, tool_context: ToolContext) -> str:
+    """Search Maps once, rank in Python, store candidates; no itinerary agent."""
+    limit = extract_place_limit(request)
+    prefer_local, require_accessible = inclusion_flags(request)
+    category = requested_category(request)
+    logger.info(
+        "LIST_DISCOVERY fast path: limit=%d category=%s prefer_local=%s require_accessible=%s request=%r",
+        limit, category, prefer_local, require_accessible, request[:120],
+    )
+
+    # Only the Maps call is cached: the catalog is re-read every time so a
+    # listing validated a minute ago shows up without waiting for the TTL.
+    catalog = _catalog_by_category(category) if category else []
+    maps_query = category_search_query(category) if category else request
+    cache = get_response_cache()
+    cache_key = f"maps::{maps_query}"
+    try:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            logger.info("LIST_DISCOVERY Maps cache hit for %r", maps_query[:80])
+            raw_places = json.loads(cached)
+        else:
+            raw_places = await search_places_async(maps_query)
+            if raw_places:
+                cache.set(cache_key, json.dumps(raw_places, ensure_ascii=False))
+    except Exception as exc:
+        logger.exception("LIST_DISCOVERY Maps search failed")
+        raw_places = []
+        if not catalog:
+            return json.dumps(
+                {
+                    "intent_type": LIST_DISCOVERY,
+                    "error": f"Maps search failed: {exc}",
+                    "candidates": [],
+                }
+            )
+
+    pooled = catalog + raw_places
+    if category:
+        pooled = keep_for_category(pooled, category)
 
     candidates = rank_places(
-        raw_places,
+        pooled,
         request,
         limit,
         prefer_local=prefer_local,
@@ -175,13 +257,15 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
     )
 
     if not candidates:
-        return json.dumps(
-            {
-                "intent_type": LIST_DISCOVERY,
-                "error": "No places found",
-                "candidates": [],
-            }
-        )
+        payload: dict[str, Any] = {
+            "intent_type": LIST_DISCOVERY,
+            "error": "No places found",
+            "candidates": [],
+        }
+        if category:
+            payload["category"] = category
+            payload["say"] = empty_category_message(category)
+        return json.dumps(payload)
 
     candidates_json = json.dumps(candidates, ensure_ascii=False)
     tool_context.state["intent_type"] = LIST_DISCOVERY
@@ -206,5 +290,4 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         },
         ensure_ascii=False,
     )
-    cache.set(request, result)
     return result

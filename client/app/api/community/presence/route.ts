@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[community/presence POST]', err)
-    return NextResponse.json({ error: 'Heartbeat failed.' }, { status: 500 })
+    return NextResponse.json({ ok: true, presence: 'offline' })
   }
 }
 
@@ -51,6 +51,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ presence })
   } catch (err) {
     console.error('[community/presence GET]', err)
-    return NextResponse.json({ error: 'Could not load presence.' }, { status: 500 })
+    return NextResponse.json({ presence: {} })
   }
 }

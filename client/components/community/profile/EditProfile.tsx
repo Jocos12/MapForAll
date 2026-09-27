@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
+import { useI18n } from '@/components/I18nProvider'
 import { cn } from '@/lib/design/cn'
 import { focusRing } from '@/lib/design/tokens'
 import type { ProfileView } from './ProfileSheet'
@@ -89,6 +90,7 @@ export interface EditProfileProps {
 }
 
 export function EditProfile({ initial, onSaved, onCancel }: EditProfileProps) {
+  const { t } = useI18n()
   const [profile, setProfile] = useState<ProfileView | null>(initial ?? null)
   const [loading, setLoading] = useState(!initial)
 
@@ -104,6 +106,15 @@ export function EditProfile({ initial, onSaved, onCancel }: EditProfileProps) {
   const [saved, setSaved] = useState(false)
   // Captured on toggle-on so the map dot appears without waiting for a heartbeat.
   const pendingLocation = useRef<{ lat: number; lng: number } | null>(null)
+
+  useEffect(() => {
+    if (!loading) return
+    const id = window.setTimeout(() => {
+      setLoading(false)
+      setError((current) => current ?? t('thinking.profileUnavailable'))
+    }, 5000)
+    return () => window.clearTimeout(id)
+  }, [loading, t])
 
   useEffect(() => {
     if (initial) return
@@ -213,7 +224,7 @@ export function EditProfile({ initial, onSaved, onCancel }: EditProfileProps) {
     return (
       <div className="flex items-center gap-2.5 py-8">
         <div className="thinking-ring" />
-        <span className="text-[11px] tracking-wide text-text2">Loading your profile…</span>
+        <span className="text-[11px] tracking-wide text-text2">{t('thinking.profile')}…</span>
       </div>
     )
   }
@@ -331,7 +342,7 @@ export function EditProfile({ initial, onSaved, onCancel }: EditProfileProps) {
           hint="Only your connections see it. Turn off anytime."
         />
         <p className="rounded-xl border border-border bg-surface2/60 px-3.5 py-3 text-[11.5px] leading-relaxed text-text2">
-          Your chats are encrypted on this device. Hodari and the AI can&apos;t read them. The AI
+          Your chats are encrypted on this device. MapForAll and the AI can&apos;t read them. The AI
           only sees your bio, reviews, and pins.
         </p>
       </div>

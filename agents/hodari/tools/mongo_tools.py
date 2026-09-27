@@ -93,6 +93,10 @@ def _mcp_tool(tool_name: str, arguments: dict) -> dict:
         )
 
     resp = _post(_session_id)
+    # A restarted MCP server no longer knows the cached session id: renew once.
+    if resp.status_code in (400, 404):
+        _session_id = _init_session()
+        resp = _post(_session_id)
     resp.raise_for_status()
 
     # Parse SSE line(s): "data: {...}"
@@ -223,6 +227,9 @@ def load_user_profile(tool_context: ToolContext) -> dict:
     Returns a minimal dict if no profile exists yet (new user).
     """
     uid = _user_id(tool_context)
+    cached = tool_context.state.get("user_profile")
+    if isinstance(cached, dict) and cached.get("user_id") == uid:
+        return cached
     try:
         result = _mcp_tool("find", {
             "database": HODARI_DB,

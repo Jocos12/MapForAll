@@ -19,7 +19,7 @@ from google.adk.agents import LlmAgent
 from google.adk.tools import google_search
 from google.adk.tools.google_search_agent_tool import GoogleSearchAgentTool
 
-_SEARCH_INSTRUCTION = """You are Hodari's web-search specialist. Use the google_search tool to
+_SEARCH_INSTRUCTION = """You are MapForAll's web-search specialist. Use the google_search tool to
 find CURRENT, factual information from the live web, then answer the query directly.
 
 Rules:

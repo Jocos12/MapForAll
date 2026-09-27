@@ -17,9 +17,25 @@ const config: Config = {
         border:   'rgb(var(--color-border)   / <alpha-value>)',
         // Fixed accent colors — same in both themes
         gold:       { DEFAULT: '#F56A00', light: '#FF8C2F', dim: '#7A3500' },
+        terracotta: { DEFAULT: '#C45C26', light: '#E08A5A', dim: '#8C3A12' },
+        cream:      { DEFAULT: '#F6F0E6', deep: '#E7DCCB' },
+        ink:        { DEFAULT: '#1A1614', soft: '#2A2420' },
         green:      { DEFAULT: '#00C47A', dim: '#0A4A36' },
         danger:     { DEFAULT: '#FF5A57', dim: '#7A1F1D' },
         brand:      { DEFAULT: '#F56A00', dark: '#C44A00' },
+        // Login "Path & Paper" palette; values are defined on .pp-root in
+        // app/login/path-paper.css, so these only resolve inside that page.
+        pp: {
+          paper: 'var(--paper)',
+          'paper-dark': 'var(--paper-dark)',
+          ink: 'var(--ink)',
+          'ink-soft': 'var(--ink-soft)',
+          clay: 'var(--clay)',
+          gold: 'var(--gold)',
+          line: 'var(--line)',
+          field: 'var(--field)',
+          error: 'var(--error)',
+        },
         // The chat UI was built on Tailwind's yellow-orange `amber` scale, which
         // clashed with the landing page's vivid orange (#F56A00). Re-anchor the
         // whole `amber` scale onto that orange so every existing `amber-*` class

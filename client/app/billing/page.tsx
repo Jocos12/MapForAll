@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import {
   EASE,
-  HodariLogo,
+  MapForAllLogo,
   RollText,
   ThemeToggle,
   useLandingTheme,
@@ -127,9 +127,9 @@ export default function BillingPage() {
       <header className="relative z-20 mx-auto w-full max-w-[1440px] p-2 sm:p-3">
         <nav className="flex items-center justify-between rounded-full bg-white p-[5px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:bg-[#15151a] dark:shadow-[0_2px_12px_rgba(0,0,0,0.5)]">
           <Link href="/" className="flex items-center gap-2.5 pl-1">
-            <HodariLogo />
-            <span className="text-[14px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-              Hodari
+            <MapForAllLogo />
+            <span className="font-display text-[14px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+              MapForAll
             </span>
           </Link>
           <div className="flex items-center gap-3 sm:gap-4">
@@ -152,7 +152,7 @@ export default function BillingPage() {
         {/* Heading */}
         <div className="max-w-[620px]">
           <p className="text-[13px] tracking-wide text-gray-500 dark:text-gray-400">
-            Hodari · Credits &amp; usage
+            MapForAll · Credits &amp; usage
           </p>
           <h1 className="mt-3 font-display text-[clamp(1.9rem,4.4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-gray-900 dark:text-gray-50">
             Keep planning without limits.

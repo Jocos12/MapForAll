@@ -60,6 +60,8 @@ export const EMPTY_ANNOTATIONS: MapAnnotations = { colors: {}, markers: [], circ
 export interface CustomRouteConfig {
   from: 'user' | 'landmark'
   landmark?: string
+  /** Resolved coordinates, so the line does not depend on a second geocode. */
+  originPoint?: LatLng
   destinationIndex: number
   mode: TravelMode
 }
@@ -182,6 +184,18 @@ export interface MapActionEffects {
   routeFromUser?: boolean
   customRoute?: CustomRouteConfig | null
   routeMode?: TravelMode
+  /** The route action named a place that is not on the map yet. */
+  routeUnresolved?: boolean
+  /** Kept until the named place appears, then drawn without a second user message. */
+  pendingRoute?: PendingRouteRequest | null
+}
+
+export interface PendingRouteRequest {
+  from: 'user' | 'landmark'
+  landmark?: string
+  to_place_index?: number
+  to_place_name?: string
+  mode: TravelMode
 }
 
 const VALID_OPS = new Set([
@@ -368,11 +382,23 @@ export function applyMapActions(
           list,
           active,
         )
-        if (destIdx === null) break
         const mode: TravelMode =
           action.mode === 'DRIVE' || action.mode === 'TRANSIT' || action.mode === 'BICYCLE'
             ? action.mode
             : 'WALK'
+        if (destIdx === null) {
+          effects.routeUnresolved = true
+          effects.pendingRoute = {
+            from: action.from,
+            landmark: action.landmark,
+            to_place_index: action.to_place_index,
+            to_place_name: action.to_place_name,
+            mode,
+          }
+          effects.mapOpen = true
+          break
+        }
+        effects.pendingRoute = null
         effects.activeStop = destIdx
         effects.mapOpen = true
         effects.routeMode = mode

@@ -5,14 +5,11 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   Bookmark,
   CalendarPlus,
-  Check,
   ChevronDown,
-  Clock,
-  Compass,
-  Globe,
   History,
-  Leaf,
+  Keyboard,
   LocateFixed,
+  Plus,
   LogOut,
   Map as MapIcon,
   MapPin,
@@ -30,7 +27,6 @@ import {
   Sun,
   Trash2,
   Users,
-  Utensils,
   Volume2,
   VolumeX,
   Accessibility,
@@ -39,16 +35,19 @@ import {
 import type { ChatMessage, Place, Theme } from '@/lib/types'
 import type { MapSnapshot } from '@/lib/mapHistory'
 import type { VoiceState } from '@/hooks/useVoice'
-import { ModelSwitcher, MODELS, type ModelId } from './ModelSwitcher'
+import { ModelSwitcher, type ModelId } from './ModelSwitcher'
 import { CollapsibleMessage } from './CollapsedReply'
 import { TypingIndicator, ThinkingTrace } from './TypingIndicator'
 import { OpenMapButton } from './OpenMapButton'
-import { InlinePlaceGallery } from './InlinePlaceGallery'
+import { WorkspaceShortcut, type WorkspaceLink } from './WorkspaceShortcut'
+import { InlinePlaceGallery, PhotoGallery } from './InlinePlaceGallery'
 import { googleCalendarUrl } from '@/lib/calendar'
 import { shownMessages } from '@/lib/animationMemory'
 import { focusRing } from '@/lib/design/tokens'
 import { DUR, EASE } from './ui/motion'
 import { useI18n, type Lang } from './I18nProvider'
+
+const SHOW_MODEL = process.env.NEXT_PUBLIC_SHOW_MODEL_SWITCHER === '1'
 
 interface Props {
   messages: ChatMessage[]
@@ -58,13 +57,19 @@ interface Props {
   onSend: (text: string) => void
   /** Quick inclusion filters. The parent fetches places and sends the agent tokens. */
   onInclusionFilter?: (mode: 'local' | 'accessible') => void
+  onMarketFilter?: () => void
   inclusionLocal?: boolean
   inclusionAccessible?: boolean
+  inclusionMarkets?: boolean
   /** Single shared voice instance, owned by the parent (avoids duplicate recorders). */
   voiceState?: VoiceState
   voiceSupported?: boolean
   voiceWarning?: string
   voiceLiveText?: string
+  /** Exact SpeechRecognition.lang from the latest listen start. */
+  voiceRecognitionLang?: string
+  /** Drop the last spoken line and listen again. */
+  onRetryVoice?: () => void
   onVoiceToggle?: () => void
   /** Stops everything: dictation, speech output, and the in-flight request. */
   onVoiceStop?: () => void
@@ -111,17 +116,19 @@ interface Props {
   onEnterVoiceMode?: () => void
   userName?: string
   onLogout?: () => void
+  /** Owner/admin shortcut back to their back-office; absent for plain client accounts. */
+  workspace?: WorkspaceLink
   /** Opens the community panel (people, encrypted chats, shared pins). */
   onOpenCommunity?: () => void
   /** Pending invite count shown as a badge on the community icon. */
   communityInviteCount?: number
+  /** Opens the community “add a place” sheet. */
+  onAddPlace?: () => void
 }
 
 const CHIPS = [
-  { key: 'chips.kigali', query: '4 hours in Kigali under $60', Icon: Clock },
-  { key: 'chips.vegetarian', query: 'Vegetarian food nearby', Icon: Leaf },
-  { key: 'chips.food', query: 'Best food and sights nearby', Icon: Utensils },
-  { key: 'chips.plan', query: 'Plan my trip today', Icon: Compass },
+  { key: 'chips.near', query: 'Local businesses near me in Kigali', Icon: MapPin },
+  { key: 'chips.add', query: '', Icon: Plus },
 ]
 
 export function ChatPanel({
@@ -131,12 +138,16 @@ export function ChatPanel({
   streamingStarted,
   onSend,
   onInclusionFilter,
+  onMarketFilter,
   inclusionLocal = false,
   inclusionAccessible = false,
+  inclusionMarkets = false,
   voiceState = 'idle',
   voiceSupported = false,
   voiceWarning,
   voiceLiveText,
+  voiceRecognitionLang,
+  onRetryVoice,
   onVoiceToggle,
   onVoiceStop,
   historyItems,
@@ -176,8 +187,10 @@ export function ChatPanel({
   onEnterVoiceMode,
   userName,
   onLogout,
+  workspace,
   onOpenCommunity,
   communityInviteCount,
+  onAddPlace,
 }: Props) {
   const { t, lang, setLang } = useI18n()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -194,6 +207,8 @@ export function ChatPanel({
   // a full 44px target instead of being squeezed to fit ~7 controls at once.
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement>(null)
+  const [langOpen, setLangOpen] = useState(false)
+  const langRef = useRef<HTMLDivElement>(null)
   const [caretVisible, setCaretVisible] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -216,11 +231,19 @@ export function ChatPanel({
     if (id && text) onEditMessage?.(id, text)
   }
   const reduced = useReducedMotion()
+
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    if (voiceState === 'listening') el.value = voiceLiveText ?? ''
+    else if (voiceState === 'thinking') el.value = ''
+  }, [voiceState, voiceLiveText])
   /** Messages present on first render get a staggered entrance; newly appended ones animate immediately. */
   const initialCountRef = useRef(messages.length)
 
   const streaming = loading && streamingStarted
   const voiceActive = voiceState !== 'idle'
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
   const lastMsgId = messages[messages.length - 1]?.id
   const showThinking = loading && !streamingStarted
   const showWriting = streaming
@@ -279,12 +302,14 @@ export function ChatPanel({
   }, [messages])
 
   useEffect(() => {
-    if (!moreOpen) return
+    if (!moreOpen && !langOpen) return
     function onClickOutside(e: MouseEvent) {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false)
+      const target = e.target as Node
+      if (moreRef.current && !moreRef.current.contains(target)) setMoreOpen(false)
+      if (langRef.current && !langRef.current.contains(target)) setLangOpen(false)
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMoreOpen(false)
+      if (e.key === 'Escape') { setMoreOpen(false); setLangOpen(false) }
     }
     document.addEventListener('mousedown', onClickOutside)
     document.addEventListener('keydown', onKey)
@@ -292,7 +317,7 @@ export function ChatPanel({
       document.removeEventListener('mousedown', onClickOutside)
       document.removeEventListener('keydown', onKey)
     }
-  }, [moreOpen])
+  }, [moreOpen, langOpen])
 
   // After the stream ends, the last reply keeps typing out for a beat. Keep the
   // view pinned to the bottom while it reveals — unless the user scrolled up.
@@ -331,28 +356,28 @@ export function ChatPanel({
             {mapVisible && !mapExpanded ? (
               <>
                 <PanelRightClose className="h-3.5 w-3.5" />
-                Hide map
+                {t('composer.hideMap')}
               </>
             ) : (
               <>
                 <MapIcon className="h-3.5 w-3.5" />
-                Show map
+                {t('composer.showMap')}
               </>
             )}
           </button>
         </div>
       )}
       {hasLocation ? (
-        <p className="mb-2 ml-1 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
+        <p className="mb-2 ml-1 flex items-center gap-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
           <MapPin className="h-3 w-3" />
-          Location active
+          {t('composer.locationActive')}
         </p>
       ) : (onUseMyLocation || onSetCity) ? (
         <div className="mb-2 ml-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           {manualCity && !cityEditing && (
-            <span className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
+            <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
               <MapPin className="h-3 w-3" />
-              City: {manualCity}
+              {t('composer.city')}: {manualCity}
             </span>
           )}
           {onUseMyLocation && (
@@ -363,7 +388,7 @@ export function ChatPanel({
               className="flex min-h-[32px] items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00] disabled:opacity-50 max-md:min-h-[44px]"
             >
               <LocateFixed className={`h-3.5 w-3.5 ${locationPending ? 'animate-pulse' : ''}`} />
-              {locationPending ? 'Locating…' : 'Use my location'}
+              {locationPending ? t('composer.locating') : t('composer.useLocation')}
             </button>
           )}
           {onSetCity && (
@@ -372,7 +397,7 @@ export function ChatPanel({
               onClick={() => { setCityEditing((v) => !v); setCityDraft(manualCity ?? '') }}
               className="flex min-h-[32px] items-center rounded-full border border-[var(--border)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:min-h-[44px]"
             >
-              {manualCity ? 'Change city' : 'Set my city'}
+              {manualCity ? t('composer.changeCity') : t('composer.setCity')}
             </button>
           )}
         </div>
@@ -402,7 +427,7 @@ export function ChatPanel({
             type="text"
             value={cityDraft}
             onChange={(e) => setCityDraft(e.target.value)}
-            placeholder="e.g. Kigali, or New York"
+            placeholder={t('composer.cityPlaceholder')}
             autoFocus
             className="min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--bg-header)] px-4 py-2 text-[16px] text-[var(--text-primary)] outline-none transition-[border-color] focus:border-[#F56A00]/60 md:text-[13px]"
           />
@@ -411,16 +436,19 @@ export function ChatPanel({
             disabled={!cityDraft.trim()}
             className="min-h-[36px] rounded-full bg-[#F56A00] px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-40 max-md:min-h-[44px]"
           >
-            Set
+            {t('composer.set')}
           </button>
         </form>
       )}
       {voiceState === 'listening' && voiceLiveText && (
-        <p className="mb-1.5 ml-1 truncate text-[12px] italic text-[var(--text-secondary)]">
-          “{voiceLiveText}”
+        <p className="sr-only" aria-live="polite">{voiceLiveText}</p>
+      )}
+      {voiceState === 'listening' && voiceRecognitionLang && (
+        <p className="mb-1.5 ml-1 text-[11px] font-medium tracking-wide text-[var(--text-secondary)]">
+          {t('composer.recognition')} : {voiceRecognitionLang}
         </p>
       )}
-      {voiceWarning && voiceState === 'idle' && (
+      {voiceWarning && voiceState !== 'speaking' && voiceState !== 'thinking' && (
         <p className="mb-1.5 ml-1 text-[11px] text-[var(--text-secondary)]">{voiceWarning}</p>
       )}
       <form onSubmit={handleSubmit}>
@@ -445,14 +473,28 @@ export function ChatPanel({
               <Mic className="h-4 w-4" />
             </button>
           )}
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={() => {
+                onVoiceStop?.()
+                onEnterChatMode?.()
+                inputRef.current?.focus()
+              }}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-neutral-200 px-2.5 text-[11px] font-medium text-neutral-600 transition-colors hover:border-[#E8672A] hover:text-[#E8672A] max-md:h-11 dark:border-white/15 dark:text-neutral-300"
+            >
+              <Keyboard className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              <span className="max-w-[9rem] truncate">{t('composer.textMode')}</span>
+            </button>
+          )}
           <input
             ref={inputRef}
             type="text"
             placeholder={
-              voiceState === 'listening' ? 'Listening…'
-              : voiceState === 'thinking' ? 'Thinking…'
-              : voiceState === 'speaking' ? 'Hodari is speaking…'
-              : voiceState === 'paused' ? 'Paused — tap Stop or the mic'
+              voiceState === 'listening' ? t('composer.listening')
+              : voiceState === 'thinking' ? t('composer.thinking')
+              : voiceState === 'speaking' ? t('composer.speaking')
+              : voiceState === 'paused' ? t('composer.paused')
               : t('composer.placeholder')
             }
             aria-label={t('composer.placeholder')}
@@ -465,19 +507,19 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => { onVoiceStop?.(); if (!onVoiceStop) onStop?.() }}
-              aria-label="Stop"
-              title="Stop voice and generation"
+              aria-label={t('composer.stop')}
+              title={t('composer.stop')}
               className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-red-500 px-3.5 text-[12px] font-medium text-white transition-colors hover:bg-red-600 max-md:h-11"
             >
               <Square className="h-3 w-3 fill-current" />
-              Stop
+              {t('composer.stop')}
             </button>
           ) : (
             <button
               type="submit"
               disabled={loading}
               aria-label={t('composer.send')}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F56A00] text-white shadow-[0_6px_16px_-6px_rgba(245,106,0,0.7)] transition-[transform,background-color,box-shadow] duration-150 ease-out hover:scale-105 hover:bg-terracotta hover:shadow-[0_10px_20px_-8px_rgba(196,92,38,0.75)] active:scale-95 disabled:opacity-40 disabled:hover:scale-100 motion-reduce:transition-none motion-reduce:hover:scale-100 max-md:h-11 max-md:w-11"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F56A00] text-white transition-colors duration-150 hover:bg-[#e05a1a] disabled:opacity-40 max-md:h-11 max-md:w-11"
             >
               <Send className="h-4 w-4" />
             </button>
@@ -490,17 +532,27 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => onInclusionFilter('local')}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] ${inclusionLocal ? 'border-terracotta bg-terracotta/15 text-terracotta' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#F56A00]/45`}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-colors duration-150 active:opacity-70 ${inclusionLocal ? 'border-terracotta bg-terracotta/15 text-terracotta' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#F56A00]/45`}
             >
-              <Store className="h-3.5 w-3.5 text-terracotta" aria-hidden />
+              <Store className="h-4 w-4 text-terracotta" strokeWidth={2} aria-hidden />
               {t('filters.local')}
             </button>
+            {onMarketFilter && (
+              <button
+                type="button"
+                onClick={onMarketFilter}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-colors duration-150 active:opacity-70 ${inclusionMarkets ? 'border-[#E8672A] bg-[#FDE8DC] text-[#E8672A]' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#E8672A]/45`}
+              >
+                <Store className="h-4 w-4 text-[#E8672A]" strokeWidth={2} aria-hidden />
+                {t('filters.markets')}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onInclusionFilter('accessible')}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] ${inclusionAccessible ? 'border-[#0F6E56] bg-[#0F6E56]/15 text-[#0F6E56]' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#0F6E56]/45`}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-colors duration-150 active:opacity-70 ${inclusionAccessible ? 'border-[#0F6E56] bg-[#0F6E56]/15 text-[#0F6E56]' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#0F6E56]/45`}
             >
-              <Accessibility className="h-3.5 w-3.5 text-[#0F6E56]" aria-hidden />
+              <Accessibility className="h-4 w-4 text-[#0F6E56]" strokeWidth={2} aria-hidden />
               {t('filters.accessible')}
             </button>
           </>
@@ -509,10 +561,10 @@ export function ChatPanel({
           <button
             key={key}
             type="button"
-            onClick={() => onSend(query)}
-            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/80 px-3 py-1.5 text-left text-[12px] leading-snug text-[var(--text-primary)] shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-200 ease-out hover:scale-[1.03] hover:border-[#F56A00]/45 hover:bg-[#F56A00]/10 hover:shadow-[0_8px_18px_-12px_rgba(245,106,0,0.7)] motion-reduce:transition-none motion-reduce:hover:scale-100 sm:px-3.5 sm:text-[13px]"
+            onClick={() => { if (key === 'chips.add') onAddPlace?.(); else onSend(query) }}
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/80 px-3 py-1.5 text-left text-[12px] leading-snug text-[var(--text-primary)] transition-colors duration-150 hover:border-[#E8672A]/40 hover:bg-[#E8672A]/10 active:opacity-70 sm:px-3.5 sm:text-[13px]"
           >
-            <Icon className="h-3.5 w-3.5 shrink-0 text-terracotta dark:text-[#FF8C2F]" aria-hidden="true" />
+            <Icon className="h-4 w-4 shrink-0 text-[#E8672A]" strokeWidth={2} aria-hidden="true" />
             <span className="min-w-0">{t(key)}</span>
           </button>
         ))}
@@ -526,22 +578,15 @@ export function ChatPanel({
         <div ref={scrollRef} onScroll={handleScroll} className="chat-scroll h-full min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
           <div className="mx-auto w-full max-w-[720px] space-y-5">
             {isEmpty && (
-              <motion.div
-                initial={reduced ? false : { opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: reduced ? 0 : 0.45, ease: EASE }}
-                className="flex flex-col items-center px-2 pb-6 pt-[6vh] text-center sm:pt-[8vh]"
-              >
-                <div className="hodari-orb relative mb-6 flex h-[88px] w-[88px] items-center justify-center motion-reduce:animate-none">
-                  <span className="absolute -inset-3 rounded-full bg-[#F56A00]/15 blur-md dark:bg-[#F56A00]/20" />
-                  <span className="absolute inset-0 rounded-full bg-gradient-to-br from-[#FF8C2F] via-[#F56A00] to-terracotta shadow-[0_18px_40px_-12px_rgba(196,92,38,0.7)]" />
-                  <Globe className="relative h-9 w-9 text-white" strokeWidth={1.5} aria-hidden="true" />
+              <div className="flex flex-col items-center px-2 pb-6 pt-[6vh] text-center sm:pt-[8vh]">
+                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-full border border-[#E4D2BE] bg-white dark:border-white/15 dark:bg-[#1C1916]">
+                  <MapPin className="h-6 w-6 text-[#E8672A]" strokeWidth={1.75} aria-hidden="true" />
                 </div>
-                <p className="font-display text-[clamp(2.4rem,6vw,3rem)] font-semibold italic tracking-tight text-ink dark:text-cream">Where to?</p>
+                <p className="font-display text-[clamp(2.4rem,6vw,3rem)] font-semibold italic tracking-tight text-ink dark:text-cream">{t('empty.title')}</p>
                 <p className="mx-auto mt-4 max-w-sm text-[14px] leading-relaxed text-[var(--text-secondary)]">
-                  Tell me your time, budget, and preferences, and I&apos;ll build your matchday plan.
+                  {t('empty.body')}
                 </p>
-              </motion.div>
+              </div>
             )}
 
             {messages.map((msg, i) => (
@@ -584,6 +629,15 @@ export function ChatPanel({
                   </div>
                 ) : (
                   <div className="group flex items-end gap-1.5">
+                    {msg.fromVoice && msg.id === lastUserMsg?.id && onRetryVoice && (
+                      <button
+                        type="button"
+                        onClick={onRetryVoice}
+                        className="mb-1 shrink-0 rounded-full border border-[#F56A00]/60 bg-white px-2.5 py-1 text-[12px] font-medium text-[#F56A00] shadow-sm transition-colors hover:bg-[#F56A00] hover:text-white dark:bg-[#1C1916]"
+                      >
+                        {t('composer.retry')}
+                      </button>
+                    )}
                     {onEditMessage && !loading && (
                       <button
                         type="button"
@@ -602,8 +656,8 @@ export function ChatPanel({
                 )
               ) : (
                 <div className="w-full max-w-[min(680px,100%)] text-left">
-                  <p className="mb-1.5 ml-1 text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
-                    Hodari
+                  <p className="mb-1.5 ml-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
+                    MapForAll
                   </p>
                   {msg.content ? (
                     <div className="w-full px-1">
@@ -620,10 +674,16 @@ export function ChatPanel({
                   )}
                   {showWriting && msg.id === lastMsgId && (
                     <p className="animate-fade-up ml-1 mt-1.5 text-[11px] text-gray-500">
-                      Hodari is writing…
+                      {t('composer.thinking')}
                     </p>
                   )}
-                  {msg.places?.length ? (
+                  {msg.gallery?.type === 'photo_gallery' && msg.gallery.photos.length > 0 ? (
+                    <PhotoGallery
+                      placeName={msg.gallery.place_name}
+                      photos={msg.gallery.photos}
+                      attribution={msg.gallery.attribution}
+                    />
+                  ) : msg.places?.length ? (
                     <InlinePlaceGallery places={msg.places} onDetails={onPlaceDetails} />
                   ) : null}
                   {msg.calendarEvents?.length ? (
@@ -657,11 +717,15 @@ export function ChatPanel({
           {showThinking && (
             <div className="flex justify-start">
               <div className="w-full max-w-[min(680px,100%)]">
-                <p className="mb-1.5 ml-1 text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
-                  Hodari
+                <p className="mb-1.5 ml-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
+                  MapForAll
                 </p>
                 <div className="animate-fade-up">
                   <ThinkingTrace steps={thinkingSteps} />
+                </div>
+                <div className="mt-3 space-y-2" aria-hidden>
+                  <div className="h-16 animate-pulse rounded-xl bg-black/[0.06] motion-reduce:animate-none dark:bg-white/10" />
+                  <div className="h-16 w-4/5 animate-pulse rounded-xl bg-black/[0.06] motion-reduce:animate-none dark:bg-white/10" />
                 </div>
               </div>
             </div>
@@ -712,7 +776,7 @@ export function ChatPanel({
         }`}
       >
         <MessageSquare className="h-3.5 w-3.5" />
-        Chat
+        {t('header.chat')}
       </button>
       <button
         type="button"
@@ -723,7 +787,7 @@ export function ChatPanel({
         }`}
       >
         <Mic className="h-3.5 w-3.5" />
-        Voice
+        {t('header.voice')}
       </button>
     </div>
   ) : null
@@ -748,7 +812,7 @@ export function ChatPanel({
       >
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3.5">
           <span className="font-display text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-            Hodari
+            MapForAll
           </span>
           <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close chat history" className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00]">
             ×
@@ -806,7 +870,7 @@ export function ChatPanel({
             </p>
             <div className="space-y-1">
             {visibleHistoryItems.length === 0 ? (
-              <p className="px-1 text-[13px] text-[var(--text-secondary)]">No recent chats yet.</p>
+              <p className="px-1 text-[13px] text-[var(--text-secondary)]">{t('header.noChats')}</p>
             ) : (
               visibleHistoryItems.map((item) => (
                 <div key={item.id} className="group relative">
@@ -839,6 +903,15 @@ export function ChatPanel({
 
         {onLogout && (
           <div className="shrink-0 border-t border-[var(--border)] p-3">
+            {workspace && (
+              <a
+                href={workspace.href}
+                className={`mb-2 flex items-center justify-center gap-2 rounded-xl bg-[#1A1614] px-3 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#33291F] dark:bg-[#E8672A] dark:text-[#1A1614] dark:hover:bg-[#F07A40] ${focusRing}`}
+              >
+                <Store className="h-4 w-4" aria-hidden />
+                {workspace.cta}
+              </a>
+            )}
             <div className="flex items-center gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--bg-header)] px-3 py-2.5 shadow-[0_8px_20px_-14px_rgba(26,22,20,0.45)]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF8C2F] to-terracotta text-[13px] font-semibold text-white shadow-[0_6px_14px_-6px_rgba(196,92,38,0.8)] ring-2 ring-white dark:ring-[#3A322C]">
                 {(userName?.trim()?.[0] ?? 'U').toUpperCase()}
@@ -867,196 +940,134 @@ export function ChatPanel({
           the chat panel can be a narrow centered column, and pushing it by the
           drawer width crushed the header. */}
       <div className="flex min-h-0 flex-1 flex-col bg-transparent">
-        <div
-          className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-3 pt-3.5 sm:px-5"
-          style={{ backgroundColor: theme === 'dark' ? 'rgba(28, 25, 22, 0.55)' : 'rgba(255, 251, 246, 0.62)' }}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-            <div className="min-w-0">
-              <h1 className="font-display text-lg font-semibold text-[var(--text-primary)]">{t('app.name')}</h1>
-              <div className="mt-0.5 flex gap-1" role="group" aria-label={t('header.language')}>
-                {(['fr', 'en', 'rw'] as Lang[]).map((code) => (
-                  <button
-                    key={code}
-                    type="button"
-                    onClick={() => setLang(code)}
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${lang === code ? 'bg-[#F56A00] text-white' : 'text-[var(--text-secondary)] hover:bg-[#F56A00]/10'}`}
-                  >
-                    {code}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {modeToggle}
+        <header className="sticky top-0 z-30 shrink-0 border-b border-black/[0.06] bg-[#FBF6EE]/95 shadow-[0_10px_28px_-22px_rgba(26,22,20,0.55)] backdrop-blur-md dark:border-white/10 dark:bg-[#141210]/95">
+          <div className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E8672A] text-[11px] font-bold tracking-tight text-white">MF</span>
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate font-display text-[15px] font-semibold tracking-tight text-[#1A1614] dark:text-gray-50">MapForAll</span>
+              <span className="hidden truncate text-[11px] font-normal text-[#8A7364] sm:block dark:text-gray-400">{t('app.subtitle')}</span>
+            </span>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <div className="flex items-center gap-0.5 rounded-full bg-white/70 p-1 ring-1 ring-black/[0.06] dark:bg-white/[0.06] dark:ring-white/10 max-md:hidden">
+          <div className="mx-auto shrink-0">{modeToggle}</div>
+          <div className="flex shrink-0 items-center gap-0.5">
             {speechOutSupported && onToggleSpeakReplies && (
               <button
                 type="button"
                 onClick={onToggleSpeakReplies}
-                aria-label={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'}
-                title={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'}
-                className={`rounded-full p-1.5 transition-colors ${speakReplies ? 'bg-[#F56A00]/15 text-[#F56A00]' : 'text-[var(--text-secondary)] hover:bg-[#F56A00]/10 hover:text-[#F56A00]'}`}
+                aria-label={speakReplies ? t('header.mute') : t('header.unmute')}
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-150 active:opacity-70 ${speakReplies ? 'text-[#E8672A]' : 'text-[#6E5B50] hover:bg-black/[0.04] dark:text-gray-300 dark:hover:bg-white/10'}`}
               >
                 {speakReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
               </button>
             )}
+            {workspace && <WorkspaceShortcut workspace={workspace} />}
             <button
               type="button"
               onClick={onToggleTheme}
-              aria-label="Toggle theme"
-              className="rounded-full p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00]"
+              aria-label={t('header.theme')}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-[#6E5B50] transition-colors duration-150 hover:bg-black/[0.04] active:opacity-70 dark:text-gray-300 dark:hover:bg-white/10"
             >
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-            </div>
-            <div className="flex items-center gap-0.5 rounded-full bg-white/70 p-1 ring-1 ring-black/[0.06] dark:bg-white/[0.06] dark:ring-white/10">
-            {onOpenCommunity && (
+            <div ref={langRef} className="relative">
               <button
                 type="button"
-                aria-label={
-                  communityInviteCount
-                    ? `Open community, ${communityInviteCount} pending invite${communityInviteCount === 1 ? '' : 's'}`
-                    : 'Open community'
-                }
-                title="Community"
-                onClick={onOpenCommunity}
-                className={`relative rounded-full p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${focusRing}`}
+                aria-label={t('header.language')}
+                aria-expanded={langOpen}
+                onClick={() => setLangOpen((v) => !v)}
+                className="flex h-9 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium uppercase tracking-wide text-[#1A1614] transition-colors duration-150 hover:bg-black/[0.04] active:opacity-70 dark:text-gray-100 dark:hover:bg-white/10"
               >
-                <Users className="h-4 w-4" />
-                {!!communityInviteCount && (
-                  <span
-                    aria-hidden
-                    className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#F56A00] text-[9px] font-semibold leading-none text-white"
-                  >
-                    {communityInviteCount > 9 ? '9+' : communityInviteCount}
-                  </span>
-                )}
+                {lang}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${langOpen ? 'rotate-180' : ''}`} />
               </button>
-            )}
-            {/* New chat: buried one level deep in the history drawer on
-                desktop, but promoted to a direct header action on phones. */}
+              {langOpen && (
+                <div className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-[88px] overflow-hidden rounded-xl border border-black/10 bg-white py-1 shadow-[0_8px_24px_rgba(26,22,20,0.12)] dark:border-white/10 dark:bg-[#1C1916]">
+                  {(['fr', 'en', 'rw'] as Lang[]).map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => { setLang(code); setLangOpen(false) }}
+                      className={`block w-full px-3 py-1.5 text-left text-[12px] uppercase transition-colors duration-150 ${lang === code ? 'text-[#E8672A]' : 'text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5'}`}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               type="button"
-              aria-label="New chat"
-              title="New chat"
-              onClick={onNewChat}
-              className={`hidden rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center ${focusRing}`}
+              onClick={() => setHistoryOpen(true)}
+              aria-label={t('header.account')}
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1614] text-[12px] font-semibold text-white transition-opacity duration-150 active:opacity-70 dark:bg-white dark:text-[#1A1614]"
             >
-              <MessageSquarePlus className="h-4 w-4" />
+              {(userName?.trim()?.[0] ?? 'M').toUpperCase()}
             </button>
-            <button
-              type="button"
-              aria-label="Open chat history"
-              onClick={() => setHistoryOpen((open) => !open)}
-              className={`rounded-full p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00] max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${focusRing}`}
-            >
-              <Menu className="h-4 w-4" />
-            </button>
-            </div>
-            {hasMapData && (
+            <div ref={moreRef} className="relative">
               <button
                 type="button"
-                onClick={() => {
-                  if (mapExpanded) onCollapseMap()
-                  else if (mapVisible) onExpandMap()
-                  else onOpenMapPanel()
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:hidden"
-              >
-                <MapIcon className="h-3.5 w-3.5" />
-                {mapExpanded ? 'Compact map' : mapVisible ? 'Full map' : 'Open map'}
-              </button>
-            )}
-            <div className="max-md:hidden">
-              <ModelSwitcher selected={selectedModel} onChange={onModelChange} />
-            </div>
-            {/* More popover (below md only): theme, speak-replies, model. */}
-            <div ref={moreRef} className="relative hidden max-md:block">
-              <button
-                type="button"
-                aria-label="More options"
+                aria-label={t('header.more')}
                 aria-haspopup="menu"
                 aria-expanded={moreOpen}
                 onClick={() => setMoreOpen((v) => !v)}
-                className={`flex h-11 w-11 items-center justify-center rounded-lg border text-[var(--text-secondary)] transition-colors ${moreOpen ? 'border-[#F56A00]/50 text-[#F56A00]' : 'border-[var(--border)] hover:border-[#F56A00]/40 hover:text-[#F56A00]'} ${focusRing}`}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[#6E5B50] transition-colors duration-150 hover:bg-black/[0.04] active:opacity-70 dark:text-gray-300 dark:hover:bg-white/10"
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>
               {moreOpen && (
                 <div
                   role="menu"
-                  aria-label="More options"
-                  className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-header)] shadow-2xl"
+                  aria-label={t('header.more')}
+                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-56 overflow-hidden rounded-xl border border-black/10 bg-white py-1 shadow-[0_8px_24px_rgba(26,22,20,0.12)] dark:border-white/10 dark:bg-[#1C1916]"
                 >
-                  <div className="p-1.5">
-                    {speechOutSupported && onToggleSpeakReplies && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => { onToggleSpeakReplies(); setMoreOpen(false) }}
-                        aria-label={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'}
-                        className={`flex min-h-[40px] w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-[var(--text-primary)] transition-colors hover:bg-[#F56A00]/[0.06] ${focusRing}`}
-                      >
-                        {speakReplies ? <Volume2 className="h-4 w-4 shrink-0" /> : <VolumeX className="h-4 w-4 shrink-0" />}
-                        {speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'}
-                      </button>
-                    )}
+                  <button type="button" role="menuitem" onClick={() => { onNewChat(); setMoreOpen(false) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5">
+                    <MessageSquarePlus className="h-4 w-4" />
+                    {t('header.newChat')}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => { setHistoryOpen(true); setMoreOpen(false) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5">
+                    <Menu className="h-4 w-4" />
+                    {t('header.history')}
+                  </button>
+                  {onOpenCommunity && (
+                    <button type="button" role="menuitem" onClick={() => { onOpenCommunity(); setMoreOpen(false) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5">
+                      <Users className="h-4 w-4" />
+                      {t('header.community')}
+                      {!!communityInviteCount && <span className="ml-auto text-[11px] text-[#E8672A]">{communityInviteCount}</span>}
+                    </button>
+                  )}
+                  {hasMapData && (
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={() => { onToggleTheme(); setMoreOpen(false) }}
-                      aria-label="Toggle theme"
-                      className={`flex min-h-[40px] w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-[var(--text-primary)] transition-colors hover:bg-[#F56A00]/[0.06] ${focusRing}`}
+                      onClick={() => {
+                        if (mapExpanded) onCollapseMap()
+                        else if (mapVisible) onExpandMap()
+                        else onOpenMapPanel()
+                        setMoreOpen(false)
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5"
                     >
-                      {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-                      {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                      <MapIcon className="h-4 w-4" />
+                      {mapExpanded ? t('header.compactMap') : mapVisible ? t('header.fullMap') : t('header.openMap')}
                     </button>
-                  </div>
-                  <div className="border-t border-[var(--border)] p-1.5">
-                    <p className="px-3 pb-1 pt-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--text-secondary)]">
-                      AI Model
-                    </p>
-                    {MODELS.map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={m.id === selectedModel}
-                        disabled={!m.available}
-                        onClick={() => { if (m.available) { onModelChange(m.id); setMoreOpen(false) } }}
-                        className={`flex min-h-[40px] w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] transition-colors ${
-                          m.id === selectedModel
-                            ? 'bg-[#F56A00]/10 text-[var(--text-primary)]'
-                            : m.available
-                              ? 'text-[var(--text-primary)] hover:bg-[#F56A00]/[0.06]'
-                              : 'cursor-not-allowed text-[var(--text-secondary)] opacity-40'
-                        } ${focusRing}`}
-                      >
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.dot}`} />
-                        <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                        {m.id === selectedModel ? (
-                          <Check className="h-3.5 w-3.5 shrink-0 text-[#F56A00]" />
-                        ) : !m.available ? (
-                          <span className="shrink-0 rounded border border-[var(--border)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-secondary)]">
-                            Soon
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
+                  )}
+                  {SHOW_MODEL && (
+                    <div className="border-t border-black/5 p-2 dark:border-white/10">
+                      <ModelSwitcher selected={selectedModel} onChange={onModelChange} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
             {onCollapse && (
-              <button type="button" onClick={onCollapse} aria-label="Collapse chat" className="rounded-lg border border-[var(--border)] p-1.5 text-[var(--text-secondary)] max-md:p-2.5">
+              <button type="button" onClick={onCollapse} aria-label="Collapse chat" className="flex h-9 w-9 items-center justify-center rounded-full text-[#6E5B50] dark:text-gray-300">
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             )}
           </div>
-        </div>
-        <div className="h-px shrink-0 bg-gradient-to-r from-transparent via-[#F56A00]/20 to-transparent dark:via-[#FF8C2F]/15" />
+          </div>
+        </header>
 
         <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] overflow-hidden">
           {messageList}

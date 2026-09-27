@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Bookmark, ExternalLink, MapPin, Navigation, Star } from 'lucide-react'
+import { PlaceBadges } from './PlaceBadges'
 import type { Place } from '@/lib/types'
 import { PlaceImage } from './PlaceImage'
 import { DUR, EASE } from './ui/motion'
@@ -84,6 +85,7 @@ export function PlaceListPanel({ places, activeIndex, onSelect, onShowDetails, o
                             {place.rating.toFixed(1)}
                           </span>
                         )}
+                        <PlaceBadges place={place} />
                         {place.open_now != null && (
                           <span className={`text-[10px] font-semibold ${place.open_now ? 'text-[#1FA463]' : 'text-[#E5484D]'}`}>
                             {place.open_now ? 'Open now' : 'Closed'}

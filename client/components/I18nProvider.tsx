@@ -28,32 +28,32 @@ function lookup(dict: Record<string, unknown>, key: string): string | undefined 
   return typeof value === 'string' ? value : undefined
 }
 
-function detectLang(): Lang {
-  if (typeof navigator === 'undefined') return 'en'
-  const code = navigator.language.toLowerCase()
-  if (code.startsWith('fr')) return 'fr'
-  if (code.startsWith('rw')) return 'rw'
-  return 'en'
+const DEFAULT_LANG: Lang = 'fr'
+
+function isLang(value: string | null): value is Lang {
+  return value === 'fr' || value === 'en' || value === 'rw'
 }
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Lang>('en')
+  // Server render and the first client render both use French. A language
+  // the visitor explicitly picked is applied only after mount. The browser
+  // language does not override this default.
+  const [lang, setLangState] = useState<Lang>(DEFAULT_LANG)
 
   useEffect(() => {
+    let next: Lang = DEFAULT_LANG
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved === 'fr' || saved === 'en' || saved === 'rw') {
-        setLangState(saved)
-        return
-      }
-    } catch { /* private mode */ }
-    setLangState(detectLang())
+      if (isLang(saved)) next = saved
+    } catch { /* keep French */ }
+    if (next !== DEFAULT_LANG) setLangState(next)
+    document.documentElement.lang = next
   }, [])
 
   const setLang = useCallback((next: Lang) => {
     setLangState(next)
     try { localStorage.setItem(STORAGE_KEY, next) } catch { /* ignore */ }
-    if (typeof document !== 'undefined') document.documentElement.lang = next === 'rw' ? 'rw' : next
+    document.documentElement.lang = next
   }, [])
 
   const t = useCallback((key: string) => {
@@ -68,9 +68,9 @@ export function useI18n(): I18nValue {
   const ctx = useContext(I18nContext)
   if (!ctx) {
     return {
-      lang: 'en',
+      lang: 'fr',
       setLang: () => {},
-      t: (key) => lookup(DICTS.en, key) ?? key,
+      t: (key) => lookup(DICTS.fr, key) ?? lookup(DICTS.en, key) ?? key,
     }
   }
   return ctx

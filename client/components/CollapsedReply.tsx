@@ -136,7 +136,7 @@ export function CollapsedReply({ content, loading, streaming, onOpen, hideOpenCh
   return (
     <div className="pointer-events-auto absolute left-4 top-4 z-20 w-[340px] max-w-[80vw] animate-fade-up overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-header)]/95 shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-md dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-2.5">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">Hodari</span>
+        <span className="text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">MapForAll</span>
         {!hideOpenChat && (
           <button
             type="button"

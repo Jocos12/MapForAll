@@ -139,6 +139,42 @@ function stopOutputMeter(): void {
 
 // ── Browser speech APIs (fallback when Gemini is unavailable) ────────────────
 
+type AppLang = 'fr' | 'en' | 'rw'
+
+/** Browser speech tags. Chrome has no Kinyarwanda model, so RW uses French. */
+export function speechRecognitionTag(lang: AppLang): { tag: string; rwFallback: boolean } {
+  if (lang === 'en') return { tag: 'en-US', rwFallback: false }
+  if (lang === 'rw') return { tag: 'fr-FR', rwFallback: true }
+  return { tag: 'fr-FR', rwFallback: false }
+}
+
+/** Last language asked of the recognizer — browser TTS uses the same tag. */
+let speechLangTag = 'fr-FR'
+
+export type VoiceDiag = {
+  appLang: AppLang
+  /** Exact `SpeechRecognition.lang` (or the tag sent to Gemini). */
+  recognitionLang: string
+  engine: 'browser' | 'gemini'
+}
+
+let lastVoiceDiag: VoiceDiag | null = null
+const voiceDiagListeners = new Set<(diag: VoiceDiag) => void>()
+
+export function subscribeVoiceDiag(listener: (diag: VoiceDiag) => void): () => void {
+  voiceDiagListeners.add(listener)
+  if (lastVoiceDiag) listener(lastVoiceDiag)
+  return () => voiceDiagListeners.delete(listener)
+}
+
+function publishVoiceDiag(diag: VoiceDiag): void {
+  lastVoiceDiag = diag
+  console.info(
+    `[voice] recognition.lang=${diag.recognitionLang} appLang=${diag.appLang} engine=${diag.engine}`,
+  )
+  voiceDiagListeners.forEach((listener) => listener(diag))
+}
+
 type BrowserSpeechRecognition = {
   continuous: boolean
   interimResults: boolean
@@ -186,7 +222,7 @@ function markGeminiSttUnavailable(): void {
 }
 
 /** Browser-native STT — no MediaRecorder, avoids mic conflicts with SpeechRecognition. */
-async function startBrowserSpeechRecording(): Promise<Recorder> {
+async function startBrowserSpeechRecording(lang: AppLang = 'fr'): Promise<Recorder> {
   const recognition = createBrowserRecognizer()
   if (!recognition) {
     throw new Error('Browser speech recognition is not supported in this browser.')
@@ -194,13 +230,14 @@ async function startBrowserSpeechRecording(): Promise<Recorder> {
 
   let transcript = ''
   let done = false
+  const { tag } = speechRecognitionTag(lang)
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   startMicMeter(stream)
 
   recognition.continuous = true
   recognition.interimResults = true
-  recognition.lang = navigator.language || 'en-US'
+  recognition.lang = tag
   recognition.onresult = (event) => {
     const parts: string[] = []
     for (let i = 0; i < event.results.length; i++) {
@@ -211,7 +248,10 @@ async function startBrowserSpeechRecording(): Promise<Recorder> {
   }
 
   await new Promise<void>((resolve, reject) => {
-    recognition.onstart = () => resolve()
+    recognition.onstart = () => {
+      publishVoiceDiag({ appLang: lang, recognitionLang: recognition.lang, engine: 'browser' })
+      resolve()
+    }
     recognition.onerror = () => reject(new Error('Speech recognition failed to start'))
     try {
       recognition.start()
@@ -260,7 +300,7 @@ async function startBrowserSpeechRecording(): Promise<Recorder> {
   }
 }
 
-async function startGeminiRecording(): Promise<Recorder> {
+async function startGeminiRecording(lang: AppLang = 'fr'): Promise<Recorder> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   const mimeType = pickMimeType()
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
@@ -268,6 +308,11 @@ async function startGeminiRecording(): Promise<Recorder> {
   recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
   recorder.start()
   startMicMeter(stream)
+  publishVoiceDiag({
+    appLang: lang,
+    recognitionLang: lang === 'en' ? 'en-US' : lang === 'fr' ? 'fr-FR' : 'rw',
+    engine: 'gemini',
+  })
 
   let done = false
   const teardown = () => {
@@ -287,7 +332,7 @@ async function startGeminiRecording(): Promise<Recorder> {
       teardown()
       if (!blob) return ''
       const wavBase64 = await blobToWavBase64(blob)
-      return transcribeWithGemini(wavBase64)
+      return transcribeWithGemini(wavBase64, lang)
     },
     cancel(): void {
       if (done) return
@@ -302,7 +347,7 @@ async function speakWithBrowser(text: string): Promise<void> {
   if (!('speechSynthesis' in window)) return
   await new Promise<void>((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = navigator.language || 'en-US'
+    utterance.lang = speechLangTag
     utterance.rate = 1
     utterance.onend = () => {
       emitCaption('')
@@ -347,26 +392,28 @@ function pickMimeType(): string | undefined {
  * message echoes into the chat with no delay. Falls back to the default path if
  * the browser recognizer isn't available.
  */
-export async function startRecording(opts?: { preferBrowser?: boolean }): Promise<Recorder> {
+export async function startRecording(opts?: { preferBrowser?: boolean; lang?: AppLang }): Promise<Recorder> {
+  const lang = opts?.lang ?? 'fr'
+  speechLangTag = speechRecognitionTag(lang).tag
   if (opts?.preferBrowser && createBrowserRecognizer()) {
     try {
-      return await startBrowserSpeechRecording()
+      return await startBrowserSpeechRecording(lang)
     } catch {
       /* fall back to the default path below */
     }
   }
   if (await shouldUseGeminiStt()) {
-    return startGeminiRecording()
+    return startGeminiRecording(lang)
   }
-  return startBrowserSpeechRecording()
+  return startBrowserSpeechRecording(lang)
 }
 
-async function transcribeWithGemini(wavBase64: string): Promise<string> {
+async function transcribeWithGemini(wavBase64: string, lang: AppLang = 'fr'): Promise<string> {
   try {
     const res = await fetch('/api/voice/transcribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audioBase64: wavBase64, mimeType: 'audio/wav' }),
+      body: JSON.stringify({ audioBase64: wavBase64, mimeType: 'audio/wav', lang }),
     })
     if (!res.ok) {
       markGeminiSttUnavailable()

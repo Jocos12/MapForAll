@@ -13,7 +13,7 @@ from ..tools.maps_mcp import create_maps_toolset
 
 logger = logging.getLogger(__name__)
 
-ITINERARY_INSTRUCTION = """You are the Itinerary builder for Hodari, a tourist AI assistant for the 2026 FIFA World Cup.
+ITINERARY_INSTRUCTION = """You are the Itinerary builder for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
 
 The user's plan and candidate places are in context (session state keys: "plan", "candidates").
 

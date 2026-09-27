@@ -14,13 +14,12 @@
  * connections and conversation membership is validated — this UI is
  * convenience only.
  */
-import { useEffect, useMemo, useState } from 'react'
-import { Check, MapPin, Share2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Check, Copy, MapPin, Share2 } from 'lucide-react'
 import { cn } from '@/lib/design/cn'
 import { focusRing } from '@/lib/design/tokens'
 import { Sheet } from '@/components/ui/Sheet'
-import { EmojiAvatar } from './EmojiAvatar'
-import { getConnections, type ConnectionEdge } from '@/lib/communityClient'
+import { useI18n } from '@/components/I18nProvider'
 import type { Place } from '@/lib/types'
 
 /** Mirrors lib/community MAX_PIN_NOTE (value import would pull in server code). */
@@ -38,6 +37,13 @@ export interface SharePinDialogProps {
   onShared?: () => void
 }
 
+function placeLink(p: Place): string {
+  if (p.maps_url) return p.maps_url
+  const googleId = p.place_id && !/^(user_|pin:|__)/.test(p.place_id)
+  const id = googleId ? `&query_place_id=${encodeURIComponent(p.place_id)}` : ''
+  return `https://www.google.com/maps/search/?api=1&query=${p.coordinates.lat},${p.coordinates.lng}${id}`
+}
+
 function placePayload(p: Place) {
   return {
     place_id: p.place_id,
@@ -51,37 +57,31 @@ function placePayload(p: Place) {
 }
 
 export function SharePinDialog({ place, conversationId, candidatePlaces = [], onClose, onShared }: SharePinDialogProps) {
+  const { t } = useI18n()
   const conversationMode = !!conversationId
   const [chosenPlace, setChosenPlace] = useState<Place | null>(place ?? null)
-  const [connections, setConnections] = useState<ConnectionEdge[] | null>(null)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
-
-  // Connections list only matters in place mode (conversation pins go to members).
-  useEffect(() => {
-    if (conversationMode) return
-    let cancelled = false
-    getConnections()
-      .then((c) => { if (!cancelled) setConnections(c.accepted.filter((e) => e.user)) })
-      .catch(() => { if (!cancelled) setConnections([]) })
-    return () => { cancelled = true }
-  }, [conversationMode])
+  const [copied, setCopied] = useState(false)
 
   const candidates = useMemo(
     () => candidatePlaces.filter((p) => p.place_id && !p.place_id.startsWith('__')),
     [candidatePlaces],
   )
 
-  const toggle = (userId: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(userId)) next.delete(userId)
-      else next.add(userId)
-      return next
-    })
+  const copyLink = async () => {
+    if (!chosenPlace) return
+    const link = placeLink(chosenPlace)
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+      setError(null)
+    } catch {
+      setError(t('share.copyFailed'))
+    }
+  }
 
   const share = async () => {
     if (!chosenPlace || busy) return
@@ -93,7 +93,6 @@ export function SharePinDialog({ place, conversationId, candidatePlaces = [], on
         note: note.trim() || undefined,
       }
       if (conversationMode) body.conversation_id = conversationId
-      else if (selected.size > 0) body.shared_with = [...selected]
       const res = await fetch('/api/community/pins', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -135,7 +134,7 @@ export function SharePinDialog({ place, conversationId, candidatePlaces = [], on
             </p>
             {candidates.length === 0 ? (
               <p className="text-[12.5px] leading-relaxed text-text3">
-                No places yet. Ask Hodari to find some first.
+                No places yet. Ask MapForAll to find some first.
               </p>
             ) : (
               <ul className="flex max-h-64 flex-col gap-2 overflow-y-auto scrollbar-hide">
@@ -170,59 +169,16 @@ export function SharePinDialog({ place, conversationId, candidatePlaces = [], on
           </section>
         )}
 
-        {/* Audience (place mode only) */}
-        {!conversationMode && (
-          <section aria-label="Share with">
-            <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-text3">Share with</p>
-            {connections === null ? (
-              <div className="flex items-center gap-2.5 py-2">
-                <div className="thinking-ring" />
-                <span className="text-[11px] tracking-wide text-text2">Loading connections…</span>
-              </div>
-            ) : connections.length === 0 ? (
-              <p className="text-[12.5px] leading-relaxed text-text3">
-                No connections yet. The pin stays private to you.
-              </p>
-            ) : (
-              <>
-                <ul className="flex max-h-56 flex-col gap-1.5 overflow-y-auto scrollbar-hide">
-                  {connections.map((edge) => {
-                    const u = edge.user!
-                    const active = selected.has(u.user_id)
-                    return (
-                      <li key={u.user_id}>
-                        <button
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => toggle(u.user_id)}
-                          className={cn(
-                            'flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors',
-                            active ? 'border-gold/60 bg-gold/5' : 'border-border bg-surface hover:border-gold/40',
-                            focusRing,
-                          )}
-                        >
-                          <EmojiAvatar emoji={u.avatar_emoji} name={u.name ?? u.handle} size="sm" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[13px] font-medium text-text">
-                              {u.name ?? `@${u.handle}`}
-                            </span>
-                            <span className="block truncate font-mono text-[11px] text-text3">@{u.handle}</span>
-                          </span>
-                          {active && <Check className="h-3.5 w-3.5 shrink-0 text-gold" />}
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-text3">
-                  Optional. Unselected pins stay private.
-                </p>
-              </>
-            )}
+        {!conversationMode && chosenPlace && (
+          <section aria-label={t('share.copyLink')}>
+            <p className="break-all rounded-xl border border-border bg-surface px-3 py-2 font-mono text-[11.5px] text-text2">
+              {placeLink(chosenPlace)}
+            </p>
           </section>
         )}
 
-        {/* Note */}
+        {/* Note — conversation share only. Place mode copies a link. */}
+        {conversationMode && (
         <section aria-label="Note">
           <label htmlFor="share-pin-note" className="mb-2 block font-mono text-[11px] uppercase tracking-[0.14em] text-text3">
             Note
@@ -236,22 +192,38 @@ export function SharePinDialog({ place, conversationId, candidatePlaces = [], on
             className="w-full resize-none rounded-xl border border-border bg-surface px-3 py-2 text-[13px] text-text outline-none transition-[border-color,box-shadow] placeholder:text-text3 focus:border-gold/60 focus:ring-2 focus:ring-gold/20 motion-reduce:transition-none"
           />
         </section>
+        )}
 
         {error && <p className="text-[12px] text-danger" role="alert">{error}</p>}
 
         <div className="flex items-center gap-2">
+          {conversationMode ? (
           <button
             type="button"
             disabled={!chosenPlace || busy || done}
             onClick={() => void share()}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-full bg-gold px-4 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60',
+              'inline-flex h-9 items-center gap-1.5 rounded-full bg-gold px-4 text-[12px] font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60',
               focusRing,
             )}
           >
             {done ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
-            {done ? 'Shared' : busy ? 'Sharing…' : conversationMode ? 'Share to chat' : 'Share pin'}
+            {done ? 'Shared' : busy ? 'Sharing…' : 'Share to chat'}
           </button>
+          ) : (
+          <button
+            type="button"
+            disabled={!chosenPlace}
+            onClick={() => void copyLink()}
+            className={cn(
+              'inline-flex h-9 items-center gap-1.5 rounded-full bg-gold px-4 text-[12px] font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60',
+              focusRing,
+            )}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? t('share.copied') : t('share.copyLink')}
+          </button>
+          )}
           <button
             type="button"
             onClick={onClose}

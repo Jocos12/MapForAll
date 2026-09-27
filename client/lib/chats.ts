@@ -7,7 +7,7 @@
  * never exposes conversation content. Guests (no session) keep using
  * localStorage; only authenticated users get server-side history.
  */
-import { mcpSession, mcpCall, ensureConnected, extractDocs } from '@/lib/mcp'
+import { mcpConnected, mcpCall, extractDocs } from '@/lib/mcp'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
 
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
@@ -22,8 +22,7 @@ export interface StoredChat {
 }
 
 export async function listChats(userId: string): Promise<StoredChat[]> {
-  const sid = await mcpSession()
-  await ensureConnected(sid)
+  const sid = await mcpConnected()
   const docs = extractDocs(
     await mcpCall(sid, 'find', { database: DB, collection: COLLECTION, filter: { user_id: userId }, limit: MAX_CHATS }),
   )
@@ -47,8 +46,7 @@ export async function upsertChat(
   userId: string,
   chat: { sessionId: string; title: string; messages: unknown[]; updatedAt: number },
 ): Promise<void> {
-  const sid = await mcpSession()
-  await ensureConnected(sid)
+  const sid = await mcpConnected()
   await mcpCall(sid, 'update-many', {
     database: DB,
     collection: COLLECTION,
@@ -61,6 +59,7 @@ export async function upsertChat(
         data: encryptSecret(JSON.stringify(chat.messages)),
         updated_at: chat.updatedAt,
       },
+      $setOnInsert: { created_at: chat.updatedAt },
     },
     upsert: true,
   })
@@ -86,8 +85,7 @@ export async function upsertChat(
 }
 
 export async function deleteChat(userId: string, sessionId: string): Promise<void> {
-  const sid = await mcpSession()
-  await ensureConnected(sid)
+  const sid = await mcpConnected()
   await mcpCall(sid, 'delete-many', {
     database: DB, collection: COLLECTION, filter: { user_id: userId, session_id: sessionId },
   })

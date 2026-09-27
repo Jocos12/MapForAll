@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ conversations })
   } catch (err) {
     console.error('[community/conversations GET]', err)
-    return NextResponse.json({ error: 'Could not load conversations.' }, { status: 500 })
+    return NextResponse.json({ conversations: [], unavailable: true })
   }
 }
 

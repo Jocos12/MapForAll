@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { ExternalLink, Globe, MapPin, Star } from 'lucide-react'
+import { ExternalLink, Globe, Star, X } from 'lucide-react'
 import type { Place } from '@/lib/types'
+import { PlaceBadges } from './PlaceBadges'
 import { PlaceImage } from './PlaceImage'
 
 interface Props {
@@ -47,14 +48,14 @@ export function InlinePlaceGallery({ places, onDetails }: Props) {
             key={`${place.place_id || place.name}-${i}`}
             className="group overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-header)] shadow-[0_1px_8px_rgba(0,0,0,0.05)] transition-colors hover:border-[#F56A00]/40 dark:shadow-[0_1px_8px_rgba(0,0,0,0.4)]"
           >
-            <button
-              type="button"
-              onClick={() => onDetails?.(place)}
-              className="block w-full text-left"
-              title="See photos & details"
-            >
+            <div className="block w-full text-left">
               <GalleryPhoto place={place} />
-              <div className="px-3 pb-1.5 pt-2">
+              <button
+                type="button"
+                onClick={() => onDetails?.(place)}
+                className="block w-full px-3 pb-1.5 pt-2 text-left"
+                title="See photos & details"
+              >
                 <p className="line-clamp-1 text-[13px] font-medium leading-snug text-[var(--text-primary)]">
                   {place.name}
                 </p>
@@ -65,14 +66,15 @@ export function InlinePlaceGallery({ places, onDetails }: Props) {
                       {place.rating.toFixed(1)}
                     </span>
                   )}
+                  <PlaceBadges place={place} />
                   {place.open_now != null && (
                     <span className={`text-[10px] font-semibold ${place.open_now ? 'text-[#1FA463]' : 'text-[#E5484D]'}`}>
                       {place.open_now ? 'Open now' : 'Closed'}
                     </span>
                   )}
                 </div>
-              </div>
-            </button>
+              </button>
+            </div>
             <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-0.5">
               <button
                 type="button"
@@ -114,21 +116,121 @@ export function InlinePlaceGallery({ places, onDetails }: Props) {
 }
 
 function GalleryPhoto({ place }: { place: Place }) {
-  const [loaded, setLoaded] = useState(false)
+  const urls = (place.photos?.length ? place.photos : place.photo_url ? [place.photo_url] : []).slice(0, 4)
+  const [open, setOpen] = useState<number | null>(null)
+
+  if (urls.length === 0) {
+    return (
+      <div className="relative h-28 w-full overflow-hidden bg-black/5 dark:bg-white/5">
+        <PlaceImage place={place} width={440} height={240} className="h-full w-full object-cover" />
+      </div>
+    )
+  }
+
   return (
-    <div className="relative h-28 w-full overflow-hidden bg-black/5 dark:bg-white/5">
-      {!loaded && <div className="place-shimmer absolute inset-0" aria-hidden />}
-      <PlaceImage
-        place={place}
-        width={440}
-        height={240}
-        className="relative h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-        onLoad={() => setLoaded(true)}
-      />
-      <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-white backdrop-blur-sm">
-        <MapPin className="h-2.5 w-2.5" />
-        {place.city || 'Place'}
-      </span>
+    <>
+      <div className={`grid gap-0.5 ${urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        {urls.map((url, i) => (
+          <button
+            key={`${url}-${i}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              setOpen(i)
+            }}
+            className="relative h-24 overflow-hidden bg-black/5 dark:bg-white/5"
+            aria-label={`${place.name} photo ${i + 1}`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt="" className="h-full w-full object-cover" />
+          </button>
+        ))}
+      </div>
+      {open != null && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setOpen(null)}
+          role="dialog"
+          aria-label={place.name}
+        >
+          <button
+            type="button"
+            onClick={() => setOpen(null)}
+            aria-label="Close"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={urls[open]}
+            alt={place.name}
+            className="max-h-[80vh] max-w-full rounded-xl object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  )
+}
+
+/** Square-ish photo grid for a chat reply that actually has image URLs. */
+export function PhotoGallery({
+  placeName,
+  photos,
+  attribution,
+}: {
+  placeName: string
+  photos: string[]
+  attribution?: string
+}) {
+  const urls = photos.slice(0, 4)
+  const [open, setOpen] = useState<number | null>(null)
+  if (!urls.length) return null
+
+  return (
+    <div className="mt-3">
+      <div className={`grid gap-2 ${urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        {urls.map((url, i) => (
+          <button
+            key={`${url}-${i}`}
+            type="button"
+            onClick={() => setOpen(i)}
+            className="relative aspect-[4/3] overflow-hidden rounded-xl bg-black/5 dark:bg-white/5"
+            aria-label={`${placeName} photo ${i + 1}`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt="" className="h-full w-full object-cover" />
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[10px] text-[#8A7364] dark:text-gray-500">
+        {attribution ? `Photo : ${attribution}` : 'Photos : Google'}
+      </p>
+      {open != null && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setOpen(null)}
+          role="dialog"
+          aria-label={placeName}
+        >
+          <button
+            type="button"
+            onClick={() => setOpen(null)}
+            aria-label="Close"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={urls[open]}
+            alt={placeName}
+            className="max-h-[80vh] max-w-full rounded-xl object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   )
 }

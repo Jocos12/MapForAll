@@ -6,6 +6,7 @@ import {
   inviteConnection,
   respondConnection,
   getAttributions,
+  communityErrorMessage,
   type Connection,
 } from '@/lib/community'
 
@@ -37,8 +38,16 @@ export async function GET(req: NextRequest) {
       blocked: edges.filter((e) => e.status === 'blocked' && e.requester_id === uid).map(decorate),
     })
   } catch (err) {
-    console.error('[community/connections GET]', err)
-    return NextResponse.json({ error: 'Could not load connections.' }, { status: 500 })
+    const detail = err instanceof Error ? err.message : String(err)
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : ''
+    console.error('[community/connections GET]', detail, cause)
+    return NextResponse.json({
+      accepted: [],
+      pending_in: [],
+      pending_out: [],
+      blocked: [],
+      unavailable: true,
+    })
   }
 }
 
@@ -85,6 +94,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, connection: result.connection })
   } catch (err) {
     console.error('[community/connections POST]', err)
-    return NextResponse.json({ error: 'Request failed.' }, { status: 500 })
+    return NextResponse.json({ error: communityErrorMessage(err) }, { status: 500 })
   }
 }

@@ -81,7 +81,7 @@ export function VoiceOrb({
     : state === 'listening' ? 'Listening…'
     : state === 'thinking' ? 'Thinking…'
     : state === 'paused' ? 'Paused'
-    : 'Hodari is speaking…'
+    : 'MapForAll is speaking…'
 
   const showSpeechControls = state === 'speaking' || state === 'paused'
   const pulseScale = state === 'speaking' ? 1 + micLevel * 0.35 : 1
@@ -109,7 +109,7 @@ export function VoiceOrb({
             <button
               type="button"
               onClick={onPause}
-              aria-label="Pause Hodari speaking"
+              aria-label="Pause MapForAll speaking"
               className="ml-0.5 text-text2 hover:text-text"
             >
               <Pause className="h-3 w-3" />
@@ -214,7 +214,7 @@ export function VoiceOrb({
             <button
               type="button"
               onClick={onPause}
-              aria-label="Pause Hodari speaking"
+              aria-label="Pause MapForAll speaking"
               className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-header)] text-[var(--text-primary)] shadow-sm transition-colors hover:border-amber-300 hover:bg-amber-50"
             >
               <Pause className="h-4 w-4" />
@@ -224,7 +224,7 @@ export function VoiceOrb({
             <button
               type="button"
               onClick={onResume}
-              aria-label="Resume Hodari speaking"
+              aria-label="Resume MapForAll speaking"
               className="flex h-10 w-10 items-center justify-center rounded-full border border-amber-500 bg-amber-500 text-white shadow-sm transition-colors hover:bg-amber-600"
             >
               <Play className="h-4 w-4" />

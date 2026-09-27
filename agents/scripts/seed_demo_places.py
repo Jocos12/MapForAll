@@ -81,14 +81,42 @@ DEMO_PLACES = [
     _place("kgl_poivre", "Poivre Noir", "restaurant", -1.9551, 30.1049, local_business=False, accessible=False, summary="Formal dining room. Not step-free.", rating=4.4),
     _place("kgl_shokola", "Shokola", "cafe", -1.9488, 30.1042, local_business=True, accessible=True, summary="Independent chocolate and coffee shop. Ground floor.", rating=4.5),
     _place("kgl_nyarugenge", "Nyarugenge Market", "market", -1.9468, 30.0584, local_business=True, accessible=False, summary="Busy informal market in Nyarugenge.", rating=4.3),
-    _place("kgl_ubumwe", "Ubumwe Grande Hotel", "attraction", -1.9482, 30.0921, local_business=False, accessible=True, summary="Formal hotel with lift and accessible rooms.", rating=4.4),
+    _place("kgl_ubumwe", "Ubumwe Grande Hotel", "hotel", -1.9482, 30.0921, local_business=False, accessible=True, summary="Formal hotel with lift and accessible rooms.", rating=4.4),
+    _place("kgl_marriott", "Kigali Marriott Hotel", "hotel", -1.9536, 30.0926, local_business=False, accessible=True, summary="City-centre hotel with a step-free lobby and lifts.", rating=4.5),
+    _place("kgl_radisson", "Radisson Blu Hotel Kigali", "hotel", -1.9544, 30.0942, local_business=False, accessible=True, summary="Hotel beside the convention centre. Lifts and accessible rooms.", rating=4.5),
+    _place("kgl_mille_collines", "Hôtel des Mille Collines", "hotel", -1.9449, 30.0617, local_business=False, accessible=True, summary="Historic city hotel with a level main entrance.", rating=4.4),
+    _place("kgl_park_inn", "Park Inn by Radisson Kigali", "hotel", -1.9441, 30.0896, local_business=False, accessible=True, summary="Hotel at Kigali Heights. Lift from the street.", rating=4.3),
+    _place("kgl_legacy", "Legacy Clinics", "clinic", -1.9496, 30.1042, local_business=True, accessible=True, summary="Neighbourhood clinic with a step-free entrance.", rating=4.2),
     _place("kgl_kimihurura", "Kimihurura Craft Stalls", "shop", -1.9486, 30.0884, local_business=True, accessible=False, summary="Roadside craft sellers. Informal, no step-free path.", rating=4.2),
-    _place("kgl_pharmacie", "Pharmacie Conseil", "shop", -1.9432, 30.0596, local_business=True, accessible=True, summary="Neighbourhood pharmacy with a level entrance.", rating=4.3),
+    _place("kgl_pharmacie", "Pharmacie Conseil", "pharmacy", -1.9432, 30.0596, local_business=True, accessible=True, summary="Neighbourhood pharmacy with a level entrance.", rating=4.3),
     _place("kgl_kcc", "Kigali Convention Centre", "attraction", -1.9546, 30.0936, local_business=False, accessible=True, summary="Formal venue. Lifts and accessible washrooms.", rating=4.6),
     _place("kgl_muhima", "Muhima Market", "market", -1.9364, 30.0589, local_business=True, accessible=False, summary="Informal market serving Muhima.", rating=4.2),
     _place("kgl_ikaze", "Ikaze Cooperative", "shop", -1.9602, 30.0784, local_business=True, accessible=True, summary="Local producers' cooperative shop. Step-free counter.", rating=4.6),
     _place("kgl_sawa", "Sawa Citi", "restaurant", -1.9518, 30.0914, local_business=False, accessible=False, summary="Formal chain restaurant.", rating=4.1),
 ]
+
+
+# toilet, parking, community confirmations. Entrance follows `accessible`.
+ACCESS_DETAIL: dict[str, tuple[bool, bool, int]] = {
+    "kgl_gisozi": (True, True, 8),
+    "kgl_kcc": (True, True, 7),
+    "kgl_ubumwe": (True, True, 5),
+    "kgl_marriott": (True, True, 6),
+    "kgl_radisson": (True, True, 5),
+    "kgl_mille_collines": (True, True, 4),
+    "kgl_park_inn": (True, True, 3),
+    "kgl_legacy": (True, False, 2),
+    "kgl_bourbon": (True, True, 4),
+    "kgl_amahoro": (True, True, 4),
+    "kgl_library": (True, False, 5),
+    "kgl_heaven": (True, False, 3),
+    "kgl_question": (True, False, 4),
+    "kgl_nyamirambo_wc": (True, False, 6),
+    "kgl_inema": (False, False, 3),
+    "kgl_pharmacie": (False, False, 3),
+    "kgl_ikaze": (False, False, 4),
+    "kgl_shokola": (False, False, 3),
+}
 
 
 def main() -> None:
@@ -99,6 +127,10 @@ def main() -> None:
     client = MongoClient(uri, serverSelectionTimeoutMS=15_000)
     col = client[db_name]["places"]
     for place in DEMO_PLACES:
+        toilet, parking, confirmed = ACCESS_DETAIL.get(place["place_id"], (False, False, 2 if place["accessible"] else 0))
+        place["access"] = {"entrance": place["accessible"], "toilet": toilet, "parking": parking}
+        place["access_confirmations"] = confirmed
+        place["access_disputes"] = 0
         col.update_one({"place_id": place["place_id"]}, {"$set": place}, upsert=True)
         print(f"upserted {place['place_id']} — {place['name']}")
     print(f"{len(DEMO_PLACES)} Kigali demo places ready")

@@ -1,6 +1,8 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Check } from 'lucide-react'
+import { useI18n } from '@/components/I18nProvider'
 
 const DOT_TONES = ['#FFA94D', '#FF8C2F', '#F56A00']
 
@@ -38,7 +40,7 @@ export function TypingIndicator() {
   return (
     <div
       className="inline-flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-gray-200/80 bg-white px-4 py-3.5 shadow-[0_2px_12px_rgba(0,0,0,0.05)] dark:border-white/[0.08] dark:bg-[#15151a] dark:shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
-      aria-label="Hodari is thinking"
+      aria-label="MapForAll is thinking"
     >
       <WaveDots />
       <style>{TYPING_STYLE}</style>
@@ -52,23 +54,43 @@ function cleanLabel(label: string): string {
   return label.replace(/^[\s✓✔•\-–]+/, '').trim()
 }
 
+const PROFILE_STEP = 'Loading your profile'
+const STUCK_MS = 5000
+
 /**
  * Live "thinking" trace: each pipeline step the AI reports becomes a line.
  * Finished steps get a check; the most recent step is the current action and
  * shows the animated wave dots after its text — text, dots, then the next text,
  * until generation finishes. Falls back to plain dots before any step arrives.
+ * A profile step that does not move within 5 seconds becomes a clear error.
  */
 export function ThinkingTrace({ steps }: { steps: string[] }) {
+  const { t } = useI18n()
+  const [stuck, setStuck] = useState(false)
+  const signature = steps.join('\n')
+
+  useEffect(() => {
+    setStuck(false)
+    const id = window.setTimeout(() => setStuck(true), STUCK_MS)
+    return () => window.clearTimeout(id)
+  }, [signature])
+
   const cleaned = steps.map(cleanLabel).filter(Boolean)
   if (cleaned.length === 0) return <TypingIndicator />
 
-  const current = cleaned[cleaned.length - 1]
-  const done = cleaned.slice(0, -1)
+  const rawCurrent = cleaned[cleaned.length - 1]
+  const profileStuck = stuck && rawCurrent === PROFILE_STEP
+  const current = profileStuck
+    ? t('thinking.profileUnavailable')
+    : rawCurrent === PROFILE_STEP
+      ? t('thinking.profile')
+      : rawCurrent
+  const done = cleaned.slice(0, -1).map((label) => (label === PROFILE_STEP ? t('thinking.profile') : label))
 
   return (
     <div
       className="inline-flex max-w-full flex-col gap-1.5 rounded-2xl rounded-tl-md border border-gray-200/80 bg-white px-4 py-3 shadow-[0_2px_12px_rgba(0,0,0,0.05)] dark:border-white/[0.08] dark:bg-[#15151a] dark:shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
-      aria-label={`Hodari is ${current}`}
+      aria-label={current}
       aria-live="polite"
     >
       {done.map((label, i) => (
@@ -82,7 +104,7 @@ export function ThinkingTrace({ steps }: { steps: string[] }) {
       ))}
       <div className="flex items-center gap-2 text-[13px] font-medium text-gray-800 dark:text-gray-100">
         <span>{current}</span>
-        <WaveDots />
+        {!profileStuck && <WaveDots />}
       </div>
       <style>{TYPING_STYLE}</style>
     </div>

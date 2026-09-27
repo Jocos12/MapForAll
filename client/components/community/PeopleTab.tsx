@@ -42,6 +42,8 @@ export interface PeopleTabProps {
   openingDm?: string | null
   /** Optional hook into the profile sheet (wired by the integration agent). */
   onOpenProfile?: (handle: string) => void
+  /** True when the connections request failed — show unavailable, not an endless loader. */
+  unavailable?: boolean
 }
 
 type SearchMode = 'query' | 'near'
@@ -58,6 +60,7 @@ export function PeopleTab({
   onMessage,
   openingDm,
   onOpenProfile,
+  unavailable = false,
 }: PeopleTabProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<UserSummary[] | null>(null)
@@ -349,11 +352,13 @@ export function PeopleTab({
       {/* Connections */}
       <section aria-label="Connections">
         <p className={SECTION}>Connections</p>
-        {connections === null ? (
+        {connections === null && !unavailable ? (
           <div className="flex items-center gap-2.5 py-3">
             <div className="thinking-ring" />
             <span className="text-[11px] tracking-wide text-text2">Loading…</span>
           </div>
+        ) : unavailable ? (
+          <p className="py-3 text-[12.5px] leading-relaxed text-text3">Indisponible</p>
         ) : accepted.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-4 py-6 text-center">
             <Users className="h-5 w-5 text-text3" aria-hidden />

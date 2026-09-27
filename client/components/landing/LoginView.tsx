@@ -1,81 +1,178 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Loader2, MapPin, Star, Utensils } from 'lucide-react'
-import {
-  EASE,
-  HodariLogo,
-  LiveClock,
-  RollText,
-  ThemeToggle,
-  useLandingTheme,
-} from '@/components/landing/bits'
-import HeroMap from '@/components/landing/HeroMap'
+import { useRouter } from 'next/navigation'
+import { AlertCircle, Check, Compass, Eye, EyeOff, Loader2, Store } from 'lucide-react'
+import TrailMap from '@/components/landing/TrailMap'
+import { useI18n } from '@/components/I18nProvider'
 
-const VALUE_POINTS = [
-  { Icon: MapPin, text: 'Grounded by Google Maps, real places, never invented' },
-  { Icon: Utensils, text: 'Restaurant-first plans built around your match days' },
-  { Icon: Star, text: 'Learns your taste with every trip' },
-]
-
-const ERROR_MESSAGES: Record<string, string> = {
-  oauth_unconfigured: 'Google sign-in is not set up yet. Please try again soon.',
-  oauth_state: 'Your sign-in session expired. Please try again.',
-  oauth_denied: 'Sign-in was cancelled.',
-  oauth_email: 'Could not get a verified email from Google.',
-  oauth_token: 'Sign-in failed. Please try again.',
-  oauth_failed: 'Sign-in failed. Please try again.',
-  rate: 'Too many attempts. Please wait a moment and try again.',
+const ERROR_CODES: Record<string, string> = {
+  oauth_unconfigured: 'auth.errors.generic',
+  oauth_state: 'auth.errors.generic',
+  oauth_denied: 'auth.errors.generic',
+  oauth_email: 'auth.errors.generic',
+  oauth_token: 'auth.errors.generic',
+  oauth_failed: 'auth.errors.generic',
+  rate: 'auth.errors.rate',
 }
 
-/** Google "G" mark. */
-function GoogleMark() {
+type Mode = 'login' | 'signup'
+type FieldErrors = { name?: string; email?: string; password?: string; role?: string; form?: string }
+type PublicRole = 'client' | 'business_owner'
+
+const MODES: Mode[] = ['login', 'signup']
+/** y of each branch end in the fork drawing; matches the centre of each tab row. */
+const FORK_ENDS = [14, 62]
+
+function BrandMark() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
-      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.34A9 9 0 0 0 9 18Z" />
-      <path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.94H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.06l3.01-2.34Z" />
-      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.94l3.01 2.34C4.68 5.16 6.66 3.58 9 3.58Z" />
+    <svg width="30" height="36" viewBox="0 0 30 36" aria-hidden className="shrink-0">
+      <path d="M15 35 C11 27 2 22 2 13.5 A13 13 0 1 1 28 13.5 C28 22 19 27 15 35 Z" fill="var(--ink)" />
+      <circle cx="15" cy="13.5" r="5" fill="var(--clay)" />
     </svg>
   )
 }
 
-export default function LoginView() {
-  const { dark, toggle } = useLandingTheme()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+/**
+ * Sign in / Create account drawn as a fork in a trail: one stem, two branches,
+ * the chosen branch inked in clay. Behaves as a vertical tablist.
+ */
+function TrailFork({ mode, onChange, label, tabs }: { mode: Mode; onChange: (m: Mode) => void; label: string; tabs: Record<Mode, string> }) {
+  const refs = useRef<Array<HTMLButtonElement | null>>([])
+  const active = MODES.indexOf(mode)
 
-  // Email/password form state.
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  function onKey(e: KeyboardEvent<HTMLButtonElement>) {
+    const moves: Record<string, number> = { ArrowUp: 1 - active, ArrowDown: 1 - active, ArrowLeft: 1 - active, ArrowRight: 1 - active, Home: 0, End: 1 }
+    if (!(e.key in moves)) return
+    e.preventDefault()
+    const next = moves[e.key]
+    onChange(MODES[next])
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div className="flex h-[76px] items-stretch">
+      <svg width="88" height="76" viewBox="0 0 88 76" aria-hidden className="shrink-0">
+        <path d="M8 38 H30" stroke="var(--ink)" strokeWidth="2.5" strokeDasharray="0.1 6" strokeLinecap="round" />
+        {FORK_ENDS.map((y, i) => {
+          const on = i === active
+          return (
+            <g key={y}>
+              <path
+                d={`M30 38 C48 38 50 ${y} 76 ${y}`}
+                fill="none"
+                stroke={on ? 'var(--clay)' : 'var(--line)'}
+                strokeWidth={on ? 3 : 2.5}
+                strokeDasharray="0.1 6"
+                strokeLinecap="round"
+                className="transition-[stroke] duration-200 motion-reduce:transition-none"
+              />
+              <circle
+                cx="80"
+                cy={y}
+                r={on ? 5 : 3.5}
+                fill={on ? 'var(--clay)' : 'var(--paper)'}
+                stroke={on ? 'var(--clay)' : 'var(--ink-soft)'}
+                strokeWidth="1.5"
+              />
+            </g>
+          )
+        })}
+        <circle cx="8" cy="38" r="4.5" fill="var(--ink)" />
+      </svg>
+      <div role="tablist" aria-label={label} aria-orientation="vertical" className="flex flex-col justify-between">
+        {MODES.map((id, i) => {
+          const on = i === active
+          return (
+            <button
+              key={id}
+              ref={(el) => { refs.current[i] = el }}
+              type="button"
+              role="tab"
+              id={`pp-tab-${id}`}
+              aria-selected={on}
+              aria-controls="pp-auth-panel"
+              tabIndex={on ? 0 : -1}
+              onClick={() => onChange(id)}
+              onKeyDown={onKey}
+              className={`pp-focus h-7 rounded-md px-1.5 text-left text-[15px] leading-7 transition-colors duration-150 ${on ? 'font-semibold text-pp-ink' : 'font-medium text-pp-ink-soft hover:text-pp-ink'}`}
+            >
+              {tabs[id]}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function FieldError({ id, children }: { id: string; children?: ReactNode }) {
+  if (!children) return null
+  return (
+    <p id={id} role="alert" className="mt-1.5 flex items-start gap-1.5 text-[13px] leading-snug text-pp-error">
+      <AlertCircle size={14} className="mt-px shrink-0" aria-hidden />
+      {children}
+    </p>
+  )
+}
+
+export default function LoginView({ googleEnabled = false }: { googleEnabled?: boolean }) {
+  const router = useRouter()
+  const { t } = useI18n()
+  const [busy, setBusy] = useState(false)
+  const [mode, setMode] = useState<Mode>('login')
+  const [role, setRole] = useState<PublicRole>('client')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [formBusy, setFormBusy] = useState(false)
+  const [forgot, setForgot] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [fields, setFields] = useState<FieldErrors>({})
 
-  // Surface OAuth errors passed back as ?error=… on the redirect.
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get('error')
-    if (code) setError(ERROR_MESSAGES[code] ?? 'Sign-in failed. Please try again.')
-  }, [])
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('error')
+    if (!code) return
+    if (!googleEnabled && code.startsWith('oauth_')) {
+      router.replace('/login')
+      return
+    }
+    const key = ERROR_CODES[code] ?? 'auth.errors.generic'
+    setFields({ form: t(key) })
+  }, [googleEnabled, router, t])
 
-  const signInWithGoogle = () => {
-    setBusy(true)
-    window.location.href = '/api/auth/google'
+  const signup = mode === 'signup'
+  const longEnough = password.length >= 8
+
+  function switchMode(next: Mode) {
+    setMode(next)
+    setFields({})
+    setForgot(false)
   }
 
-  const toggleMode = () => {
-    setMode((m) => (m === 'login' ? 'signup' : 'login'))
-    setError(null)
+  function messageFor(data: { code?: string; error?: string }) {
+    if (data.code && data.code !== 'invalid') return t(`auth.errors.${data.code}`)
+    return data.error || t('auth.errors.generic')
   }
 
   async function submitEmail(e: FormEvent) {
     e.preventDefault()
-    setError(null)
+    const next: FieldErrors = {}
+    if (signup && !name.trim()) next.name = t('auth.errors.name_required')
+    if (!email.includes('@')) next.email = t('auth.errors.invalid_email')
+    if (signup && !longEnough) next.password = t('auth.errors.weak_password')
+    if (!signup && !password) next.password = t('auth.errors.bad_credentials')
+    if (Object.keys(next).length > 0) {
+      setFields(next)
+      return
+    }
+    setFields({})
     setFormBusy(true)
     try {
-      const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login'
-      const payload = mode === 'signup' ? { name, email, password } : { email, password }
+      const endpoint = signup ? '/api/auth/signup' : '/api/auth/login'
+      const payload = signup ? { name, email, password, role } : { email, password }
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -83,170 +180,264 @@ export default function LoginView() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(data.error ?? 'Something went wrong. Please try again.')
+        const msg = messageFor(data)
+        const code = data.code as string | undefined
+        if (code === 'bad_credentials' || code === 'weak_password') setFields({ password: msg })
+        else if (code === 'invalid_email' || code === 'email_taken') setFields({ email: msg })
+        else if (code === 'name_required') setFields({ name: msg })
+        else if (code === 'role_required') setFields({ role: msg })
+        else setFields({ form: msg })
         setFormBusy(false)
         return
       }
-      window.location.href = '/chat'
+      window.location.href = typeof data.redirect === 'string' ? data.redirect : '/chat'
     } catch {
-      setError('Network error. Please try again.')
+      setFields({ form: t('auth.errors.network') })
       setFormBusy(false)
     }
   }
 
+  const roles = [
+    { id: 'client' as const, title: t('auth.clientTitle'), body: t('auth.clientBody'), Icon: Compass },
+    { id: 'business_owner' as const, title: t('auth.ownerTitle'), body: t('auth.ownerBody'), Icon: Store },
+  ]
+
   return (
-    <div className="relative flex h-screen flex-col overflow-y-auto overflow-x-hidden bg-[#EFEFEF] dark:bg-[#0a0a0d]">
-      {/* Same cinematic night-map treatment as the landing hero — the sign-in
-          card floats over its right edge on large screens. */}
-      <HeroMap className="absolute right-[-35%] top-[-2%] w-[min(85vw,420px)] sm:right-[-8%] sm:top-1/2 sm:-translate-y-1/2 sm:w-[min(56vh,540px)] lg:right-[2%] lg:w-[min(62vh,600px)] xl:right-[4%]" />
-      {/* Readability veil under the content */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[36%] bg-gradient-to-b from-transparent to-[#EFEFEF]/95 dark:to-[#0a0a0d]/95" />
-
-      {/* Minimal nav */}
-      <header className="relative z-20 mx-auto w-full max-w-[1440px] p-2 sm:p-3">
-        <nav className="flex items-center justify-between rounded-full bg-white p-[5px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:bg-[#15151a] dark:shadow-[0_2px_12px_rgba(0,0,0,0.5)]">
-          <Link href="/" className="flex items-center gap-2.5 pl-1">
-            <HodariLogo />
-            <span className="text-[14px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">Hodari</span>
-          </Link>
-          <div className="flex items-center gap-3 sm:gap-4">
-            <span className="hidden md:block">
-              <LiveClock />
-            </span>
-            <ThemeToggle dark={dark} onToggle={toggle} />
-            <Link
-              href="/"
-              className="group flex items-center gap-2 rounded-full bg-gray-900 py-2 pl-3 pr-4 text-[13px] font-medium text-white dark:bg-white dark:text-gray-900"
-            >
-              <ArrowLeft size={13} className={`transition-transform duration-500 ${EASE} group-hover:-translate-x-0.5`} />
-              <RollText>Back home</RollText>
-            </Link>
-          </div>
-        </nav>
-      </header>
-
-      {/* Two-column composition: welcome copy left, sign-in card right.
-          On mobile the card stacks first so signing in stays one thumb away. */}
-      <main className="relative z-20 mx-auto grid w-full max-w-[1440px] flex-1 content-center items-center gap-x-10 gap-y-12 px-5 pb-14 pt-6 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,460px)] lg:gap-x-20 lg:px-12 lg:pb-16">
-
-        {/* Welcome copy */}
-        <div className="order-2 max-w-[560px] lg:order-1">
-          <p className="animate-[fadeUp_0.7s_0.05s_both] motion-reduce:animate-none text-[13px] tracking-wide text-gray-900 dark:text-gray-200 sm:text-[14px]">
-            Hodari · 2026 FIFA World Cup
-          </p>
-          <h1 className="mt-4 max-w-[16ch] animate-[fadeUp_0.8s_0.18s_both] motion-reduce:animate-none font-display font-semibold leading-[1.08] tracking-[-0.02em] text-gray-900 dark:text-gray-50 text-[clamp(1.8rem,5.6vw,3.4rem)] sm:text-[clamp(2.1rem,4vw,3.4rem)]">
-            Your next great meal is already on the map.
-          </h1>
-          <p className="mt-5 max-w-[48ch] animate-[fadeUp_0.8s_0.32s_both] motion-reduce:animate-none text-[14px] leading-relaxed text-gray-600 dark:text-gray-300 sm:text-[15px]">
-            Your taste, dietary needs and saved places live in your fan
-            profile, so every meal plan fits you, on match days and every day
-            after.
-          </p>
-
-          <ul className="mt-8 animate-[fadeUp_0.8s_0.46s_both] motion-reduce:animate-none space-y-3.5">
-            {VALUE_POINTS.map(({ Icon, text }) => (
-              <li key={text} className="flex items-center gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F56A00]/10 text-[#F56A00]">
-                  <Icon size={15} />
+    <div className="pp-root h-dvh overflow-y-auto">
+      <div className="grid min-h-full lg:grid-cols-[minmax(460px,540px)_1fr]">
+        <div className="pp-sheet-wrap relative z-10 lg:-mr-4">
+          <div className="pp-sheet pp-paper flex min-h-dvh flex-col px-6 pb-10 pt-6 sm:px-10 lg:pr-16">
+            <header className="flex items-center justify-between gap-4">
+              <Link href="/" className="pp-focus flex items-center gap-2.5 rounded-md">
+                <BrandMark />
+                <span className="leading-tight">
+                  <span className="pp-serif block text-[20px] font-semibold">MapForAll</span>
+                  <span className="block text-[12.5px] text-pp-ink-soft">Ikarita ya Bose</span>
                 </span>
-                <span className="text-[13px] text-gray-700 dark:text-gray-300 sm:text-[14px]">{text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Sign-in card */}
-        <div className="order-1 w-full max-w-[460px] animate-[fadeUp_0.8s_0.12s_both] motion-reduce:animate-none justify-self-center rounded-3xl bg-white p-7 shadow-[0_24px_80px_rgba(0,0,0,0.16),0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/5 dark:bg-[#131318] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65),0_2px_12px_rgba(0,0,0,0.5)] dark:ring-white/10 sm:p-9 lg:order-2 lg:justify-self-end">
-          <h2 className="font-display text-[24px] font-semibold leading-[1.12] tracking-[-0.01em] text-gray-900 dark:text-gray-50 sm:text-[26px]">
-            {mode === 'signup' ? 'Create your account.' : 'Sign in to Hodari.'}
-          </h2>
-          <p className="mt-2 text-[13px] leading-relaxed text-gray-500 dark:text-gray-400">
-            {mode === 'signup'
-              ? 'Sign up with your email, or continue with Google. Your fan profile follows your account.'
-              : 'Continue with your email or Google. Your fan profile and saved places follow your account.'}
-          </p>
-
-          <div className="mt-7 space-y-4">
-            {error && (
-              <p className="text-[13px] text-[#e05a1a]" role="alert">{error}</p>
-            )}
-
-            <form onSubmit={submitEmail} className="space-y-3">
-              {mode === 'signup' && (
-                <input
-                  type="text"
-                  autoComplete="name"
-                  required
-                  placeholder="Your name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#F56A00] dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:placeholder:text-gray-500"
-                />
-              )}
-              <input
-                type="email"
-                autoComplete="email"
-                required
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#F56A00] dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:placeholder:text-gray-500"
-              />
-              <input
-                type="password"
-                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                required
-                minLength={mode === 'signup' ? 8 : undefined}
-                placeholder={mode === 'signup' ? 'Password (min. 8 characters)' : 'Password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#F56A00] dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:placeholder:text-gray-500"
-              />
-              <button
-                type="submit"
-                disabled={formBusy}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-[#F56A00] py-3.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#e05a1a] disabled:cursor-wait disabled:opacity-70"
+              </Link>
+              <Link
+                href="/"
+                className="pp-focus rounded-md text-[14px] font-medium text-pp-ink-soft underline decoration-pp-line decoration-1 underline-offset-4 transition-colors duration-150 hover:text-pp-ink hover:decoration-pp-clay"
               >
-                {formBusy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" />}
-                {formBusy
-                  ? mode === 'signup' ? 'Creating account…' : 'Signing in…'
-                  : mode === 'signup' ? 'Create account' : 'Sign in'}
-              </button>
-            </form>
+                {t('auth.back')}
+              </Link>
+            </header>
 
-            <div className="flex items-center gap-3 py-1">
-              <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
-              <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">or</span>
-              <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
-            </div>
+            <main className="mt-auto w-full max-w-[400px] pt-14">
+              <TrailFork
+                mode={mode}
+                onChange={switchMode}
+                label={t('auth.forkLabel')}
+                tabs={{ login: t('auth.signIn'), signup: t('auth.signUp') }}
+              />
 
-            <button
-              type="button"
-              onClick={signInWithGoogle}
-              disabled={busy}
-              className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-300 bg-white py-3.5 text-[14px] font-medium text-gray-700 shadow-sm transition-colors duration-200 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-70 dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
-            >
-              {busy ? (
-                <Loader2 size={16} className="animate-spin motion-reduce:animate-none" />
-              ) : (
-                <GoogleMark />
-              )}
-              {busy ? 'Redirecting to Google…' : 'Continue with Google'}
-            </button>
+              <div id="pp-auth-panel" role="tabpanel" aria-labelledby={`pp-tab-${mode}`}>
+                <h1 className="pp-serif mt-7 text-[34px] font-semibold leading-[1.08] tracking-[-0.01em] sm:text-[38px]">
+                  {signup ? t('auth.joinTitle') : t('auth.welcome')}
+                </h1>
+                <p className="mt-2.5 text-[15px] leading-relaxed text-pp-ink-soft">
+                  {signup ? t('auth.createBody') : t('auth.welcomeBody')}
+                </p>
 
-            <p className="text-center text-[13px] text-gray-500 dark:text-gray-400">
-              {mode === 'signup' ? 'Already have an account?' : 'New to Hodari?'}{' '}
-              <button
-                type="button"
-                onClick={toggleMode}
-                className="font-semibold text-[#F56A00] hover:underline"
-              >
-                {mode === 'signup' ? 'Sign in' : 'Create an account'}
-              </button>
-            </p>
+                <form onSubmit={submitEmail} className="mt-7 space-y-5" noValidate>
+                  {signup && (
+                    <fieldset>
+                      <legend className="mb-2 text-[13px] font-medium">{t('auth.roleLegend')}</legend>
+                      <div className="grid grid-cols-2 gap-3">
+                        {roles.map(({ id, title, body, Icon }) => {
+                          const on = role === id
+                          return (
+                            <label
+                              key={id}
+                              className={`relative flex cursor-pointer flex-col rounded-xl border p-3.5 transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-pp-clay ${on ? 'border-pp-clay bg-pp-paper-dark' : 'border-pp-line hover:border-[#B3A487] hover:bg-pp-field'}`}
+                            >
+                              <input type="radio" name="role" value={id} checked={on} onChange={() => setRole(id)} className="sr-only" />
+                              <span className="flex items-center justify-between">
+                                <Icon size={20} strokeWidth={1.75} className={on ? 'text-pp-clay' : 'text-pp-ink-soft'} aria-hidden />
+                                <span
+                                  aria-hidden
+                                  className={`h-4 w-4 rounded-full border transition-colors duration-150 ${on ? 'border-pp-clay bg-pp-clay shadow-[inset_0_0_0_3px_var(--paper-dark)]' : 'border-pp-line bg-pp-field'}`}
+                                />
+                              </span>
+                              <span className="mt-3 text-[14px] font-semibold leading-snug">{title}</span>
+                              <span className="mt-1 text-[13px] leading-snug text-pp-ink-soft">{body}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                      <FieldError id="pp-role-error">{fields.role}</FieldError>
+                    </fieldset>
+                  )}
+
+                  {signup && (
+                    <div>
+                      <label htmlFor="pp-name" className="mb-1.5 block text-[13px] font-medium">{t('auth.name')}</label>
+                      <input
+                        id="pp-name"
+                        type="text"
+                        autoComplete="name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        aria-invalid={Boolean(fields.name)}
+                        aria-describedby={fields.name ? 'pp-name-error' : undefined}
+                        className="pp-field"
+                      />
+                      <FieldError id="pp-name-error">{fields.name}</FieldError>
+                    </div>
+                  )}
+
+                  <div>
+                    <label htmlFor="pp-email" className="mb-1.5 block text-[13px] font-medium">{t('auth.email')}</label>
+                    <input
+                      id="pp-email"
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      aria-invalid={Boolean(fields.email)}
+                      aria-describedby={fields.email ? 'pp-email-error' : undefined}
+                      className="pp-field"
+                    />
+                    <FieldError id="pp-email-error">{fields.email}</FieldError>
+                  </div>
+
+                  <div>
+                    <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                      <label htmlFor="pp-password" className="text-[13px] font-medium">{t('auth.password')}</label>
+                      {!signup && (
+                        <button
+                          type="button"
+                          onClick={() => setForgot((v) => !v)}
+                          aria-expanded={forgot}
+                          aria-controls="pp-forgot"
+                          className="pp-focus rounded text-[13px] font-medium text-pp-clay underline-offset-4 hover:underline"
+                        >
+                          {t('auth.forgot')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="pp-password"
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete={signup ? 'new-password' : 'current-password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        aria-invalid={Boolean(fields.password)}
+                        aria-describedby={[signup ? 'pp-password-rules' : '', fields.password ? 'pp-password-error' : ''].filter(Boolean).join(' ') || undefined}
+                        className="pp-field pr-12"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
+                        aria-pressed={showPassword}
+                        className="pp-focus absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-pp-ink-soft transition-colors duration-150 hover:text-pp-ink"
+                      >
+                        {showPassword ? <EyeOff size={17} aria-hidden /> : <Eye size={17} aria-hidden />}
+                      </button>
+                    </div>
+                    {signup && (
+                      <ul id="pp-password-rules" className="mt-2">
+                        <li className={`flex items-center gap-2 text-[13px] transition-colors duration-150 ${longEnough ? 'text-pp-ink' : 'text-pp-ink-soft'}`}>
+                          <span
+                            aria-hidden
+                            className={`flex h-4 w-4 items-center justify-center rounded-full border transition-colors duration-150 ${longEnough ? 'border-pp-ink bg-pp-ink text-pp-paper' : 'border-pp-line bg-pp-field'}`}
+                          >
+                            {longEnough && <Check size={11} strokeWidth={3} />}
+                          </span>
+                          {t('auth.passwordHint')}
+                          <span className="sr-only">{longEnough ? t('auth.ruleMet') : t('auth.ruleUnmet')}</span>
+                        </li>
+                      </ul>
+                    )}
+                    <FieldError id="pp-password-error">{fields.password}</FieldError>
+                    {forgot && !signup && (
+                      <p id="pp-forgot" className="mt-2 rounded-lg bg-pp-paper-dark px-3 py-2 text-[13px] leading-relaxed text-pp-ink-soft">
+                        {t('auth.forgotHint')}
+                      </p>
+                    )}
+                  </div>
+
+                  <FieldError id="pp-form-error">{fields.form}</FieldError>
+
+                  <button
+                    type="submit"
+                    disabled={formBusy}
+                    className="pp-primary pp-focus flex w-full items-center justify-center gap-2 py-3.5 text-[15px] font-semibold disabled:opacity-70"
+                  >
+                    {formBusy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" aria-hidden />}
+                    {formBusy ? (signup ? t('auth.busyUp') : t('auth.busyIn')) : (signup ? t('auth.submitUp') : t('auth.submitIn'))}
+                  </button>
+                </form>
+
+                {googleEnabled && (
+                  <>
+                    <div className="my-5 flex items-center gap-3 text-[13px] text-pp-ink-soft">
+                      <span className="h-px flex-1 bg-pp-line" />
+                      {t('auth.or')}
+                      <span className="h-px flex-1 bg-pp-line" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setBusy(true); window.location.href = '/api/auth/google' }}
+                      disabled={busy}
+                      className="pp-focus flex w-full items-center justify-center gap-2 rounded-[10px] border border-pp-line bg-pp-field py-3 text-[15px] font-medium transition-colors duration-150 hover:border-pp-ink disabled:opacity-70"
+                    >
+                      {busy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" aria-hidden />}
+                      {busy ? t('auth.googleBusy') : t('auth.google')}
+                    </button>
+                  </>
+                )}
+              </div>
+            </main>
           </div>
         </div>
-      </main>
+
+        <div className="relative hidden overflow-hidden bg-pp-paper-dark lg:sticky lg:top-0 lg:block lg:h-dvh" aria-hidden>
+          <TrailMap
+            labels={{
+              start: t('auth.map.start'),
+              market: t('auth.map.market'),
+              pharmacy: t('auth.map.pharmacy'),
+              shop: 'Duka rya Jean',
+              confirmed: t('auth.map.confirmed'),
+            }}
+          />
+          <div className="absolute bottom-8 left-12 rounded-md border border-pp-line bg-pp-paper px-4 py-3 text-[12.5px] text-pp-ink">
+            <p className="pp-serif text-[17px] italic">Kigali</p>
+            <ul className="mt-2 space-y-1.5">
+              <li className="flex items-center gap-2.5">
+                <svg width="28" height="6" viewBox="0 0 28 6">
+                  <line x1="2" y1="3" x2="26" y2="3" stroke="var(--clay)" strokeWidth="3" strokeDasharray="0.1 6" strokeLinecap="round" />
+                </svg>
+                {t('auth.map.legendTrail')}
+              </li>
+              <li className="flex items-center gap-2.5">
+                <span className="flex w-7 justify-center">
+                  <span className="h-2.5 w-2.5 rounded-full border border-pp-ink bg-pp-gold" />
+                </span>
+                {t('auth.map.legendConfirmed')}
+              </li>
+            </ul>
+          </div>
+          <div className="absolute bottom-8 right-8 flex items-end gap-5 text-[12px] text-pp-ink-soft">
+            <div>
+              <div className="flex h-2 w-24 border border-pp-ink">
+                <span className="w-1/2 bg-pp-ink" />
+              </div>
+              <div className="mt-1 flex justify-between">
+                <span>0</span>
+                <span>200 m</span>
+              </div>
+            </div>
+            <svg width="22" height="36" viewBox="0 0 22 36">
+              <path d="M11 12 L17 32 L11 27 L5 32 Z" fill="var(--ink)" />
+              <text x="11" y="9" textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--ink)">N</text>
+            </svg>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -165,13 +165,13 @@ export async function* streamChat(
 
         const errMsg: string | undefined = event.errorMessage || event.error
         if (errMsg) {
-          if (errMsg.includes('prepayment credits are depleted') || errMsg.includes('prepay')) {
-            yield { type: 'text', text: '⚡ Prepay credits depleted. Add credits at aistudio.google.com/projects or switch to a fresh API key.' }
-          } else if (errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota')) {
-            yield { type: 'text', text: '⚡ API quota reached. Switch to a fresh API key or wait for the daily quota to reset at midnight Pacific Time.' }
-          } else {
-            yield { type: 'text', text: `Something went wrong: ${errMsg.slice(0, 180)}` }
+          console.error('[mapforall] agent error:', errMsg)
+          if (/your_project_id_here|GOOGLE_CLOUD_PROJECT/.test(errMsg)) {
+            console.error(
+              '[mapforall] GOOGLE_CLOUD_PROJECT is missing or still the placeholder your_project_id_here. Set the real project id in agents/.env and restart the agent.',
+            )
           }
+          yield { type: 'error' }
           return
         }
 
@@ -204,11 +204,77 @@ export async function* streamChat(
   }
 }
 
+const SESSION_MIN_GAP_MS = 500
+const sessionInflight = new Map<string, Promise<Record<string, unknown>>>()
+const sessionLastDone = new Map<string, number>()
+
+function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    if (!signal) return
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * Read agent session state once. Concurrent callers for the same session share
+ * one request. A second call waits at least 500ms. A 429 backs off (1s, 2s, 4s,
+ * three tries) and then returns an empty state instead of retrying forever.
+ */
 export async function fetchSessionState(
   userId: string,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(`/api/session?userId=${userId}&sessionId=${sessionId}`)
-  if (!res.ok) return {}
-  return res.json()
+  const key = `${userId}\n${sessionId}`
+  const existing = sessionInflight.get(key)
+  if (existing) return existing
+
+  const run = (async (): Promise<Record<string, unknown>> => {
+    const elapsed = Date.now() - (sessionLastDone.get(key) ?? 0)
+    if (elapsed < SESSION_MIN_GAP_MS) {
+      try {
+        await sleepMs(SESSION_MIN_GAP_MS - elapsed, signal)
+      } catch {
+        return {}
+      }
+    }
+
+    let wait = 1000
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (signal?.aborted) return {}
+      try {
+        const res = await fetch(
+          `/api/session?userId=${encodeURIComponent(userId)}&sessionId=${encodeURIComponent(sessionId)}`,
+          { signal },
+        )
+        if (res.status === 429) {
+          if (attempt === 2) return {}
+          try {
+            await sleepMs(wait, signal)
+          } catch {
+            return {}
+          }
+          wait *= 2
+          continue
+        }
+        if (!res.ok) return {}
+        return (await res.json()) as Record<string, unknown>
+      } catch {
+        return {}
+      }
+    }
+    return {}
+  })().finally(() => {
+    sessionLastDone.set(key, Date.now())
+    sessionInflight.delete(key)
+  })
+
+  sessionInflight.set(key, run)
+  return run
 }

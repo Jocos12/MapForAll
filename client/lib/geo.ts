@@ -1,4 +1,4 @@
-export type LatLng = { lat: number; lng: number }
+export type LatLng = { lat: number; lng: number; accuracy?: number }
 
 /** Fallback map center when the user has not granted location (SF Bay Area). */
 export const SF_BAY_CENTER: LatLng = { lat: 37.6819, lng: -122.3453 }
@@ -92,7 +92,14 @@ export function requestUserLocationDetailed(): Promise<GeoResult> {
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (pos) =>
-        resolve({ ok: true, location: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+        resolve({
+          ok: true,
+          location: {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+          },
+        }),
       (err) => {
         const reason: GeoFailure =
           err.code === err.PERMISSION_DENIED

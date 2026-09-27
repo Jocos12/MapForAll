@@ -76,4 +76,9 @@ def inclusion_bonus(place: dict[str, Any], *, prefer_local: bool) -> float:
         bonus += LOCAL_BONUS if prefer_local else LOCAL_BONUS * 0.5
     if place.get("accessible") is True:
         bonus += ACCESS_BONUS
+        detail = place.get("access") if isinstance(place.get("access"), dict) else {}
+        if detail.get("toilet") is True:
+            bonus += 0.35
+        if detail.get("parking") is True:
+            bonus += 0.35
     return bonus

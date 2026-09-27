@@ -152,7 +152,7 @@ export function PlaceStack({
               </div>
 
               <div className="mb-1">
-                <p className="font-mono text-[9px] tracking-widest uppercase text-text3 mb-1.5">Ask Hodari</p>
+                <p className="font-mono text-[9px] tracking-widest uppercase text-text3 mb-1.5">Ask MapForAll</p>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
                   {askChips(active).map((chip) => (
                     <button

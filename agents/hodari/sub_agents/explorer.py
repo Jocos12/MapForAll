@@ -4,7 +4,7 @@ from ..tools.maps_mcp import create_maps_toolset
 from ..tools.mongo_tools import find_similar_preferences
 from ..tools.places_tools import find_places_by_vector
 
-EXPLORER_INSTRUCTION = """You are the Explorer for Hodari, a tourist AI assistant for the 2026 FIFA World Cup.
+EXPLORER_INSTRUCTION = """You are the Explorer for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
 
 You have access to:
   • find_similar_preferences  — MongoDB vector search: retrieve the user's past taste signals

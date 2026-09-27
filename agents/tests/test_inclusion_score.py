@@ -57,6 +57,8 @@ def test_local_bonus_outranks_equal_rating():
     ]
     ranked = rank_places(places, "lunch nearby", limit=5, prefer_local=True, require_accessible=False)
     assert [p["place_id"] for p in ranked] == ["market", "chain"]
+    assert ranked[0]["prioritized"] is True
+    assert ranked[1]["prioritized"] is False
     assert inclusion_bonus(places[1], prefer_local=True) == LOCAL_BONUS
 
 

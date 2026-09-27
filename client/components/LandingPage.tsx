@@ -4,19 +4,23 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import { MessageSquare, Mic } from 'lucide-react'
 import { ChatPanel } from '@/components/ChatPanel'
+import type { WorkspaceLink } from '@/components/WorkspaceShortcut'
 import { AddPlaceSheet } from '@/components/AddPlaceSheet'
 import { useI18n } from '@/components/I18nProvider'
-import { MapView, type RouteInfo } from '@/components/MapView'
+import { MapView, PlaceInfoCard, type RouteInfo } from '@/components/MapView'
 import { PlaceCardStrip } from '@/components/PlaceCardStrip'
 import { CollapsedReply } from '@/components/CollapsedReply'
 import { PlaceDetailsPanel } from '@/components/PlaceDetailsPanel'
 import { streamChat, fetchSessionState, ChatGateError } from '@/lib/stream'
+import { placesForAsk } from '@/lib/placeCategory'
+import { markPrioritized } from '@/lib/priority'
 import Paywall, { type GateState } from '@/components/Paywall'
 import { VoiceOrb } from '@/components/VoiceOrb'
 import { MobileChatSheet, SHEET_PEEK_PX, type SheetSnap } from '@/components/MobileChatSheet'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
   isValidCoord,
+  type LatLng,
   pinsFarFromUser,
   queryGeoPermission,
   requestUserLocationDetailed,
@@ -30,6 +34,7 @@ import {
   type CustomRouteConfig,
   type MapActionEffects,
   type MapAnnotations,
+  type PendingRouteRequest,
   type TravelMode,
 } from '@/lib/mapActions'
 import {
@@ -46,7 +51,6 @@ import { speak, cancelSpeech, isSpeechOutputSupported } from '@/lib/voice'
 import { useVoice } from '@/hooks/useVoice'
 import { type ModelId } from '@/components/ModelSwitcher'
 import { useCommunityMapLayer } from '@/components/community/useCommunityMapLayer'
-import { getConnections } from '@/lib/communityClient'
 import type { ChatMessage, Place, Itinerary, ItineraryStop, Theme } from '@/lib/types'
 
 // Community UI is lazy-loaded: the chunks (panel, profile sheet, share picker,
@@ -66,6 +70,18 @@ const SharePinDialog = dynamic(
 )
 
 function uid() { return Math.random().toString(36).slice(2) }
+
+const REPLY_CACHE_TTL_MS = 30 * 60_000
+
+function replyCacheKey(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function isCacheableReply(content: string): boolean {
+  const c = content.trim()
+  if (c.length < 12) return false
+  return !/n'ai pas pu|couldn't draw|out of generations|réessayer|try again|quota|unavailable/i.test(c)
+}
 
 function isMapShowRequest(text: string): boolean {
   const t = text.toLowerCase()
@@ -92,6 +108,103 @@ function wantsRouteFromUser(text: string): boolean {
     || /\bdistance\b/.test(t)
     || /\broute from me\b/.test(t)
   )
+}
+
+/** Photos, hours, reviews, accessibility — facts the chat should show, not defer to a pin tap. */
+function wantsPlaceFacts(text: string): boolean {
+  const t = text.toLowerCase()
+  return (
+    /\b(photos?|pictures?|images?|pics?|galerie|avis|reviews?|horaires?|hours|menu|accessib\w*)\b/.test(t) ||
+    /montre.{0,50}(photo|image|avis|horaire)/.test(t)
+  )
+}
+
+function wantsPhotos(text: string): boolean {
+  const t = text.toLowerCase()
+  return /\b(photos?|pictures?|images?|pics?|galerie)\b/.test(t) || /montre.{0,40}(photo|image)/.test(t)
+}
+
+/** "de Kigali City Tower jusqu'à Java House" → both ends. Needs a named origin and destination. */
+function namedRoute(text: string): { origin: string; destination: string } | null {
+  const match = text.match(/\b(?:de|from)\s+(.+?)\s+(?:jusqu['’]à|jusqu'a|vers|to)\s+(.+)/i)
+  if (!match) return null
+  const origin = match[1].replace(/[?!.,]/g, '').trim()
+  const destination = match[2]
+    .replace(/\b(et\s+trace.*|avec\s+la\s+ligne.*|sur\s+la\s+carte.*|en\s+marchant.*|à\s+pied.*)$/i, '')
+    .replace(/[?!.,]/g, '')
+    .trim()
+  if (origin.length < 3 || destination.length < 3) return null
+  return { origin, destination }
+}
+
+/** "Montre-moi les photos de Java House" → "Java House". */
+function placeQueryFromFactRequest(text: string): string {
+  const cleaned = text
+    .replace(/montre[-\s]?moi/gi, ' ')
+    .replace(/\b(show me|please|s'il te pla[iî]t|stp|the|of|for|pour|les|des|de|du|la|le|un|une|photos?|pictures?|images?|pics?|galerie|avis|reviews?|horaires?|hours|menu|accessibilit\w*|accessible)\b/gi, ' ')
+    .replace(/[?!.,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || text.replace(/[?!]/g, '').trim()
+}
+
+const PLACE_QUERY_STOP = new Set(['kigali', 'city', 'ville', 'road', 'street', 'avenue', 'ave'])
+
+/** Reject a fuzzy hit such as "Blorpville" → Blairsville, Georgia. */
+function placeMatchesQuery(query: string, name: string): boolean {
+  const words = query
+    .toLowerCase()
+    .split(/[^a-z0-9àâäéèêëïîôùûüç]+/i)
+    .filter((w) => w.length >= 4 && !PLACE_QUERY_STOP.has(w))
+  const hay = name.toLowerCase()
+  if (words.length === 0) return hay.includes(query.trim().toLowerCase().slice(0, 6))
+  return words.some((w) => hay.includes(w))
+}
+
+function replaceTurnAssistant(prev: ChatMessage[], id: string | null, content: string): ChatMessage[] {
+  if (!id || !prev.some((m) => m.id === id)) return prev
+  return prev.map((m) => (m.id === id ? { ...m, content } : m))
+}
+
+/** Only a request that asks for a line may replace the assistant text with the paint result. */
+function isRouteAsk(text: string): boolean {
+  return !!namedRoute(text) || /\b(itin[eé]raires?|routes?|chemins?|trac[eé]|directions?|jusqu['’]à|à pied|a pied|how do i get|comment aller)\b/i.test(text)
+}
+
+/** Itinerary stops omit rating, photos and badges. Keep the copy the chat already has. */
+function enrichMapPlace(item: Place | ItineraryStop, memory: Map<string, Place>): Place {
+  const known = item.place_id ? memory.get(item.place_id) : undefined
+  const fromItem = 'categories' in item && Array.isArray(item.categories) ? item.categories : []
+  return {
+    ...known,
+    ...item,
+    categories: known?.categories?.length ? known.categories : fromItem,
+    photo_url: ('photo_url' in item && item.photo_url) || known?.photo_url,
+    photos: ('photos' in item && item.photos?.length ? item.photos : known?.photos),
+    rating: ('rating' in item && item.rating != null ? item.rating : known?.rating),
+    local_business: ('local_business' in item && item.local_business) || known?.local_business,
+    accessible: ('accessible' in item && item.accessible) || known?.accessible,
+    access: ('access' in item && item.access) || known?.access,
+    access_confirmations: ('access_confirmations' in item && item.access_confirmations != null ? item.access_confirmations : known?.access_confirmations),
+    access_disputes: ('access_disputes' in item && item.access_disputes != null ? item.access_disputes : known?.access_disputes),
+    open_now: ('open_now' in item && item.open_now != null ? item.open_now : known?.open_now),
+    price_level: ('price_level' in item && item.price_level) || known?.price_level,
+    summary: ('summary' in item && item.summary) || known?.summary,
+    website: ('website' in item && item.website) || known?.website,
+  } as Place
+}
+
+function selectedPlaceNote(place: Place): string {
+  const bits = [
+    `name: ${place.name}`,
+    place.address ? `address: ${place.address}` : '',
+    place.categories?.length ? `category: ${place.categories.join(', ')}` : '',
+    place.rating != null ? `rating: ${place.rating}` : '',
+    `local_business: ${place.local_business ? 'yes' : 'no'}`,
+    `accessible: ${place.accessible ? 'yes' : 'no'}`,
+    place.open_now == null ? '' : `open_now: ${place.open_now ? 'yes' : 'no'}`,
+  ].filter(Boolean)
+  return `\n[Selected place on the map — the user just tapped this pin. Pronouns like "it", "ce lieu", "c'est loin", "c'est accessible" refer to this place unless they name a different one. ${bits.join('. ')}.]`
 }
 
 function parseCandidates(raw: unknown): Place[] | null {
@@ -162,11 +275,7 @@ export default function LandingPage() {
     }
     window.history.replaceState({}, '', window.location.pathname)
   }, [])
-  const [userName] = useState(() =>
-    typeof window !== 'undefined'
-      ? (localStorage.getItem('hodari_name') || localStorage.getItem('hodari_email') || '')
-      : '',
-  )
+  const [userName, setUserName] = useState('')
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -178,10 +287,12 @@ export default function LandingPage() {
   const [activeStop, setActiveStop] = useState<number | null>(null)
   const [mapVisible, setMapVisible] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [placesLoading, setPlacesLoading] = useState(false)
   const [draftLat, setDraftLat] = useState('')
   const [draftLng, setDraftLng] = useState('')
   const [preferLocal, setPreferLocal] = useState(false)
   const [requireAccessible, setRequireAccessible] = useState(false)
+  const [marketOnly, setMarketOnly] = useState(false)
   const [mapExpanded, setMapExpanded] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const [uiMode, setUiMode] = useState<'chat' | 'voice'>('chat')
@@ -191,18 +302,12 @@ export default function LandingPage() {
   const isMobile = useIsMobile()
   const [chatSnap, setChatSnap] = useState<SheetSnap>('half')
   const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-3.5')
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'light'
-    const saved = localStorage.getItem('hodari_theme')
-    return saved === 'dark' ? 'dark' : 'light'
-  })
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [theme, setTheme] = useState<Theme>('light')
+  const [themeReady, setThemeReady] = useState(false)
+  const [userLocation, setUserLocation] = useState<LatLng | null>(null)
   // Manual "set my city" fallback when GPS is denied/unavailable (mobile).
   // Piped into the chat context the same way coords are (see handleSend).
-  const [manualCity, setManualCity] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
-    return localStorage.getItem('hodari_city') || null
-  })
+  const [manualCity, setManualCity] = useState<string | null>(null)
   const [geoNotice, setGeoNotice] = useState<string | null>(null)
   const geoWatchIdRef = useRef<number | null>(null)
   const [routeFromUser, setRouteFromUser] = useState(false)
@@ -220,6 +325,22 @@ export default function LandingPage() {
   const speakRepliesRef = useRef(true)
   const sessionId = useRef(uid())
   const abortRef = useRef<AbortController | null>(null)
+  /** Set only after the map has actually painted a route, or after that paint failed. */
+  const routeVerdictRef = useRef<string | null>(null)
+  const pendingRouteClaim = useRef(false)
+  /** True once paintRoute has put a line on the map for the current claim. */
+  const routePaintedRef = useRef(false)
+  const routeWatchRef = useRef<number | null>(null)
+  /** Last pin the user tapped. Follow-up chat questions use this, not a separate store. */
+  const clickedPlaceRef = useRef<Place | null>(null)
+  /** Assistant bubble of the in-flight turn. Route text is written only into this id. */
+  const turnAssistantIdRef = useRef<string | null>(null)
+  /** True when the current user message asked for a line. */
+  const routeClaimAllowedRef = useRef(false)
+  /** Route the agent asked for before the destination was on the map. */
+  const pendingRouteRef = useRef<PendingRouteRequest | null>(null)
+  const mapPlacesRef = useRef<Place[]>([])
+  const [placeCardOpen, setPlaceCardOpen] = useState(false)
   const soloPlaceModeRef = useRef(false)
   const appliedMapActionsRef = useRef('')
   const placesRef = useRef(places)
@@ -230,57 +351,91 @@ export default function LandingPage() {
   // earlier search (e.g. mark the restaurant while showing nearby hotels).
   const placeMemoryRef = useRef<Map<string, Place>>(new Map())
   const [annotations, setAnnotations] = useState<MapAnnotations>(EMPTY_ANNOTATIONS)
-  const [savedPlaceIds, setSavedPlaceIds] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set()
-    try { return new Set(JSON.parse(localStorage.getItem('hodari_saved') ?? '[]')) } catch { return new Set() }
-  })
+  const [savedPlaceIds, setSavedPlaceIds] = useState<Set<string>>(() => new Set())
+
+  // Jury demo keeps Community out of the header and the map. The pitch is the
+  // map, local businesses, and accessibility. Flip this to bring the panel back.
+  const showCommunity = false
 
   // ── Community layer (panel, profile sheet, share picker, map overlays) ──────
   // `communityMounted` keeps the lazy chunk mounted after first open so the
   // sheet's close animation still plays; before that nothing is downloaded.
   const [communityMounted, setCommunityMounted] = useState(false)
   const [communityOpen, setCommunityOpen] = useState(false)
-  const [communityLayerOn, setCommunityLayerOn] = useState(
-    () => typeof window !== 'undefined' && localStorage.getItem('hodari_community_layer') === '1',
-  )
+  const [communityLayerOn, setCommunityLayerOn] = useState(false)
+  const [communityPrefsReady, setCommunityPrefsReady] = useState(false)
   const [profileTarget, setProfileTarget] = useState<string | null>(null)
   const [shareTarget, setShareTarget] = useState<Place | null>(null)
   const [shareConversationId, setShareConversationId] = useState<string | null>(null)
   const [communityFocus, setCommunityFocus] = useState<{ lat: number; lng: number } | null>(null)
-  // Pending-invite count for the header badge. Sourced two ways: this
-  // standalone poll (so the badge works before the panel is ever opened —
-  // CommunityPanel only mounts on first open) and, once mounted, the panel's
-  // own connections state via onInviteCountChange (immediate, no poll lag).
+  // Invite badge updates when the community panel is opened. A background
+  // poll of /api/community/connections was timing out and logging 500s.
   const [communityInviteCount, setCommunityInviteCount] = useState(0)
 
   useEffect(() => {
-    try { localStorage.setItem('hodari_community_layer', communityLayerOn ? '1' : '0') } catch { /* ignore */ }
-  }, [communityLayerOn])
+    setUserName(localStorage.getItem('hodari_name') || localStorage.getItem('hodari_email') || '')
+    const savedTheme = localStorage.getItem('hodari_theme')
+    if (savedTheme === 'dark' || savedTheme === 'light') setTheme(savedTheme)
+    setThemeReady(true)
+    setManualCity(localStorage.getItem('hodari_city') || null)
+    try {
+      const parsed = JSON.parse(localStorage.getItem('hodari_saved') ?? '[]')
+      if (Array.isArray(parsed)) setSavedPlaceIds(new Set(parsed))
+    } catch { /* ignore */ }
+    // Leave the community map layer off on load. Restoring hodari_community_layer
+    // was calling pins, connections, and presence before the panel was opened.
+    setCommunityPrefsReady(true)
+  }, [])
 
+  // Owners and admins who land on the client app get a way back to their space.
+  const [workspaceRole, setWorkspaceRole] = useState<'business_owner' | 'admin' | null>(null)
+  const [ownedListings, setOwnedListings] = useState<NonNullable<WorkspaceLink['places']>>([])
   useEffect(() => {
-    if (communityMounted) return // the panel is now the source of truth
-    let cancelled = false
-    const tick = () => {
-      if (document.visibilityState !== 'visible') return
-      void getConnections()
-        .then((conns) => { if (!cancelled) setCommunityInviteCount(conns.pending_in.length) })
-        .catch(() => { /* not signed in yet, or transient — next tick retries */ })
-    }
-    tick()
-    const interval = setInterval(tick, 30_000)
-    document.addEventListener('visibilitychange', tick)
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-      document.removeEventListener('visibilitychange', tick)
-    }
-  }, [communityMounted])
+    let alive = true
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (data) => {
+        if (!alive) return
+        if (data?.user?.role === 'business_owner') {
+          setWorkspaceRole('business_owner')
+          const res = await fetch('/api/business?summary=1', { cache: 'no-store' }).catch(() => null)
+          const json = res?.ok ? await res.json().catch(() => null) : null
+          if (alive && Array.isArray(json?.places)) setOwnedListings(json.places)
+        } else if (data?.user?.admin) {
+          setWorkspaceRole('admin')
+        }
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+  const workspace: WorkspaceLink | undefined = workspaceRole === 'business_owner'
+    ? {
+        href: ownedListings.length === 1
+          ? `/business/dashboard?place=${encodeURIComponent(ownedListings[0].place_id)}`
+          : '/business/dashboard',
+        label: t('header.workspace.short'),
+        cta: t('header.workspace.owner'),
+        places: ownedListings,
+      }
+    : workspaceRole === 'admin'
+      ? { href: '/admin', label: t('header.workspace.admin'), cta: t('header.workspace.admin') }
+      : undefined
 
-  // Pins load while the panel OR the map layer is on; connection positions
-  // poll (15s) only while the map layer is on. All polling stops otherwise.
+  const communityLayerWrite = useRef(false)
+  useEffect(() => {
+    if (!communityPrefsReady) return
+    if (!communityLayerWrite.current) {
+      communityLayerWrite.current = true
+      return
+    }
+    try { localStorage.setItem('hodari_community_layer', communityLayerOn ? '1' : '0') } catch { /* ignore */ }
+  }, [communityLayerOn, communityPrefsReady])
+
+  // Pins load once while the panel or the map layer is on. Connection
+  // positions load once when the layer is turned on. No background polling.
   const { pins: communityPins, friends: communityFriends, refreshPins } = useCommunityMapLayer({
-    pinsEnabled: communityLayerOn || communityOpen,
-    friendsEnabled: communityLayerOn,
+    pinsEnabled: showCommunity && (communityLayerOn || communityOpen),
+    friendsEnabled: showCommunity && communityLayerOn,
     userLocation,
   })
 
@@ -308,6 +463,47 @@ export default function LandingPage() {
     }
   }, [places])
   useEffect(() => { itineraryRef.current = itinerary }, [itinerary])
+
+  // The route action often arrives before candidates are in React state.
+  // Draw it as soon as the named place shows up, on the same chat turn.
+  useEffect(() => {
+    const pending = pendingRouteRef.current
+    if (!pending || !routeClaimAllowedRef.current || routePaintedRef.current) return
+    const list: Place[] = itinerary?.stops?.length
+      ? itinerary.stops.map((s) => ({ ...s, personalization_score: 0, categories: [] as string[] }))
+      : places
+    if (!list.length) return
+    let idx: number | null = null
+    if (
+      typeof pending.to_place_index === 'number' &&
+      pending.to_place_index >= 0 &&
+      pending.to_place_index < list.length
+    ) {
+      idx = pending.to_place_index
+    } else if (pending.to_place_name) {
+      idx = findPlaceIndexInText(pending.to_place_name, list)
+    }
+    if (idx === null && activeStop != null && activeStop < list.length && !pending.to_place_name) {
+      idx = activeStop
+    }
+    if (idx === null) return
+    pendingRouteRef.current = null
+    setActiveStop(idx)
+    setMapVisible(true)
+    setRouteMode(pending.mode)
+    if (pending.from === 'user') {
+      setRouteFromUser(true)
+      setCustomRoute(null)
+    } else if (pending.landmark) {
+      setRouteFromUser(false)
+      setCustomRoute({
+        from: 'landmark',
+        landmark: pending.landmark,
+        destinationIndex: idx,
+        mode: pending.mode,
+      })
+    }
+  }, [places, itinerary, activeStop])
   useEffect(() => { activeStopRef.current = activeStop }, [activeStop])
   useEffect(() => { speakRepliesRef.current = speakReplies }, [speakReplies])
 
@@ -323,6 +519,9 @@ export default function LandingPage() {
   // Signed-in members get server-side (encrypted, cross-device) chat history;
   // guests fall back to localStorage. Set during the initial history load.
   const authedRef = useRef(false)
+  const messagesRef = useRef<ChatMessage[]>([])
+  messagesRef.current = messages
+  const replyCacheRef = useRef(new Map<string, { at: number; content: string; places?: Place[] }>())
   const placePhotoKey = places
     .map((p) => `${p.place_id}:${p.photo_url || p.photos?.length ? 1 : 0}`)
     .join(',')
@@ -424,7 +623,52 @@ export default function LandingPage() {
     [savedPlaceIds],
   )
 
-  const handleSend = useCallback(async (text: string, opts?: { speak?: boolean; display?: string }) => {
+  /** A chat turn asked for a line. The verdict waits until the map paints it, or the attempt ends. */
+  const beginRouteClaim = useCallback(() => {
+    if (routePaintedRef.current) return
+    pendingRouteClaim.current = true
+    routePaintedRef.current = false
+    routeVerdictRef.current = null
+    setRouteInfo(null)
+    setRouteError(null)
+    if (routeWatchRef.current != null) window.clearTimeout(routeWatchRef.current)
+    routeWatchRef.current = window.setTimeout(() => {
+      if (!pendingRouteClaim.current || routePaintedRef.current) return
+      pendingRouteClaim.current = false
+      const verdict = t('errors.routeFailed')
+      routeVerdictRef.current = verdict
+      setRouteError(verdict)
+      setMessages((prev) => replaceTurnAssistant(prev, turnAssistantIdRef.current, verdict))
+    }, 12000)
+  }, [t])
+
+  const commitRouteFailure = useCallback(() => {
+    if (routePaintedRef.current) return
+    pendingRouteClaim.current = false
+    if (routeWatchRef.current != null) {
+      window.clearTimeout(routeWatchRef.current)
+      routeWatchRef.current = null
+    }
+    const verdict = t('errors.routeFailed')
+    routeVerdictRef.current = verdict
+    setRouteError(verdict)
+    setMessages((prev) => replaceTurnAssistant(prev, turnAssistantIdRef.current, verdict))
+  }, [t])
+
+  const reportRouteError = useCallback((message: string | null) => {
+    if (!message || routePaintedRef.current || !pendingRouteClaim.current) return
+    commitRouteFailure()
+  }, [commitRouteFailure])
+
+  const handleSend = useCallback(async (text: string, opts?: { speak?: boolean; display?: string; fromVoice?: boolean }) => {
+    routeVerdictRef.current = null
+    routePaintedRef.current = false
+    pendingRouteClaim.current = false
+    routeClaimAllowedRef.current = isRouteAsk(text)
+    if (routeClaimAllowedRef.current) {
+      setCustomRoute(null)
+      setRouteFromUser(false)
+    }
     cancelSpeech()
     const wantSpeak = !!opts?.speak
 
@@ -442,14 +686,68 @@ export default function LandingPage() {
     // "a location exists" + text intent, so probe it with a sentinel coord.
     const attachCity =
       !attachGps && !!manualCity && shouldAttachGps(text, { lat: 1, lng: 1 }, suppressGpsContext)
-    const enriched = attachGps && userLocation
+    const located = attachGps && userLocation
       ? `${text}\n[User location: ${userLocation.lat.toFixed(5)}, ${userLocation.lng.toFixed(5)}]`
       : attachCity
         ? `${text}\n[User city: ${manualCity}]`
         : text
+    const tapped = clickedPlaceRef.current
+    const enriched = tapped ? `${located}${selectedPlaceNote(tapped)}` : located
 
-    const userMsg: ChatMessage = { id: uid(), role: 'user', content: opts?.display ?? text }
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: 'user',
+      content: opts?.display ?? text,
+      fromVoice: opts?.fromVoice,
+    }
     setMessages((prev) => [...prev, userMsg])
+    const assistantId = uid()
+    turnAssistantIdRef.current = assistantId
+    setLoading(true)
+    setThinkingSteps([])
+    setStreamingStarted(false)
+    streamingStartedRef.current = false
+
+    const photoLookup = wantsPhotos(text)
+      ? fetch(`/api/place-photos?q=${encodeURIComponent(placeQueryFromFactRequest(text))}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+      : Promise.resolve(null)
+
+    const ends = namedRoute(text)
+    if (ends) {
+      beginRouteClaim()
+      void Promise.all([
+        fetch(`/api/place-photos?q=${encodeURIComponent(ends.origin)}`).then((r) => (r.ok ? r.json() : null)),
+        fetch(`/api/place-photos?q=${encodeURIComponent(ends.destination)}`).then((r) => (r.ok ? r.json() : null)),
+      ]).then(([from, to]) => {
+        const dest = to?.place as Place | undefined
+        const origin = from?.place as Place | undefined
+        const destName = String(to?.name ?? dest?.name ?? '')
+        const originName = String(from?.name ?? origin?.name ?? '')
+        if (
+          !dest?.coordinates ||
+          !origin?.coordinates ||
+          !placeMatchesQuery(ends.destination, destName) ||
+          !placeMatchesQuery(ends.origin, originName)
+        ) {
+          commitRouteFailure()
+          return
+        }
+        setPlaces([dest])
+        setItinerary(null)
+        setActiveStop(0)
+        setMapVisible(true)
+        setRouteFromUser(false)
+        setCustomRoute({
+          from: 'landmark',
+          landmark: String(from?.name ?? ends.origin),
+          originPoint: origin.coordinates,
+          destinationIndex: 0,
+          mode: 'WALK',
+        })
+      }).catch(() => commitRouteFailure())
+    }
 
     const visiblePlaces: Place[] = itinerary?.stops?.length
       ? itinerary.stops.map((s) => ({ ...s, personalization_score: 0, categories: [] }))
@@ -486,12 +784,31 @@ export default function LandingPage() {
     if (isMapShowRequest(text)) setMapVisible(true)
 
     if (mapOnlyReply && !wantsRouteFromUser(text)) {
+      setLoading(false)
       setMessages((prev) => [
         ...prev,
         { id: uid(), role: 'assistant', content: mapOnlyReply },
       ])
       if (wantSpeak && speakRepliesRef.current) speak(mapOnlyReply)
       return
+    }
+
+    if (!isRouteAsk(text)) {
+      const hit = replyCacheRef.current.get(replyCacheKey(opts?.display ?? text))
+      if (hit && Date.now() - hit.at < REPLY_CACHE_TTL_MS) {
+        setLoading(false)
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantId, role: 'assistant', content: hit.content, places: hit.places },
+        ])
+        if (hit.places?.length) {
+          setPlaces(hit.places)
+          setMapVisible(true)
+          setActiveStop(0)
+        }
+        if (wantSpeak && speakRepliesRef.current) speak(hit.content)
+        return
+      }
     }
     const routeRequest = wantsRouteFromUser(text)
     if (routeRequest) {
@@ -504,15 +821,9 @@ export default function LandingPage() {
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
-    setLoading(true)
-    setThinkingSteps([])
-    setStreamingStarted(false)
-    streamingStartedRef.current = false
-
     let assistantText = ''
-    const assistantId = uid()
+    let rememberReply = false
     let earlyItinerarySet = false
-    let streamDone = false
     let pipelineRan = false
 
     const processSessionMapActions = (state: Record<string, unknown>) => {
@@ -526,6 +837,9 @@ export default function LandingPage() {
         places: placesRef.current,
         itinerary: itineraryRef.current,
         activeStop: activeStopRef.current,
+        sessionCandidates: state.candidates,
+        sessionItinerary: state.itinerary,
+        intentType: typeof state.intent_type === 'string' ? state.intent_type : undefined,
       })
       applyMapEffects(effects)
 
@@ -541,86 +855,82 @@ export default function LandingPage() {
       }
     }
 
-    const pollForItinerary = async () => {
-      for (let i = 0; i < 120; i++) {
-        await new Promise((r) => setTimeout(r, 3000))
-        if (streamDone || earlyItinerarySet) break
-        try {
-          const s = await fetchSessionState(USER_ID, sessionId.current)
-          if (s.intent_type === 'LIST_DISCOVERY') setItinerary(null)
-          if (s.itinerary && s.intent_type !== 'LIST_DISCOVERY') {
-            const parsed = parseItinerary(s.itinerary)
-            if (parsed) {
-              earlyItinerarySet = true
-              setItinerary(parsed)
-              setPlaces([])
-              setActiveStop(0)
-              setMapVisible(true)
-              if (!routeRequest) setRouteFromUser(false)
-              setMessages((prev) => {
-                const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
-                if (ri === -1) {
-                  const text = parsed.voice_summary || `Here's your ${parsed.stops.length}-stop plan!`
-                  return [...prev, { id: assistantId, role: 'assistant' as const, content: text, itinerary: parsed }]
-                }
-                const ai = prev.length - 1 - ri
-                return prev.map((m, i) => i === ai ? { ...m, itinerary: parsed, places: undefined } : m)
-              })
+    const applySessionSnapshot = (s: Record<string, unknown>) => {
+      if (s.intent_type === 'LIST_DISCOVERY') setItinerary(null)
+      if (s.itinerary && s.intent_type !== 'LIST_DISCOVERY' && !earlyItinerarySet) {
+        const parsed = parseItinerary(s.itinerary)
+        if (parsed) {
+          earlyItinerarySet = true
+          setItinerary(parsed)
+          placesRef.current = []
+          setPlaces([])
+          setActiveStop(0)
+          setMapVisible(true)
+          if (!routeRequest) setRouteFromUser(false)
+          setMessages((prev) => {
+            const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
+            if (ri === -1) {
+              const text = parsed.voice_summary || `Here's your ${parsed.stops.length}-stop plan!`
+              return [...prev, { id: assistantId, role: 'assistant' as const, content: text, itinerary: parsed }]
             }
-          }
-          if (!earlyItinerarySet && s.candidates && !soloPlaceModeRef.current) {
-            const parsed = parseCandidates(s.candidates)
-            if (parsed) {
-              setPlaces(parsed)
-              setItinerary(null)
-              setMapZoomFocus(false)
-              setMapVisible(true)
-              setActiveStop((prev) => prev ?? 0)
-              if (!routeRequest) { setRouteFromUser(false); setRouteInfo(null) }
-              setMessages((prev) => {
-                const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
-                if (ri === -1) {
-                  const text = `Found ${parsed.length} place${parsed.length !== 1 ? 's' : ''} for you!`
-                  return [...prev, { id: assistantId, role: 'assistant' as const, content: text, places: parsed }]
-                }
-                const ai = prev.length - 1 - ri
-                return prev.map((m, i) => i === ai ? { ...m, places: parsed, itinerary: undefined } : m)
-              })
-            }
-          }
-          processSessionMapActions(s)
-          if (s.suppress_gps_context === '1') setSuppressGpsContext(true)
-        } catch { /* non-critical */ }
+            const ai = prev.length - 1 - ri
+            return prev.map((m, i) => i === ai ? { ...m, itinerary: parsed, places: undefined } : m)
+          })
+        }
       }
+      if (!earlyItinerarySet && s.candidates && !soloPlaceModeRef.current) {
+        const parsed = placesForAsk(parseCandidates(s.candidates) ?? [], text)
+        if (parsed.length) {
+          const ranked = markPrioritized(parsed, /prefer_local/i.test(text))
+          placesRef.current = ranked
+          setPlaces(ranked)
+          setItinerary(null)
+          setMapZoomFocus(false)
+          setMapVisible(true)
+          setActiveStop((prev) => prev ?? 0)
+          if (!routeRequest) { setRouteFromUser(false); setRouteInfo(null) }
+          setMessages((prev) => {
+            const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
+            if (ri === -1) {
+              const text = `Found ${parsed.length} place${parsed.length !== 1 ? 's' : ''} for you!`
+              return [...prev, { id: assistantId, role: 'assistant' as const, content: text, places: ranked }]
+            }
+            const ai = prev.length - 1 - ri
+            return prev.map((m, i) => i === ai ? { ...m, places: ranked, itinerary: undefined } : m)
+          })
+        }
+      }
+      processSessionMapActions(s)
+      if (s.suppress_gps_context === '1') setSuppressGpsContext(true)
     }
 
     try {
       for await (const chunk of streamChat(enriched, USER_ID, sessionId.current, ctrl.signal)) {
+        if (chunk.type === 'error') {
+          const friendly = t('errors.retry')
+          setMessages((prev) => {
+            const existing = prev.find((m) => m.id === assistantId)
+            if (existing) return prev.map((m) => m.id === assistantId ? { ...m, content: friendly } : m)
+            return [...prev, { id: assistantId, role: 'assistant', content: friendly }]
+          })
+          continue
+        }
         if (chunk.type === 'thinking') {
           pipelineRan = true
           setThinkingSteps((prev) => [...prev, chunk.label])
           if (chunk.agent === 'map_control') {
-            fetchSessionState(USER_ID, sessionId.current)
-              .then((s) => {
-                processSessionMapActions(s)
-                if (s.suppress_gps_context === '1') setSuppressGpsContext(true)
-              })
+            fetchSessionState(USER_ID, sessionId.current, ctrl.signal)
+              .then((s) => applySessionSnapshot(s))
               .catch(() => {})
           }
-          const planningSignal =
-            chunk.agent === 'hodari_pipeline' ||
-            chunk.agent === 'load_user_profile' ||
-            chunk.agent.startsWith('pipeline_') ||
-            chunk.agent === 'itinerary_agent'
-          if (planningSignal && !earlyItinerarySet) pollForItinerary()
         } else {
           if (!streamingStartedRef.current) {
             streamingStartedRef.current = true
             setStreamingStarted(true)
           }
           assistantText += chunk.text
-          const clean = stripEmDashes(assistantText)
           setMessages((prev) => {
+            const clean = routeVerdictRef.current ?? stripEmDashes(assistantText)
             const existing = prev.find((m) => m.id === assistantId)
             if (existing) return prev.map((m) => m.id === assistantId ? { ...m, content: clean } : m)
             return [...prev, { id: assistantId, role: 'assistant', content: clean }]
@@ -628,15 +938,13 @@ export default function LandingPage() {
         }
       }
 
-      streamDone = true
-
       if (wantSpeak && speakRepliesRef.current && assistantText.trim()) {
         speak(stripEmDashes(assistantText))
       }
 
       const wantsMap = isMapShowRequest(text)
       try {
-        const state = await fetchSessionState(USER_ID, sessionId.current)
+        const state = await fetchSessionState(USER_ID, sessionId.current, ctrl.signal)
         processSessionMapActions(state)
         if (state.suppress_gps_context === '1') setSuppressGpsContext(true)
         else if (state.suppress_gps_context === '') setSuppressGpsContext(false)
@@ -661,12 +969,16 @@ export default function LandingPage() {
 
         if ((pipelineRan && !earlyItinerarySet) || wantsMap) {
           const intent = state.intent_type as string | undefined
-          const parsedCandidates = state.candidates ? parseCandidates(state.candidates) : null
+          const parsedCandidates = state.candidates
+            ? placesForAsk(parseCandidates(state.candidates) ?? [], text)
+            : null
           const parsedItinerary =
             state.itinerary && !earlyItinerarySet ? parseItinerary(state.itinerary) : null
 
-          if (parsedCandidates && (intent === 'LIST_DISCOVERY' || !parsedItinerary) && !soloPlaceModeRef.current) {
-            setPlaces(parsedCandidates)
+          if (parsedCandidates?.length && (intent === 'LIST_DISCOVERY' || !parsedItinerary) && !soloPlaceModeRef.current) {
+            const ranked = markPrioritized(parsedCandidates, /prefer_local/i.test(text))
+            placesRef.current = ranked
+            setPlaces(ranked)
             setItinerary(null)
             setMapZoomFocus(false)
             setMapVisible(true)
@@ -674,14 +986,15 @@ export default function LandingPage() {
             setMessages((prev) => {
               const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
               if (ri === -1) {
-                const text = `Found ${parsedCandidates.length} place${parsedCandidates.length !== 1 ? 's' : ''} for you!`
-                return [...prev, { id: assistantId, role: 'assistant' as const, content: text, places: parsedCandidates }]
+                const text = `Found ${ranked.length} place${ranked.length !== 1 ? 's' : ''} for you!`
+                return [...prev, { id: assistantId, role: 'assistant' as const, content: text, places: ranked }]
               }
               const ai = prev.length - 1 - ri
-              return prev.map((m, i) => i === ai ? { ...m, places: parsedCandidates, itinerary: undefined } : m)
+              return prev.map((m, i) => i === ai ? { ...m, places: ranked, itinerary: undefined } : m)
             })
           } else if (parsedItinerary && intent !== 'LIST_DISCOVERY') {
             setItinerary(parsedItinerary)
+            placesRef.current = []
             setPlaces([])
             setMapVisible(true)
             setActiveStop(0)
@@ -702,13 +1015,71 @@ export default function LandingPage() {
       if (routeRequest) {
         let list = places
         try {
-          const state = await fetchSessionState(USER_ID, sessionId.current)
+          const state = await fetchSessionState(USER_ID, sessionId.current, ctrl.signal)
           const parsed = state.candidates ? parseCandidates(state.candidates) : null
           if (parsed) list = parsed
         } catch { /* use in-memory places */ }
         const idx = findPlaceIndexInText(text, list)
         if (idx !== null) setActiveStop(idx)
       }
+
+      if (wantsPhotos(text)) {
+        const data = await photoLookup
+        const photos: string[] = Array.isArray(data?.photoUrls) ? data.photoUrls.filter((u: unknown) => typeof u === 'string' && u) : []
+        setMessages((prev) => {
+          const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
+          if (ri === -1) return prev
+          const ai = prev.length - 1 - ri
+          if (photos.length > 0) {
+            const place = data.place as Place | undefined
+            return prev.map((m, i) => i === ai ? {
+              ...m,
+              places: place ? [place] : m.places,
+              gallery: {
+                type: 'photo_gallery' as const,
+                place_name: String(data.name ?? place?.name ?? placeQueryFromFactRequest(text)),
+                photos: photos.slice(0, 4),
+                attribution: typeof data.attribution === 'string' ? data.attribution : undefined,
+              },
+            } : m)
+          }
+          return prev.map((m, i) => i === ai ? { ...m, content: t('errors.noPhotos'), gallery: undefined } : m)
+        })
+      } else if (wantsPlaceFacts(text)) {
+        const pool = placesRef.current.length
+          ? placesRef.current
+          : [...placeMemoryRef.current.values()]
+        const factIdx = findPlaceIndexInText(text, pool)
+        if (factIdx != null) {
+          let shown = pool[factIdx]
+          if ((!shown.photos || shown.photos.length === 0) && !shown.photo_url && shown.place_id && !shown.place_id.startsWith('__')) {
+            try {
+              const photoRes = await fetch(`/api/place-photos?placeId=${encodeURIComponent(shown.place_id)}`)
+              if (photoRes.ok) {
+                const data = await photoRes.json()
+                if (Array.isArray(data.photoUrls) && data.photoUrls.length) {
+                  photoCacheRef.current.set(shown.place_id, data.photoUrls)
+                  shown = { ...shown, photo_url: data.photoUrls[0], photos: data.photoUrls }
+                }
+              }
+            } catch { /* gallery still shows the place card */ }
+          }
+          if (shown.photos?.length || shown.photo_url) {
+            const urls = (shown.photos?.length ? shown.photos : [shown.photo_url as string]).slice(0, 4)
+            setMessages((prev) => {
+              const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
+              if (ri === -1) return prev
+              const ai = prev.length - 1 - ri
+              return prev.map((m, i) => i === ai ? {
+                ...m,
+                places: [shown],
+                gallery: { type: 'photo_gallery' as const, place_name: shown.name, photos: urls },
+              } : m)
+            })
+          }
+        }
+      }
+      rememberReply = true
     } catch (err) {
       if (err instanceof ChatGateError) {
         // Quota gate (free previews used / out of credits): drop the empty
@@ -721,17 +1092,24 @@ export default function LandingPage() {
         console.error(err)
         setMessages((prev) => [
           ...prev,
-          { id: uid(), role: 'assistant', content: 'Something went wrong. Please try again.' },
+          { id: uid(), role: 'assistant', content: t('errors.retry') },
         ])
       }
     } finally {
-      streamDone = true
       abortRef.current = null
       setLoading(false)
       setStreamingStarted(false)
       streamingStartedRef.current = false
+      if (rememberReply && !isRouteAsk(text) && isCacheableReply(assistantText)) {
+        const pins = placesRef.current
+        replyCacheRef.current.set(replyCacheKey(opts?.display ?? text), {
+          at: Date.now(),
+          content: assistantText,
+          places: pins.length ? pins : undefined,
+        })
+      }
     }
-  }, [userLocation, manualCity, places, itinerary, activeStop, suppressGpsContext]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userLocation, manualCity, places, itinerary, activeStop, suppressGpsContext, t, beginRouteClaim, commitRouteFailure]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const applyMapEffects = useCallback((effects: MapActionEffects) => {
     if (effects.showUserOnMap !== undefined) setShowUserOnMap(effects.showUserOnMap)
@@ -747,16 +1125,26 @@ export default function LandingPage() {
     if (effects.routeFromUser !== undefined) setRouteFromUser(effects.routeFromUser)
     if (effects.customRoute !== undefined) setCustomRoute(effects.customRoute)
     if (effects.routeMode !== undefined) setRouteMode(effects.routeMode)
-    if (effects.routeFromUser || effects.customRoute) { setRouteInfo(null); setRouteError(null) }
-    if (effects.customRoute === null && effects.routeFromUser === false) { setRouteInfo(null); setRouteError(null) }
-  }, [])
+    if (effects.pendingRoute !== undefined) pendingRouteRef.current = effects.pendingRoute
+    if (routeClaimAllowedRef.current && (effects.routeFromUser || effects.customRoute || effects.routeUnresolved)) {
+      beginRouteClaim()
+    }
+    if (effects.customRoute === null && effects.routeFromUser === false && !effects.routeUnresolved) {
+      setRouteInfo(null)
+      setRouteError(null)
+    }
+  }, [t, beginRouteClaim])
 
   /** Follow the user once permission exists (no-op if a watch is running). */
   const startGeoWatch = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return
     if (geoWatchIdRef.current != null) return
     geoWatchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (pos) => setUserLocation({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      }),
       () => {},
       { enableHighAccuracy: true, maximumAge: 60_000 },
     )
@@ -776,23 +1164,59 @@ export default function LandingPage() {
     return false
   }, [userLocation, startGeoWatch])
 
+  useEffect(() => {
+    if (!routeFromUser) return
+    void ensureUserLocation()
+  }, [routeFromUser, ensureUserLocation])
+
+  useEffect(() => {
+    if (!mapExpanded) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (detailsPlace || addOpen || communityOpen || profileTarget || shareTarget || shareConversationId) return
+      setMapExpanded(false)
+      setChatCollapsed(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mapExpanded, detailsPlace, addOpen, communityOpen, profileTarget, shareTarget, shareConversationId])
+
+  useEffect(() => {
+    if (!routeInfo) return
+    const failed = t('errors.routeFailed')
+    const claimed = pendingRouteClaim.current || routeVerdictRef.current === failed
+    if (!claimed) return
+    routePaintedRef.current = true
+    pendingRouteClaim.current = false
+    if (routeWatchRef.current != null) {
+      window.clearTimeout(routeWatchRef.current)
+      routeWatchRef.current = null
+    }
+    const verdict = t('errors.routeDrawn')
+      .replace('{place}', routeInfo.destinationName)
+      .replace('{distance}', routeInfo.distance || '—')
+      .replace('{duration}', routeInfo.duration || '—')
+    if (routeVerdictRef.current === verdict && !routeError) return
+    routeVerdictRef.current = verdict
+    if (routeError) setRouteError(null)
+    setMessages((prev) => replaceTurnAssistant(prev, turnAssistantIdRef.current, verdict))
+  }, [routeInfo, routeError, t])
+
   const handleMarkerClick = useCallback((index: number) => {
+    const place = mapPlacesRef.current[index]
+    if (place) clickedPlaceRef.current = place
     setActiveStop(index)
     setMapZoomFocus(true)
     setMapVisible(true)
-    // Selecting a place only focuses it and pops its action bubble on the map
-    // (Full details / Save / Route / Website). It does NOT open the full details
-    // panel anymore, and does NOT draw a route — keep the map clean.
-    setRouteFromUser(false)
-    setCustomRoute(null)
-    setRouteInfo(null)
-    setRouteError(null)
-  }, [])
+    setPlaceCardOpen(true)
+    if (isMobile) setChatSnap('collapsed')
+  }, [isMobile])
 
   // Clicking a result card in the in-chat gallery: on the FULL map it just
   // focuses that place's marker (the bubble gives full details); in compact mode
   // it opens the details panel as before.
   const handleGalleryCardClick = useCallback((place: Place) => {
+    clickedPlaceRef.current = place
     if (mapExpanded) {
       const list = (itinerary?.stops ?? places) as Place[]
       const idx = list.findIndex((p) => p.place_id === place.place_id)
@@ -804,6 +1228,7 @@ export default function LandingPage() {
   const handleRouteFromMe = useCallback(async (index: number) => {
     setActiveStop(index)
     setCustomRoute(null)
+    setMapZoomFocus(false)
     setRouteFromUser(true)
     setRouteInfo(null)
     setRouteError(null)
@@ -852,6 +1277,7 @@ export default function LandingPage() {
       // Clear personal data so a shared/public browser doesn't leak the previous
       // user's chats or saved places to the next person.
       localStorage.removeItem('hodari_history')
+      localStorage.removeItem('hodari_chat_index')
       localStorage.removeItem('hodari_saved')
     } catch { /* ignore */ }
     window.location.href = '/login'
@@ -862,6 +1288,8 @@ export default function LandingPage() {
     sessionId.current = uid()
     try { localStorage.setItem('hodari_active_session', sessionId.current) } catch { /* ignore */ }
     placeMemoryRef.current.clear()
+    clickedPlaceRef.current = null
+    setPlaceCardOpen(false)
     setAnnotations(EMPTY_ANNOTATIONS)
     setMessages([])
     setLoading(false)
@@ -889,6 +1317,8 @@ export default function LandingPage() {
     sessionId.current = item.id
     try { localStorage.setItem('hodari_active_session', item.id) } catch { /* ignore */ }
     setAnnotations(EMPTY_ANNOTATIONS)
+    clickedPlaceRef.current = null
+    setPlaceCardOpen(false)
     setMessages(item.messages)
     setLoading(false)
     setThinkingSteps([])
@@ -933,6 +1363,18 @@ export default function LandingPage() {
     setSpeechOutSupported(isSpeechOutputSupported())
     const savedVoice = localStorage.getItem('hodari_speak')
     if (savedVoice === '0') setSpeakReplies(false)
+    try {
+      const raw = localStorage.getItem('hodari_chat_index')
+      const parsed = raw ? JSON.parse(raw) as HistoryItem[] : []
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setHistoryItems(parsed.filter((item) => item?.id && item.title).map((item) => ({
+          id: item.id,
+          title: item.title,
+          updatedAt: item.updatedAt ?? 0,
+          messages: [],
+        })))
+      }
+    } catch { /* ignore */ }
     const resume = (items: HistoryItem[]) => {
       setHistoryItems(items)
       // Resume the conversation we left (e.g. after visiting Saved places) instead
@@ -951,19 +1393,63 @@ export default function LandingPage() {
       try {
         const savedHistory = localStorage.getItem('hodari_history')
         const parsed = savedHistory ? JSON.parse(savedHistory) as HistoryItem[] : []
-        resume(Array.isArray(parsed) ? parsed.slice(0, 20) : [])
+        const items = Array.isArray(parsed) ? parsed.slice(0, 20) : []
+        if (messagesRef.current.length > 0) mergeHistory(items)
+        else resume(items)
       } catch {
-        setHistoryItems([])
+        if (messagesRef.current.length === 0) setHistoryItems([])
       }
     }
 
+    const mergeHistory = (incoming: HistoryItem[]) => {
+      setHistoryItems((prev) => {
+        const byId = new Map<string, HistoryItem>()
+        for (const item of incoming) byId.set(item.id, item)
+        for (const item of prev) {
+          const existing = byId.get(item.id)
+          if (!existing) {
+            byId.set(item.id, item)
+            continue
+          }
+          const incomingHasText = (existing.messages?.length ?? 0) > 0
+          const localHasText = (item.messages?.length ?? 0) > 0
+          if (localHasText && !incomingHasText) byId.set(item.id, item)
+          else if (!localHasText && incomingHasText) byId.set(item.id, existing)
+          else if (item.updatedAt >= existing.updatedAt) byId.set(item.id, item)
+        }
+        return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20)
+      })
+    }
+
     // Members → server history (encrypted, cross-device). Guests → localStorage.
+    // A late response must not wipe a conversation that started while this request was in flight.
     fetch('/api/chats')
       .then((r) => r.json())
       .then((d) => {
         if (d?.authed) {
           authedRef.current = true
-          resume((d.chats ?? []).map((c: HistoryItem) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: c.messages ?? [] })))
+          const serverChats = (d.chats ?? []).map((c: HistoryItem) => ({
+            id: c.id,
+            title: c.title,
+            updatedAt: c.updatedAt,
+            messages: c.messages ?? [],
+          }))
+          mergeHistory(serverChats)
+          const activeId = localStorage.getItem('hodari_active_session')
+          const active = activeId ? serverChats.find((it: HistoryItem) => it.id === activeId) : undefined
+          if (active && messagesRef.current.length === 0) {
+            sessionId.current = active.id
+            setMessages(active.messages)
+          }
+          if (messagesRef.current.length > 0) {
+            const firstUser = messagesRef.current.find((m) => m.role === 'user') ?? messagesRef.current[0]
+            const title = firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 56) || 'Untitled chat'
+            fetch('/api/chats', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId: sessionId.current, title, messages: messagesRef.current }),
+            }).catch(() => {})
+          }
         } else {
           loadLocal()
         }
@@ -980,20 +1466,38 @@ export default function LandingPage() {
     localStorage.setItem('hodari_history', JSON.stringify(historyItems.slice(0, 20)))
   }, [historyItems, historyLoaded])
 
-  // Members: debounced save of the active conversation to the server. Debounced
-  // so streaming token updates coalesce into one write per turn.
+  // Titles only (no transcript) so Recent is not blank while Mongo answers.
   useEffect(() => {
-    if (!historyLoaded || !authedRef.current || !messages.length) return
-    const t = setTimeout(() => {
-      const firstUser = messages.find((m) => m.role === 'user') ?? messages[0]
-      const title = firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 56) || 'Untitled chat'
+    if (!historyLoaded) return
+    const index = historyItems.map(({ id, title, updatedAt }) => ({ id, title, updatedAt }))
+    try { localStorage.setItem('hodari_chat_index', JSON.stringify(index)) } catch { /* ignore */ }
+  }, [historyItems, historyLoaded])
+
+  // Members: the first user message is written immediately so Recent survives a
+  // reload. Later token updates are debounced into one write per turn.
+  const savedSessionsRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (!historyLoaded || !authedRef.current || !messages.some((m) => m.role === 'user')) return
+    const session = sessionId.current
+    const firstUser = messages.find((m) => m.role === 'user') ?? messages[0]
+    const title = firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 56) || 'Untitled chat'
+    const post = (snapshot: ChatMessage[]) => {
       fetch('/api/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionId.current, title, messages }),
-      }).catch(() => {})
-    }, 1500)
-    return () => clearTimeout(t)
+        body: JSON.stringify({ sessionId: session, title, messages: snapshot }),
+      }).then((r) => {
+        if (!r.ok) savedSessionsRef.current.delete(session)
+      }).catch(() => {
+        savedSessionsRef.current.delete(session)
+      })
+    }
+    if (!savedSessionsRef.current.has(session)) {
+      savedSessionsRef.current.add(session)
+      post(messages)
+    }
+    const handle = setTimeout(() => post(messages), 1500)
+    return () => clearTimeout(handle)
   }, [messages, historyLoaded])
 
   useEffect(() => {
@@ -1043,9 +1547,10 @@ export default function LandingPage() {
   }, [])
 
   useEffect(() => {
+    if (!themeReady) return
     document.documentElement.classList.toggle('dark', theme === 'dark')
     localStorage.setItem('hodari_theme', theme)
-  }, [theme])
+  }, [theme, themeReady])
 
   // Geolocation: never prompt on page load — mobile browsers auto-deny or
   // silently swallow un-gestured prompts (the old "AI can't get my location"
@@ -1057,7 +1562,15 @@ export default function LandingPage() {
     queryGeoPermission().then((state) => {
       if (cancelled || state !== 'granted') return
       navigator.geolocation?.getCurrentPosition(
-        (pos) => { if (!cancelled) setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }) },
+        (pos) => {
+          if (!cancelled) {
+            setUserLocation({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+            })
+          }
+        },
         () => {},
         { enableHighAccuracy: true, timeout: 20_000, maximumAge: 120_000 },
       )
@@ -1102,21 +1615,41 @@ export default function LandingPage() {
     cancelSpeech()
   }, [])
 
-  const voiceTranscriptCb = useCallback((t: string) => handleSend(t, { speak: true }), [handleSend])
+  const voiceTranscriptCb = useCallback((t: string) => handleSend(t, { speak: true, fromVoice: true }), [handleSend])
   // The ONLY useVoice instance in the app. Multiple instances each spin up their
   // own recorder on auto-resume, which double-sends every transcript.
   const voice = useVoice({
     onTranscript: voiceTranscriptCb,
     disabled: loading,
     autoResumeAfterSpeak: uiMode === 'voice',
-    // Voice mode: browser STT → live words + instant echo (no ~4s Gemini delay).
-    preferBrowserStt: uiMode === 'voice',
+    // Browser STT follows the active app language and streams words into the
+    // field. Kinyarwanda skips this path inside useVoice (Chrome has no model).
+    preferBrowserStt: true,
   })
 
   const stopEverything = useCallback(() => {
     voice.stopAll()
     cancelSpeech()
     abortRef.current?.abort()
+  }, [voice])
+
+  const retryLastVoice = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
+    setThinkingSteps([])
+    setStreamingStarted(false)
+    streamingStartedRef.current = false
+    setMessages((prev) => {
+      let lastUser = -1
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].role === 'user') { lastUser = i; break }
+      }
+      if (lastUser < 0 || !prev[lastUser].fromVoice) return prev
+      return prev.slice(0, lastUser)
+    })
+    voice.allowNextListen()
+    void voice.startListening()
   }, [voice])
 
   const enterChatMode = useCallback(() => {
@@ -1132,9 +1665,11 @@ export default function LandingPage() {
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant') ?? null
   const itineraryStops = itinerary?.stops ?? null
-  const mapPlaces = itineraryStops
-    ? itineraryStops.map((s) => ({ ...s, personalization_score: 0, categories: [] }))
-    : places
+  const mapPlaces = (itineraryStops ?? places).map((item) => enrichMapPlace(item, placeMemoryRef.current))
+  mapPlacesRef.current = mapPlaces
+  const mapItinerary: ItineraryStop[] | null = itineraryStops
+    ? itineraryStops.map((stop, i) => ({ ...mapPlaces[i], ...stop }))
+    : null
 
   const pinsMismatch =
     showUserOnMap &&
@@ -1152,7 +1687,7 @@ export default function LandingPage() {
   // ── Mobile sheet discipline ─────────────────────────────────────────────────
   // When the map (base layer) first appears, drop the chat to its peek so the
   // user actually sees the map they asked for; the reply shows in the peek.
-  const showMobileMap = isMobile && mapVisible && hasMapData
+  const showMobileMap = isMobile && mapVisible && (hasMapData || placesLoading)
   const prevShowMobileMapRef = useRef(false)
   useEffect(() => {
     if (showMobileMap && !prevShowMobileMapRef.current) setChatSnap('collapsed')
@@ -1191,11 +1726,13 @@ export default function LandingPage() {
     locateDraft()
     setMapVisible(true)
     if (places.length > 0) return
+    setPlacesLoading(true)
     try {
       const res = await fetch('/api/places')
       const data = await res.json()
       if (Array.isArray(data.places) && data.places.length) setPlaces(data.places)
     } catch { /* form still works with GPS */ }
+    finally { setPlacesLoading(false) }
   }, [locateDraft, places.length])
 
   const applyInclusion = useCallback(async (mode: 'local' | 'accessible') => {
@@ -1203,6 +1740,9 @@ export default function LandingPage() {
     const nextAccess = mode === 'accessible' ? !requireAccessible : requireAccessible
     setPreferLocal(nextLocal)
     setRequireAccessible(nextAccess)
+    setMarketOnly(false)
+    setMapVisible(true)
+    setPlacesLoading(true)
     const params = new URLSearchParams()
     if (nextLocal) params.set('local_business', '1')
     if (nextAccess) params.set('accessible', '1')
@@ -1210,10 +1750,12 @@ export default function LandingPage() {
       const res = await fetch(`/api/places?${params.toString()}`)
       const data = await res.json()
       if (Array.isArray(data.places)) {
-        setPlaces(data.places)
-        if (data.places.length) setMapVisible(true)
+        const ranked = markPrioritized(data.places, nextLocal)
+        setPlaces(ranked)
+        if (ranked.length) setMapVisible(true)
       }
     } catch { /* chips still reach the agent */ }
+    finally { setPlacesLoading(false) }
     const tokens = [
       nextLocal ? 'prefer_local:' : '',
       nextAccess ? 'require_accessible:' : '',
@@ -1224,6 +1766,37 @@ export default function LandingPage() {
     }
   }, [preferLocal, requireAccessible, handleSend, t])
 
+  const applyMarkets = useCallback(async () => {
+    const next = !marketOnly
+    setMarketOnly(next)
+    setPreferLocal(false)
+    setRequireAccessible(false)
+    setMapVisible(true)
+    setPlacesLoading(true)
+    try {
+      let data = await (await fetch('/api/places', { cache: 'no-store' })).json()
+      let all = Array.isArray(data.places) ? data.places as Place[] : []
+      if (all.length === 0) {
+        data = await (await fetch('/api/places', { cache: 'no-store' })).json()
+        all = Array.isArray(data.places) ? data.places as Place[] : []
+      }
+      const list = next
+        ? all.filter((place) => (place.categories ?? []).includes('market'))
+        : all
+      const ranked = markPrioritized(list, false)
+      setPlaces(ranked)
+      if (next) {
+        setMessages((prev) => [...prev, {
+          id: uid(),
+          role: 'assistant',
+          content: ranked.length ? t('filters.marketsHint') : t('filters.marketsHint'),
+          places: ranked,
+        }])
+      }
+    } catch { /* the button stays usable */ }
+    finally { setPlacesLoading(false) }
+  }, [marketOnly, t])
+
   const chatPanel = (
     <ChatPanel
       messages={messages}
@@ -1232,12 +1805,17 @@ export default function LandingPage() {
       streamingStarted={streamingStarted}
       onSend={handleSend}
       onInclusionFilter={applyInclusion}
+      onMarketFilter={() => { void applyMarkets() }}
+      onAddPlace={() => { void openAddPlace() }}
       inclusionLocal={preferLocal}
       inclusionAccessible={requireAccessible}
+      inclusionMarkets={marketOnly}
       voiceState={voice.voiceState}
       voiceSupported={voice.supported}
       voiceWarning={voice.warning}
       voiceLiveText={voice.liveText}
+      voiceRecognitionLang={voice.recognitionLang}
+      onRetryVoice={retryLastVoice}
       onVoiceToggle={voice.toggleVoice}
       onVoiceStop={stopEverything}
       historyItems={historyItems}
@@ -1281,7 +1859,8 @@ export default function LandingPage() {
       onEnterVoiceMode={enterVoiceMode}
       userName={userName}
       onLogout={handleLogout}
-      onOpenCommunity={openCommunity}
+      workspace={workspace}
+      onOpenCommunity={showCommunity ? openCommunity : undefined}
       communityInviteCount={communityInviteCount}
     />
   )
@@ -1341,16 +1920,6 @@ export default function LandingPage() {
           <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
             {!mapVisible && (
               <>
-                <div
-                  className="pointer-events-none absolute inset-0 opacity-[0.018]"
-                  style={{
-                    backgroundImage: 'radial-gradient(circle, rgb(var(--color-text)) 1px, transparent 1px)',
-                    backgroundSize: '32px 32px',
-                  }}
-                />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-[440px] w-[440px] rounded-full bg-[radial-gradient(circle,rgba(245,106,0,0.12),rgba(196,92,38,0.04)_46%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(245,106,0,0.18),transparent_68%)]" />
-                </div>
               </>
             )}
             <div className={`relative mx-auto flex h-full w-full flex-col ${mapVisible ? '' : 'max-w-2xl'}`}>
@@ -1358,12 +1927,13 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {mapVisible && hasMapData && (
+          {mapVisible && (hasMapData || placesLoading) && (
             <aside className="flex h-full w-[clamp(300px,32vw,420px)] shrink-0 flex-col border-l border-border bg-surface2/40 animate-slide-right">
               <div className="relative min-h-[200px] flex-1 p-2">
                 <MapView
+                  loading={placesLoading && mapPlaces.length === 0}
                   places={mapPlaces as Place[]}
-                  itinerary={itineraryStops}
+                  itinerary={mapItinerary}
                   annotations={annotations}
                   activeStopIndex={activeStop}
                   onMarkerClick={handleMarkerClick}
@@ -1375,12 +1945,20 @@ export default function LandingPage() {
                   routeFromUser={routeFromUser}
                   customRoute={customRoute}
                   routeMode={routeMode}
+                  onRouteModeChange={setRouteMode}
+                  onRequestLocation={handleUseMyLocation}
+                  locationPending={locationPending}
                   onRouteInfo={setRouteInfo}
-                  onRouteError={setRouteError}
+                  onRouteError={reportRouteError}
+                  placeCardOpen={placeCardOpen}
+                  onPlaceCardClose={() => setPlaceCardOpen(false)}
                   zoomFocusOnActive={mapZoomFocus}
                   aiBusy={loading}
                   size="compact"
                   hideInlinePlaceCard
+                  onPlaceFullDetails={setDetailsPlace}
+                  onPlaceSave={handleSavePlace}
+                  onPlaceRoute={handleRouteFromMe}
                   onExpand={() => { setMapExpanded(true); setMapVisible(true); setChatCollapsed(false) }}
                   selectedPlace={selectedPlace}
                   routeInfo={routeInfo}
@@ -1388,7 +1966,7 @@ export default function LandingPage() {
                   communityPins={communityPins}
                   communityFriends={communityFriends}
                   communityLayerOn={communityLayerOn}
-                  onToggleCommunityLayer={handleToggleCommunityLayer}
+                  onToggleCommunityLayer={showCommunity ? handleToggleCommunityLayer : undefined}
                   onOpenProfile={handleOpenProfile}
                   communityFocus={communityFocus}
                 />
@@ -1415,8 +1993,9 @@ export default function LandingPage() {
       {!isMobile && mapExpanded && (
         <div className="absolute inset-0 isolate">
           <MapView
+            loading={placesLoading && mapPlaces.length === 0}
             places={mapPlaces as Place[]}
-            itinerary={itineraryStops}
+            itinerary={mapItinerary}
             annotations={annotations}
             activeStopIndex={activeStop}
             onMarkerClick={handleMarkerClick}
@@ -1428,10 +2007,17 @@ export default function LandingPage() {
             routeFromUser={routeFromUser}
             customRoute={customRoute}
             routeMode={routeMode}
+            onRouteModeChange={setRouteMode}
+            onRequestLocation={handleUseMyLocation}
+            locationPending={locationPending}
             onRouteInfo={setRouteInfo}
-            onRouteError={setRouteError}
+            onRouteError={reportRouteError}
+            routeInfo={routeInfo}
+            placeCardOpen={placeCardOpen}
+            onPlaceCardClose={() => setPlaceCardOpen(false)}
             zoomFocusOnActive={mapZoomFocus}
             aiBusy={loading}
+            onCollapse={() => { setMapExpanded(false); setChatCollapsed(false) }}
             onPlaceFullDetails={setDetailsPlace}
             onPlaceSave={handleSavePlace}
             onPlaceRoute={handleRouteFromMe}
@@ -1439,14 +2025,14 @@ export default function LandingPage() {
             communityPins={communityPins}
             communityFriends={communityFriends}
             communityLayerOn={communityLayerOn}
-            onToggleCommunityLayer={handleToggleCommunityLayer}
+            onToggleCommunityLayer={showCommunity ? handleToggleCommunityLayer : undefined}
             onOpenProfile={handleOpenProfile}
             communityFocus={communityFocus}
             onPlaceShare={handlePlaceShare}
           />
           {pinsMismatch && (
             <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-md px-4 py-2 rounded-xl bg-surface/95 border border-gold/40 text-sm text-text backdrop-blur-md">
-              Pins look far from your GPS. Ask Hodari to search again in your city.
+              Pins look far from your GPS. Ask MapForAll to search again in your city.
             </div>
           )}
           {routeActive && routeError && (
@@ -1457,15 +2043,6 @@ export default function LandingPage() {
           {routeFromUser && locationPending && (
             <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-full bg-surface/95 border border-border text-sm text-text2 backdrop-blur-md">
               Getting your location…
-            </div>
-          )}
-          {routeActive && routeInfo && (
-            <div className="pointer-events-none absolute bottom-[11.5rem] left-1/2 z-20 -translate-x-1/2 px-4 py-2 rounded-full bg-surface/95 border border-border shadow-lg text-sm text-text backdrop-blur-md">
-              <span className="text-gold font-medium">{routeInfo.destinationName}</span>
-              <span className="text-text2">
-                {' · '}{routeInfo.distance}{' · '}{routeInfo.duration} from{' '}
-                {routeInfo.originLabel && routeInfo.originLabel !== 'you' ? routeInfo.originLabel : 'you'}
-              </span>
             </div>
           )}
           {routeFromUser && !userLocation && !locationPending && (
@@ -1548,10 +2125,15 @@ export default function LandingPage() {
       )}
       {isMobile && showMobileMap && (
         <>
-          <div className="absolute inset-0 isolate">
+          <div
+            className={mapExpanded ? 'fixed inset-0 z-[100] isolate' : 'absolute inset-0 isolate'}
+            style={mapExpanded ? { top: 'env(safe-area-inset-top)', bottom: 'env(safe-area-inset-bottom)' } : undefined}
+          >
             <MapView
+              size={mapExpanded ? 'compact' : 'full'}
+              loading={placesLoading && mapPlaces.length === 0}
               places={mapPlaces as Place[]}
-              itinerary={itineraryStops}
+              itinerary={mapItinerary}
               annotations={annotations}
               activeStopIndex={activeStop}
               onMarkerClick={handleMarkerClick}
@@ -1563,10 +2145,18 @@ export default function LandingPage() {
               routeFromUser={routeFromUser}
               customRoute={customRoute}
               routeMode={routeMode}
+              onRouteModeChange={setRouteMode}
+              onRequestLocation={handleUseMyLocation}
+              locationPending={locationPending}
               onRouteInfo={setRouteInfo}
-              onRouteError={setRouteError}
+              onRouteError={reportRouteError}
+              routeInfo={routeInfo}
+              placeCardOpen={placeCardOpen}
+              onPlaceCardClose={() => setPlaceCardOpen(false)}
               zoomFocusOnActive={mapZoomFocus}
               aiBusy={loading}
+              onExpand={mapExpanded ? undefined : () => { setMapExpanded(true); setMapVisible(true); setChatSnap('collapsed') }}
+              onCollapse={mapExpanded ? () => { setMapExpanded(false); setChatSnap('half') } : undefined}
               onPlaceFullDetails={setDetailsPlace}
               onPlaceSave={handleSavePlace}
               onPlaceRoute={handleRouteFromMe}
@@ -1574,7 +2164,7 @@ export default function LandingPage() {
               communityPins={communityPins}
               communityFriends={communityFriends}
               communityLayerOn={communityLayerOn}
-              onToggleCommunityLayer={handleToggleCommunityLayer}
+              onToggleCommunityLayer={showCommunity ? handleToggleCommunityLayer : undefined}
               onOpenProfile={handleOpenProfile}
               communityFocus={communityFocus}
               onPlaceShare={handlePlaceShare}
@@ -1583,7 +2173,7 @@ export default function LandingPage() {
             <div className="pointer-events-none absolute inset-x-3 top-16 z-[65] flex flex-col items-center gap-2">
               {pinsMismatch && (
                 <div className="pointer-events-auto max-w-md rounded-xl border border-gold/40 bg-surface/95 px-4 py-2 text-[13px] text-text backdrop-blur-md">
-                  Pins look far from your GPS. Ask Hodari to search again in your city.
+                  Pins look far from your GPS. Ask MapForAll to search again in your city.
                 </div>
               )}
               {routeActive && routeError && (
@@ -1594,14 +2184,6 @@ export default function LandingPage() {
               {routeFromUser && locationPending && (
                 <div className="pointer-events-auto rounded-full border border-border bg-surface/95 px-4 py-2 text-[13px] text-text2 backdrop-blur-md">
                   Getting your location…
-                </div>
-              )}
-              {routeActive && routeInfo && (
-                <div className="rounded-full border border-border bg-surface/95 px-4 py-2 text-[13px] text-text shadow-lg backdrop-blur-md">
-                  <span className="font-medium text-gold">{routeInfo.destinationName}</span>
-                  <span className="text-text2">
-                    {' · '}{routeInfo.distance}{' · '}{routeInfo.duration}
-                  </span>
                 </div>
               )}
             </div>
@@ -1641,7 +2223,7 @@ export default function LandingPage() {
                 className="min-h-[44px] w-full px-5 pb-3 text-left"
               >
                 <p className="text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
-                  Hodari
+                  MapForAll
                 </p>
                 <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-[var(--text-secondary)]">
                   {loading
@@ -1653,6 +2235,18 @@ export default function LandingPage() {
           >
             {chatPanel}
           </MobileChatSheet>
+          {placeCardOpen && selectedPlace && chatSnap === 'collapsed' && activeStop != null && (
+            <div className="fixed inset-x-0 z-[125] px-3" style={{ bottom: SHEET_PEEK_PX + 8 }}>
+              <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_-8px_30px_rgba(0,0,0,0.18)]">
+                <PlaceInfoCard
+                  place={selectedPlace}
+                  index={activeStop}
+                  onClose={() => setPlaceCardOpen(false)}
+                  onRoute={(index) => { void handleRouteFromMe(index) }}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -1662,6 +2256,8 @@ export default function LandingPage() {
           placeId={detailsPlace.place_id}
           fallbackName={detailsPlace.name}
           fallbackMapsUrl={`https://www.google.com/maps/search/?api=1&query=${detailsPlace.coordinates.lat},${detailsPlace.coordinates.lng}&query_place_id=${encodeURIComponent(detailsPlace.place_id)}`}
+          fallbackPlace={detailsPlace}
+          userLocation={userLocation}
           onClose={() => setDetailsPlace(null)}
           onShare={() => setShareTarget(detailsPlace)}
         />

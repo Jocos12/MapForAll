@@ -234,6 +234,36 @@ npm run dev
 
 Open **http://localhost:3000**. Verify with `curl http://localhost:8000/list-apps` → `["hodari"]`.
 
+### Known limitations (local dev on Windows)
+
+**Next.js dev server stuck after many hot reloads (error `-4094`).** When the repo
+sits on a secondary or external drive (here `J:`), Windows can briefly lock files
+in `client/.next` during a hot reload. The server log then shows
+`UNKNOWN: unknown error, open ... errno: -4094`, and pages either return HTTP 500 or
+render but never finish loading: grey placeholder cards that never fill in.
+The business dashboard shows *"Le chargement semble bloqué"* with a reload link
+after 8 seconds instead of staying grey. If reloading doesn't fix it, restart the
+dev server:
+
+```powershell
+# In the terminal running `npm run dev`: Ctrl+C, then
+cd client
+npm run dev
+# If port 3000 is still taken, stop whoever holds it first:
+Get-NetTCPConnection -LocalPort 3000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+If it keeps happening, delete `client/.next` while the server is stopped, or move
+the repo to the system drive (`C:`). **Before a demo:** restart the dev server,
+open each page you'll show once to compile it, and avoid editing files while
+presenting.
+
+**MongoDB MCP server memory.** Every MCP session opens its own Atlas connection
+pool, and the MCP server never releases it. The Next.js server now reuses a single
+session per process (see `client/lib/mcp.ts`). Don't add routes that call
+`initialize` per request. If `npx mongodb-mcp-server` has been running for days
+and responses slow down, restart it. The Next.js server reconnects on its own.
+
 ### Environment variables
 
 **`agents/.env`**

@@ -20,14 +20,16 @@
  * the blast radius. If it ever matters, swap the find+update for a conditional
  * `update-many` (filter encodes the cap) and read the matched count.
  */
-import { mcpSession, mcpCall, ensureConnected, extractDocs } from '@/lib/mcp'
+import { mcpConnected, mcpCall, extractDocs } from '@/lib/mcp'
 
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
 
 /** Free generations a not-logged-in visitor gets before the login wall. */
 export const GUEST_FREE = Number(process.env.HODARI_GUEST_FREE ?? 3)
-/** Free generations a signed-in member gets each day before the paywall. */
-export const FREE_DAILY = Number(process.env.HODARI_FREE_DAILY ?? 5)
+/** Free generations a signed-in member gets each day before the paywall.
+ *  40 covers a jury demo; the old default of 5 blocked the app mid-session.
+ *  Override with HODARI_FREE_DAILY. */
+export const FREE_DAILY = Number(process.env.HODARI_FREE_DAILY ?? 40)
 
 export type Gate = 'login' | 'paywall'
 
@@ -103,8 +105,7 @@ export function unlimitedEntitlement(): Entitlement {
 }
 
 async function mcp() {
-  const sid = await mcpSession()
-  await ensureConnected(sid)
+  const sid = await mcpConnected()
   return sid
 }
 

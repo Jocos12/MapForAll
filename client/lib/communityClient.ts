@@ -125,7 +125,9 @@ export interface ConnectionsView {
 }
 
 export async function getConnections(): Promise<ConnectionsView> {
-  return request<ConnectionsView>('/api/community/connections')
+  const body = await request<ConnectionsView & { unavailable?: boolean }>('/api/community/connections')
+  if (body.unavailable) throw new CommunityApiError(503, 'Community is unavailable right now.')
+  return body
 }
 
 export type ConnectionAction =
@@ -149,10 +151,11 @@ export async function connectionAction(action: ConnectionAction, userId: string)
 // ── Conversations + messages ─────────────────────────────────────────────────
 
 export async function listConversations(): Promise<ConversationSummary[]> {
-  const { conversations } = await request<{ conversations: ConversationSummary[] }>(
+  const body = await request<{ conversations: ConversationSummary[]; unavailable?: boolean }>(
     '/api/community/conversations',
   )
-  return conversations
+  if (body.unavailable) throw new CommunityApiError(503, 'Community is unavailable right now.')
+  return body.conversations ?? []
 }
 
 export interface CreateConversationBody {
@@ -198,20 +201,44 @@ export async function sendMessage(
 
 // ── Presence + keys ──────────────────────────────────────────────────────────
 
+/** Stop calling a dead presence route after three failures in a row. */
+let presenceFailures = 0
+
+function notePresenceFailure(): void {
+  presenceFailures += 1
+}
+
+function notePresenceOk(): void {
+  presenceFailures = 0
+}
+
 /** Heartbeat: bumps last_seen_at (location only persists if sharing is on). */
 export async function sendHeartbeat(loc?: { lat: number; lng: number }): Promise<void> {
-  await request<{ ok: true }>('/api/community/presence', {
-    method: 'POST',
-    body: JSON.stringify(loc ?? {}),
-  })
+  if (presenceFailures >= 3) return
+  try {
+    await request<{ ok: true }>('/api/community/presence', {
+      method: 'POST',
+      body: JSON.stringify(loc ?? {}),
+    })
+    notePresenceOk()
+  } catch (err) {
+    notePresenceFailure()
+    throw err
+  }
 }
 
 export async function getPresence(ids: string[]): Promise<Record<string, PresenceInfo>> {
-  if (ids.length === 0) return {}
-  const { presence } = await request<{ presence: Record<string, PresenceInfo> }>(
-    `/api/community/presence?ids=${encodeURIComponent(ids.join(','))}`,
-  )
-  return presence
+  if (ids.length === 0 || presenceFailures >= 3) return {}
+  try {
+    const { presence } = await request<{ presence: Record<string, PresenceInfo> }>(
+      `/api/community/presence?ids=${encodeURIComponent(ids.join(','))}`,
+    )
+    notePresenceOk()
+    return presence
+  } catch (err) {
+    notePresenceFailure()
+    throw err
+  }
 }
 
 export async function getPubkeys(ids: string[]): Promise<Record<string, JsonWebKey | null>> {

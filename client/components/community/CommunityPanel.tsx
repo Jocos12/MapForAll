@@ -46,15 +46,13 @@ import {
   type ProfileView,
 } from '@/lib/communityClient'
 import { ensureKeypair, createConversationKey, E2EEUnavailableError } from '@/lib/e2ee'
+import { useI18n } from '@/components/I18nProvider'
 import { registerConversationKey } from './conversationKeys'
 import { EmojiAvatar } from './EmojiAvatar'
 import { PeopleTab } from './PeopleTab'
 import { ConversationList } from './ConversationList'
 import { ConversationThread } from './ConversationThread'
 import { NewGroupPanel } from './NewGroupPanel'
-
-const REFRESH_MS = 10_000
-const HEARTBEAT_MS = 30_000
 
 export interface CommunityPanelProps {
   open: boolean
@@ -88,34 +86,21 @@ function samePubkey(stored: Record<string, unknown> | null, local: JsonWebKey): 
 }
 
 /**
- * Presence heartbeat: POST /api/community/presence every 30s while `enabled`
- * and the document is visible. Exported so the host app can also run it
- * app-wide (outside the panel) if desired.
+ * One presence heartbeat when the panel opens. A 30s loop was timing out
+ * against Mongo and filling the console with 500s.
  */
 export function usePresenceHeartbeat(enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return
-    const beat = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-      void sendHeartbeat().catch(() => {
-        /* best-effort */
-      })
-    }
-    beat()
-    const interval = setInterval(beat, HEARTBEAT_MS)
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') beat()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      clearInterval(interval)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
+    void sendHeartbeat().catch(() => {
+      /* best-effort */
+    })
   }, [enabled])
 }
 
 export function CommunityPanel(props: CommunityPanelProps) {
   const { open, onClose, currentUserId, onSharePin, onOpenProfile, onInviteCountChange } = props
+  const { t } = useI18n()
 
   const [tab, setTab] = useState<'people' | 'chats'>('people')
   const [e2ee, setE2ee] = useState<E2eeState>({ status: 'init' })
@@ -127,6 +112,7 @@ export function CommunityPanel(props: CommunityPanelProps) {
   const [groupOpen, setGroupOpen] = useState(false)
   const [openingDm, setOpeningDm] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [communityDown, setCommunityDown] = useState(false)
 
   const e2eeReady = e2ee.status === 'ready'
   const myPubkey = e2ee.status === 'ready' ? e2ee.pubkey : null
@@ -185,21 +171,24 @@ export function CommunityPanel(props: CommunityPanelProps) {
       for (const e of conns.accepted) if (e.user) ids.add(e.user.user_id)
       for (const c of convs) for (const id of c.member_ids) if (id !== currentUserId) ids.add(id)
       if (ids.size > 0) {
-        const p = await getPresence([...ids])
+        const p = await getPresence([...ids]).catch(() => ({} as Record<string, PresenceInfo>))
         setPresence(p)
       }
+      setCommunityDown(false)
+      setNotice((prev) => (prev === t('community.unavailable') ? null : prev))
     } catch {
-      /* transient — the next tick retries */
+      setCommunityDown(true)
+      setConnections({ accepted: [], pending_in: [], pending_out: [], blocked: [] })
+      setConversations([])
+      setNotice(t('community.unavailable'))
     } finally {
       refreshInFlight.current = false
     }
-  }, [currentUserId])
+  }, [currentUserId, t])
 
   useEffect(() => {
     if (!open) return
     void refresh()
-    const interval = setInterval(() => void refresh(), REFRESH_MS)
-    return () => clearInterval(interval)
   }, [open, refresh])
 
   // Reset transient view state whenever the panel is (re)opened.
@@ -336,7 +325,7 @@ export function CommunityPanel(props: CommunityPanelProps) {
             <p className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12px] leading-relaxed text-text2">
               <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" aria-hidden />
               <span>
-                {e2eeNotice} You can still browse. Sending stays off, Hodari never sends unencrypted
+                {e2eeNotice} You can still browse. Sending stays off, MapForAll never sends unencrypted
                 messages.
               </span>
             </p>
@@ -395,6 +384,7 @@ export function CommunityPanel(props: CommunityPanelProps) {
                 onMessage={(user) => void openDm(user)}
                 openingDm={openingDm}
                 onOpenProfile={onOpenProfile}
+                unavailable={communityDown}
               />
             </TabsContent>
             <TabsContent value="chats">

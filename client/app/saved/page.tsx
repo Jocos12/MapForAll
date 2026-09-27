@@ -1,9 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Bookmark, Calendar, CalendarPlus, Check, MapPin, Trash2 } from 'lucide-react'
+import { ArrowLeft, Bookmark, Calendar, CalendarPlus, Check, Star, Trash2 } from 'lucide-react'
+import { CategoryIcon } from '@/components/CategoryIcon'
+import { PlaceBadges } from '@/components/PlaceBadges'
+import { useI18n } from '@/components/I18nProvider'
 import { googleCalendarUrl } from '@/lib/calendar'
+import type { Place } from '@/lib/types'
 
 interface SavedItem {
   place_id: string
@@ -33,7 +37,6 @@ function groupByDay(items: SavedItem[]): Record<string, SavedItem[]> {
   return groups
 }
 
-/** Returns a human-friendly relative hint, e.g. "Today", "Tomorrow", "in 5 days", "5 days ago". */
 function relativeDay(dateStr: string): string {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -48,19 +51,88 @@ function relativeDay(dateStr: string): string {
   return ''
 }
 
+function dedupePlaces(items: SavedItem[]): SavedItem[] {
+  const seenId = new Set<string>()
+  const seenName = new Set<string>()
+  const out: SavedItem[] = []
+  for (const item of items) {
+    const id = (item.place_id || '').trim().toLowerCase()
+    const name = (item.place_name || '').trim().toLowerCase()
+    if ((id && seenId.has(id)) || (name && seenName.has(name))) continue
+    if (id) seenId.add(id)
+    if (name) seenName.add(name)
+    out.push(item)
+  }
+  return out
+}
+
+function withBookmarks(items: SavedItem[], catalog: Record<string, Place>): SavedItem[] {
+  let ids: string[] = []
+  if (typeof window !== 'undefined') {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('hodari_saved') ?? '[]')
+      if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === 'string')
+    } catch { /* ok */ }
+  }
+  const extra: SavedItem[] = []
+  for (const id of ids) {
+    const place = catalog[id]
+    if (!place) continue
+    extra.push({ place_id: place.place_id, place_name: place.name, city: place.city, action: 'saved' })
+  }
+  return dedupePlaces([...items, ...extra])
+}
+
+function kmBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)))
+}
+
+function PlaceThumb({
+  name,
+  photo,
+  categories,
+  size = 'lg',
+}: {
+  name: string
+  photo?: string
+  categories?: string[]
+  size?: 'lg' | 'sm'
+}) {
+  const [broken, setBroken] = useState(false)
+  const box = size === 'lg' ? 'h-24 w-24 rounded-xl' : 'h-12 w-12 rounded-lg'
+  return (
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden bg-neutral-100 dark:bg-white/5 ${box}`}>
+      {photo && !broken ? (
+        <img src={photo} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+      ) : (
+        <CategoryIcon categories={categories} className={size === 'lg' ? 'h-6 w-6 text-neutral-400' : 'h-4 w-4 text-neutral-400'} />
+      )}
+      <span className="sr-only">{name}</span>
+    </div>
+  )
+}
+
 export default function SavedPage() {
+  const { t } = useI18n()
   const [saved, setSaved] = useState<SavedItem[]>([])
   const [reminders, setReminders] = useState<SavedItem[]>([])
   const [details, setDetails] = useState<Record<string, PlaceDetails>>({})
+  const [catalog, setCatalog] = useState<Record<string, Place>>({})
+  const [here, setHere] = useState<{ lat: number; lng: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'places' | 'calendar'>('places')
   const [editingReminder, setEditingReminder] = useState<string | null>(null)
   const [reminderInputs, setReminderInputs] = useState<Record<string, { date: string; note: string }>>({})
   const [calendarConnected, setCalendarConnected] = useState(false)
   const [addedToCal, setAddedToCal] = useState<Set<string>>(new Set())
+  const [userId, setUserId] = useState('')
   const fetchedRef = useRef(new Set<string>())
-
-  const userId = typeof window !== 'undefined' ? (localStorage.getItem('hodari_uid') ?? '') : ''
 
   useEffect(() => {
     fetch('/api/calendar/status').then((r) => r.json()).then((d) => setCalendarConnected(!!d?.connected)).catch(() => {})
@@ -74,7 +146,7 @@ export default function SavedPage() {
       title: item.place_name,
       date: (item.visit_date ?? '').slice(0, 10),
       location: item.city || undefined,
-      description: item.note || `Planned with Hodari`,
+      description: item.note || `Planned with MapForAll`,
     }
     if (!ev.date) return
     if (calendarConnected) {
@@ -90,18 +162,52 @@ export default function SavedPage() {
   }
 
   useEffect(() => {
-    if (!userId) { setLoading(false); return }
-    Promise.all([
-      fetch(`/api/saved?userId=${encodeURIComponent(userId)}`).then((r) => r.json()),
-    ]).then(([data]) => {
-      setSaved((data.saved ?? []).filter((i: SavedItem) => i.action !== 'reminder') as SavedItem[])
-      setReminders((data.saved ?? []).filter((i: SavedItem) => i.action === 'reminder') as SavedItem[])
-    }).catch(() => {}).finally(() => setLoading(false))
-  }, [userId])
+    let cancel = false
+    ;(async () => {
+      let uid = ''
+      try { uid = localStorage.getItem('hodari_uid') ?? '' } catch { /* ok */ }
+      if (!uid) {
+        const me = await fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+        if (typeof me?.user?.user_id === 'string') uid = me.user.user_id
+      }
+      if (cancel) return
+      setUserId(uid)
+      if (!uid) { setLoading(false); return }
+      const data = await fetch(`/api/saved?userId=${encodeURIComponent(uid)}`).then((r) => r.json()).catch(() => ({ saved: [] }))
+      if (cancel) return
+      const rows = (data.saved ?? []) as SavedItem[]
+      setSaved(dedupePlaces(rows.filter((i) => i.action !== 'reminder')))
+      setReminders(dedupePlaces(rows.filter((i) => i.action === 'reminder')))
+      setLoading(false)
+    })()
+    return () => { cancel = true }
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/places')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const map: Record<string, Place> = {}
+        for (const place of (data?.places ?? []) as Place[]) {
+          if (place?.place_id) map[place.place_id] = place
+          if (place?.name) map[`name:${place.name.trim().toLowerCase()}`] = place
+        }
+        setCatalog(map)
+      })
+      .catch(() => {})
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setHere({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 60_000, timeout: 8000 },
+    )
+  }, [])
+
+  const places = useMemo(() => withBookmarks(saved, catalog), [saved, catalog])
 
   // Load details + photos for saved places
   useEffect(() => {
-    const toFetch = saved.filter((s) => s.place_id && !fetchedRef.current.has(s.place_id))
+    const toFetch = places.filter((s) => s.place_id && !fetchedRef.current.has(s.place_id))
     toFetch.forEach((item) => {
       fetchedRef.current.add(item.place_id)
       fetch(`/api/place-photos?placeId=${encodeURIComponent(item.place_id)}`)
@@ -112,7 +218,7 @@ export default function SavedPage() {
         })
         .catch(() => {})
     })
-  }, [saved])
+  }, [places])
 
   const reminderFor = (placeId: string) => reminders.find((r) => r.place_id === placeId)
 
@@ -146,23 +252,23 @@ export default function SavedPage() {
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="font-display text-xl font-semibold text-[#15151a] dark:text-amber-50">Saved Places</h1>
-          <p className="text-[11px] uppercase tracking-wider text-amber-700/70 dark:text-amber-500/70">FIFA World Cup 2026 · Your list</p>
+          <h1 className="font-display text-xl font-semibold text-[#15151a] dark:text-amber-50">{t('saved.title')}</h1>
+          <p className="text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">{t('saved.subtitle')}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setTab('places')}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors ${tab === 'places' ? 'bg-amber-600 text-white' : 'border border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20'}`}
+            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors ${tab === 'places' ? 'bg-[#E8672A] text-white' : 'border border-neutral-200 text-neutral-600 hover:bg-neutral-50 dark:border-white/10 dark:text-neutral-300'}`}
           >
-            <Bookmark className="h-3.5 w-3.5" />
-            Places
+            <Bookmark className="h-4 w-4" strokeWidth={1.75} />
+            {t('saved.places')}
           </button>
           <button
             onClick={() => setTab('calendar')}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors ${tab === 'calendar' ? 'bg-amber-600 text-white' : 'border border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20'}`}
+            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors ${tab === 'calendar' ? 'bg-[#E8672A] text-white' : 'border border-neutral-200 text-neutral-600 hover:bg-neutral-50 dark:border-white/10 dark:text-neutral-300'}`}
           >
-            <Calendar className="h-3.5 w-3.5" />
-            Plan
+            <Calendar className="h-4 w-4" strokeWidth={1.75} />
+            {t('saved.plan')}
           </button>
         </div>
       </header>
@@ -177,61 +283,60 @@ export default function SavedPage() {
         {!loading && !userId && (
           <div className="rounded-2xl border border-amber-100 bg-white/60 p-10 text-center dark:border-amber-900/30 dark:bg-amber-950/10">
             <Bookmark className="mx-auto mb-4 h-10 w-10 text-amber-300" />
-            <p className="text-[15px] text-amber-800 dark:text-amber-200">Sign in to see your saved places.</p>
+            <p className="text-[15px] text-neutral-700 dark:text-neutral-200">{t('saved.signIn')}</p>
             <Link href="/login" className="mt-4 inline-block rounded-full bg-amber-600 px-6 py-2 text-[13px] font-medium text-white transition-colors hover:bg-amber-700">
-              Sign in
+              {t('saved.signInAction')}
             </Link>
           </div>
         )}
 
         {!loading && userId && tab === 'places' && (
           <>
-            {saved.length === 0 ? (
+            {places.length === 0 ? (
               <div className="rounded-2xl border border-amber-100 bg-white/60 p-10 text-center dark:border-amber-900/30 dark:bg-amber-950/10">
                 <Bookmark className="mx-auto mb-4 h-10 w-10 text-amber-300" />
-                <p className="text-[15px] font-medium text-amber-800 dark:text-amber-200">No saved places yet</p>
-                <p className="mt-1.5 text-[13px] text-amber-600/70 dark:text-amber-500/70">
-                  Tap the bookmark icon on any place card to save it here.
+                <p className="text-[15px] font-medium text-neutral-800 dark:text-neutral-100">{t('saved.empty')}</p>
+                <p className="mt-1.5 text-[13px] text-neutral-500">
+                  {t('saved.emptyHint')}
                 </p>
                 <Link href="/chat" className="mt-4 inline-block rounded-full bg-amber-600 px-6 py-2 text-[13px] font-medium text-white transition-colors hover:bg-amber-700">
-                  Explore places
+                  {t('saved.explore')}
                 </Link>
               </div>
             ) : (
               <div className="space-y-4">
-                {saved.map((item) => {
+                {places.map((item) => {
                   const d = details[item.place_id]
+                  const place = catalog[item.place_id] ?? catalog[`name:${item.place_name.trim().toLowerCase()}`]
                   const reminder = reminderFor(item.place_id)
                   const isEditing = editingReminder === item.place_id
                   const inp = reminderInputs[item.place_id] ?? { date: reminder?.visit_date ?? '', note: reminder?.note ?? '' }
+                  const photo = d?.photoUrls?.[0] || place?.photo_url
+                  const distance = here && place?.coordinates
+                    ? kmBetween(here, place.coordinates)
+                    : null
                   return (
-                    <div key={item.place_id} className="overflow-hidden rounded-2xl border border-amber-100/80 bg-white/70 shadow-sm dark:border-amber-900/30 dark:bg-[#15151a]/70">
+                    <div key={item.place_id} className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-sm dark:border-white/10 dark:bg-[#15151a]">
                       <div className="flex gap-4 p-4">
-                        {/* Photo */}
-                        <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-amber-100 dark:bg-amber-900/20">
-                          {d?.photoUrls?.[0] ? (
-                            <img src={d.photoUrls[0]} alt={item.place_name} className="h-full w-full object-cover" />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center">
-                              <MapPin className="h-6 w-6 text-amber-300" />
-                            </div>
-                          )}
-                        </div>
+                        <PlaceThumb name={item.place_name} photo={photo} categories={place?.categories} />
 
-                        {/* Info */}
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-[15px] text-[#15151a] dark:text-amber-50">{item.place_name}</p>
-                          {item.city && <p className="mt-0.5 text-[12px] text-amber-700/70 dark:text-amber-500/70">{item.city}</p>}
-                          {d?.rating != null && (
-                            <p className="mt-1 text-[11px] text-amber-600">★ {d.rating.toFixed(1)}</p>
-                          )}
-                          {reminder?.visit_date && !isEditing && (
-                            <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-                              <Calendar className="h-3 w-3 shrink-0" />
-                              {new Date(reminder.visit_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                              {reminder.note && <span className="ml-1 truncate text-amber-600/70">· {reminder.note}</span>}
-                            </div>
-                          )}
+                          <p className="truncate font-semibold text-[15px] text-[#15151a] dark:text-neutral-50">{item.place_name}</p>
+                          {item.city && <p className="mt-0.5 text-[12px] text-neutral-500">{item.city}</p>}
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            {(d?.rating ?? place?.rating) != null && (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
+                                <Star className="h-3.5 w-3.5 text-neutral-400" strokeWidth={1.75} />
+                                {(d?.rating ?? place?.rating)!.toFixed(1)}
+                              </span>
+                            )}
+                            {distance != null && Number.isFinite(distance) && (
+                              <span className="text-[11px] text-neutral-500">
+                                {distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`}
+                              </span>
+                            )}
+                          </div>
+                          {place && <div className="mt-2"><PlaceBadges place={place} /></div>}
                         </div>
 
                         {/* Actions */}
@@ -243,13 +348,13 @@ export default function SavedPage() {
                             }}
                             className="rounded-full border border-amber-200 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
                           >
-                            {isEditing ? 'Cancel' : reminder?.visit_date ? 'Edit visit' : 'Plan visit'}
+                            {isEditing ? 'Cancel' : reminder?.visit_date ? t('saved.editVisit') : t('saved.planVisit')}
                           </button>
                           <Link
                             href="/chat"
                             className="rounded-full border border-amber-200 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
                           >
-                            Ask Hodari
+                            {t('saved.ask')}
                           </Link>
                         </div>
                       </div>
@@ -273,7 +378,7 @@ export default function SavedPage() {
                               <input
                                 type="text"
                                 value={inp.note}
-                                placeholder="e.g. lunch before the match"
+                                placeholder={t('saved.notePlaceholder')}
                                 onChange={(e) => setReminderInputs((p) => ({ ...p, [item.place_id]: { ...inp, note: e.target.value } }))}
                                 className="w-full rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-[13px] text-[#15151a] outline-none placeholder:text-amber-300 focus:border-amber-400 dark:border-amber-800 dark:bg-[#15151a] dark:text-amber-50"
                               />
@@ -301,12 +406,12 @@ export default function SavedPage() {
             {!hasCalendar ? (
               <div className="rounded-2xl border border-amber-100 bg-white/60 p-10 text-center dark:border-amber-900/30 dark:bg-amber-950/10">
                 <Calendar className="mx-auto mb-4 h-10 w-10 text-amber-300" />
-                <p className="text-[15px] font-medium text-amber-800 dark:text-amber-200">No visits planned yet</p>
+                <p className="text-[15px] font-medium text-amber-800 dark:text-amber-200">{t('saved.noVisits')}</p>
                 <p className="mt-1.5 text-[13px] text-amber-600/70 dark:text-amber-500/70">
-                  Go to Places and tap &ldquo;Plan visit&rdquo; on a saved place to add it here.
+                  {t('saved.noVisitsHint')}
                 </p>
                 <button onClick={() => setTab('places')} className="mt-4 inline-block rounded-full bg-amber-600 px-6 py-2 text-[13px] font-medium text-white transition-colors hover:bg-amber-700">
-                  View saved places
+                  {t('saved.viewPlaces')}
                 </button>
               </div>
             ) : (
@@ -379,16 +484,12 @@ export default function SavedPage() {
                                 <span className="text-xl font-bold leading-none">{itemDt.getDate()}</span>
                               </div>
 
-                              {/* Thumbnail */}
-                              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-amber-100 dark:bg-amber-900/20">
-                                {d?.photoUrls?.[0] ? (
-                                  <img src={d.photoUrls[0]} alt={item.place_name} className="h-full w-full object-cover" />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center">
-                                    <MapPin className="h-4 w-4 text-amber-300" />
-                                  </div>
-                                )}
-                              </div>
+                              <PlaceThumb
+                                name={item.place_name}
+                                photo={d?.photoUrls?.[0]}
+                                categories={(catalog[item.place_id] ?? catalog[`name:${item.place_name.trim().toLowerCase()}`])?.categories}
+                                size="sm"
+                              />
 
                               {/* Details */}
                               <div className="min-w-0 flex-1">

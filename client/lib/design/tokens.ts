@@ -27,6 +27,9 @@ export const accents = {
   gold: '#F56A00',
   goldLight: '#FF8C2F',
   goldDim: '#7A3500',
+  terracotta: '#C45C26',
+  cream: '#F6F0E6',
+  ink: '#1A1614',
   green: '#00C47A',
   danger: '#FF5A57',
 } as const

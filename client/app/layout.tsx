@@ -22,11 +22,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="fr" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('hodari_theme');if(t==='dark')document.documentElement.classList.add('dark');else document.documentElement.classList.remove('dark');}catch(e){}})();`,
+            __html: `(function(){try{var c=document.documentElement.classList,p=location.pathname,t=localStorage.getItem('hodari_theme');if(t==='dark'&&p.indexOf('/business')!==0)c.add('dark');else c.remove('dark');if(p.indexOf('/business/dashboard')===0&&localStorage.getItem('hodari_biz_theme')==='dark')c.add('biz-dark');else c.remove('biz-dark');}catch(e){}})();`,
           }}
         />
       </head>

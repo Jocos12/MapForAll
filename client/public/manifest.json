@@ -1,7 +1,7 @@
 {
-  "name": "Hodari — FIFA World Cup 2026 Guide",
-  "short_name": "Hodari",
-  "description": "AI-powered tourist assistant for the 2026 FIFA World Cup",
+  "name": "MapForAll — Ikarita ya Bose",
+  "short_name": "MapForAll",
+  "description": "MapForAll, Ikarita ya Bose. Trouvez des lieux accessibles et des commerces locaux.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0C0B0A",

@@ -38,7 +38,7 @@ function Sink() {
     <main className="min-h-screen overflow-y-auto p-8 md:p-12 max-w-4xl mx-auto space-y-12">
       <header className="space-y-1">
         <h1 className="font-display text-3xl font-semibold text-text">Design system</h1>
-        <p className="font-mono text-[11px] text-text3 tracking-widest uppercase">Hodari · kitchen sink (dev only)</p>
+        <p className="font-mono text-[11px] text-text3 tracking-widest uppercase">MapForAll · kitchen sink (dev only)</p>
       </header>
 
       <Section title="Color">

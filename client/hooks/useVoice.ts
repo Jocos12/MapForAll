@@ -1,6 +1,7 @@
 'use client'
 
 import { useReducer, useCallback, useEffect, useRef, useState } from 'react'
+import { useI18n } from '@/components/I18nProvider'
 import {
   cancelSpeech,
   emitActivity,
@@ -11,6 +12,7 @@ import {
   stopSpeech,
   subscribeVoiceActivity,
   subscribeLiveTranscript,
+  subscribeVoiceDiag,
 } from '@/lib/voice'
 
 export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'paused'
@@ -49,6 +51,7 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
   const [supported, setSupported] = useState(true)
   const [warning, setWarning] = useState('')
   const [liveText, setLiveText] = useState('')
+  const [recognitionLang, setRecognitionLang] = useState('')
   const recorderRef = useRef<Awaited<ReturnType<typeof startRecording>> | null>(null)
   const lastSpeechAtRef = useRef(0)
   const rafRef = useRef(0)
@@ -58,8 +61,20 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
   const stateRef = useRef(state)
   stateRef.current = state
   // Keep the latest value so startListening (a stable callback) reads it live.
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
+  const forceListenRef = useRef(false)
   const preferBrowserRef = useRef(preferBrowserStt)
   preferBrowserRef.current = preferBrowserStt
+  const { lang, t } = useI18n()
+  const langRef = useRef(lang)
+  const tRef = useRef(t)
+  langRef.current = lang
+  tRef.current = t
+
+  useEffect(() => {
+    setWarning('')
+  }, [lang])
 
   const stopListening = useCallback(async () => {
     const rec = recorderRef.current
@@ -86,7 +101,8 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
   }, [onTranscript])
 
   const startListening = useCallback(async () => {
-    if (disabled) return
+    if (disabledRef.current && !forceListenRef.current) return
+    forceListenRef.current = false
     setWarning('')
     setLiveText('')
     stopSpeech()
@@ -99,7 +115,12 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
     }
 
     try {
-      recorderRef.current = await startRecording({ preferBrowser: preferBrowserRef.current })
+      const activeLang = langRef.current
+      // Chrome has no Kinyarwanda model. A French browser pass would invent
+      // French words, so RW waits for the language-hinted transcription.
+      const preferBrowser = Boolean(preferBrowserRef.current) && activeLang !== 'rw'
+      if (activeLang === 'rw') setWarning(tRef.current('composer.voiceRwFallback'))
+      recorderRef.current = await startRecording({ preferBrowser, lang: activeLang })
       lastSpeechAtRef.current = performance.now()
       dispatch({ type: 'LISTEN' })
       emitActivity('listening', 0)
@@ -109,7 +130,7 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
       dispatch({ type: 'ERROR' })
       emitActivity('idle', 0)
     }
-  }, [disabled])
+  }, [])
 
   const stopAll = useCallback(() => {
     stopSpeech()
@@ -160,6 +181,7 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
   useEffect(() => setSupported(isSpeechInputSupported()), [])
 
   useEffect(() => subscribeLiveTranscript(setLiveText), [])
+  useEffect(() => subscribeVoiceDiag((diag) => setRecognitionLang(diag.recognitionLang)), [])
 
   useEffect(() => {
     return subscribeVoiceActivity((s, level) => {
@@ -210,8 +232,11 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
     supported,
     warning,
     liveText,
+    recognitionLang,
     toggleVoice,
     startListening,
+    /** Lets one listen start even while a reply is still marked loading (Retry). */
+    allowNextListen: () => { forceListenRef.current = true },
     stopAll,
     pauseSpeaking,
     resumeSpeaking,

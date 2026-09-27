@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Accessibility, Store, X } from 'lucide-react'
-import { PLACE_CATEGORIES } from '@/lib/places'
+import { PHOTO_LIMIT, PLACE_CATEGORIES } from '@/lib/places'
+import { compressImage } from '@/lib/imageCompress'
 import { useI18n } from '@/components/I18nProvider'
-
-const PHOTO_LIMIT = 150_000
 
 export function AddPlaceSheet({
   open,
@@ -26,25 +26,37 @@ export function AddPlaceSheet({
   const [name, setName] = useState('')
   const [category, setCategory] = useState<string>(PLACE_CATEGORIES[0])
   const [localBusiness, setLocalBusiness] = useState(true)
-  const [accessible, setAccessible] = useState(false)
+  const [entrance, setEntrance] = useState(false)
+  const [toilet, setToilet] = useState(false)
+  const [parking, setParking] = useState(false)
   const [photo, setPhoto] = useState('')
   const [photoError, setPhotoError] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  if (!open) return null
+  useEffect(() => {
+    if (!open) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previous
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+
+  if (!open || typeof document === 'undefined') return null
 
   async function onPhoto(file: File | undefined) {
     setPhotoError('')
     setPhoto('')
     if (!file) return
-    const data = await file.arrayBuffer()
-    const bytes = new Uint8Array(data)
-    let binary = ''
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-    const url = `data:${file.type || 'image/jpeg'};base64,${btoa(binary)}`
-    if (url.length > PHOTO_LIMIT) {
+    const url = await compressImage(file, PHOTO_LIMIT)
+    if (!url) {
       setPhotoError(t('add.photoTooBig'))
       return
     }
@@ -66,7 +78,8 @@ export function AddPlaceSheet({
           latitude: Number(lat),
           longitude: Number(lng),
           local_business: localBusiness,
-          accessible,
+          accessible: entrance,
+          access: { entrance, toilet, parking },
           photo_url: photo || undefined,
         }),
       })
@@ -90,11 +103,23 @@ export function AddPlaceSheet({
     }
   }
 
-  return (
-    <div className="pointer-events-auto absolute bottom-4 left-4 right-16 z-[60] max-h-[min(70vh,520px)] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-header)] p-4 shadow-[0_16px_40px_-20px_rgba(26,22,20,0.55)]">
+  return createPortal(
+    <div className="fixed inset-0 z-[400] flex items-end justify-center sm:items-center" role="presentation">
+      <button
+        type="button"
+        aria-label={t('add.close')}
+        className="absolute inset-0 bg-black/55"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-place-title"
+        className="relative z-10 max-h-[min(85dvh,560px)] w-full max-w-md overflow-y-auto rounded-t-2xl border border-[var(--border)] bg-[var(--bg-header)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_24px_60px_rgba(0,0,0,0.35)] sm:rounded-2xl"
+      >
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="font-display text-base font-semibold text-[var(--text-primary)]">{t('add.title')}</h2>
-        <button type="button" onClick={onClose} aria-label={t('add.close')} className="rounded-full p-1 text-[var(--text-secondary)] hover:bg-[#F56A00]/10">
+        <h2 id="add-place-title" className="font-display text-base font-semibold text-[var(--text-primary)]">{t('add.title')}</h2>
+        <button type="button" onClick={onClose} aria-label={t('add.close')} className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-secondary)] transition-colors duration-150 hover:bg-gray-200 hover:text-[var(--text-primary)]">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -124,11 +149,22 @@ export function AddPlaceSheet({
           <Store className="h-3.5 w-3.5 text-terracotta" aria-hidden />
           {t('add.local')}
         </label>
-        <label className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
-          <input type="checkbox" checked={accessible} onChange={(e) => setAccessible(e.target.checked)} />
-          <Accessibility className="h-3.5 w-3.5 text-[#0F6E56]" aria-hidden />
-          {t('add.accessible')}
-        </label>
+        <fieldset className="space-y-1.5">
+          <legend className="text-[12px] font-medium text-[var(--text-primary)]">{t('access.legend')}</legend>
+          <label className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+            <input type="checkbox" checked={entrance} onChange={(e) => setEntrance(e.target.checked)} />
+            <Accessibility className="h-3.5 w-3.5 text-[#0F6E56]" aria-hidden />
+            {t('access.entrance')}
+          </label>
+          <label className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+            <input type="checkbox" checked={toilet} onChange={(e) => setToilet(e.target.checked)} />
+            {t('access.toilet')}
+          </label>
+          <label className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+            <input type="checkbox" checked={parking} onChange={(e) => setParking(e.target.checked)} />
+            {t('access.parking')}
+          </label>
+        </fieldset>
         <label className="text-[12px] text-[var(--text-secondary)]">
           {t('add.photo')}
           <input type="file" accept="image/*" onChange={(e) => void onPhoto(e.target.files?.[0])} className="mt-1 block w-full text-[12px]" />
@@ -140,6 +176,8 @@ export function AddPlaceSheet({
           {busy ? t('add.submitting') : t('add.submit')}
         </button>
       </form>
-    </div>
+      </div>
+    </div>,
+    document.body,
   )
 }

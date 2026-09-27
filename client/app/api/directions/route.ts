@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
     travelMode: travelMode ?? 'WALK',
     computeAlternativeRoutes: false,
+    polylineQuality: 'HIGH_QUALITY',
     languageCode: 'en-US',
     units: 'METRIC',
   }
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': SERVER_KEY,
-      'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration,routes.polyline.encodedPolyline',
+      'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration,routes.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction',
     },
     body: JSON.stringify(body),
   })
@@ -60,10 +61,25 @@ export async function POST(req: NextRequest) {
   const leg = route.legs?.[0] ?? {}
   const distanceMeters: number = leg.distanceMeters ?? 0
   const durationSeconds: number = parseInt((leg.duration ?? '0s').replace('s', ''), 10)
+  const steps = Array.isArray(leg.steps)
+    ? leg.steps
+        .map((step: { distanceMeters?: number; staticDuration?: string; navigationInstruction?: { instructions?: string } }) => {
+          const instruction = step.navigationInstruction?.instructions?.trim() ?? ''
+          if (!instruction) return null
+          const seconds = parseInt((step.staticDuration ?? '0s').replace('s', ''), 10)
+          return {
+            instruction,
+            distance: formatDistance(step.distanceMeters ?? 0),
+            duration: formatDuration(Number.isFinite(seconds) ? seconds : 0),
+          }
+        })
+        .filter((step: { instruction: string } | null): step is { instruction: string; distance: string; duration: string } => !!step)
+    : []
 
   return NextResponse.json({
     distance: formatDistance(distanceMeters),
     duration: formatDuration(durationSeconds),
     polyline: route.polyline?.encodedPolyline ?? '',
+    steps,
   })
 }

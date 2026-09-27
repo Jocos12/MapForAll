@@ -34,6 +34,14 @@ export const ONLINE_WINDOW_MS = 90_000
 /** Radius for the "travellers near me" search. */
 export const NEARBY_RADIUS_M = 25_000
 
+/** Short message for a failed community read. The raw MCP error stays in the server log. */
+export function communityErrorMessage(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err)
+  if (/timeout|aborted/i.test(detail)) return 'The community database timed out. Try again in a moment.'
+  if (/ECONNREFUSED|fetch failed|MCP/i.test(detail)) return 'The community database is not reachable.'
+  return 'Community data is unavailable right now.'
+}
+
 const BASE64_RE = /^[A-Za-z0-9+/_=-]+$/
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -261,6 +269,47 @@ export async function getCommunityProfile(userId: string): Promise<CommunityProf
   const sid = await mcp()
   const doc = await findUserDoc(sid, userId)
   return doc ? toProfile(doc) : null
+}
+
+/**
+ * First visit creates a minimal community profile on the existing user id.
+ * A missing document used to surface as 404 and left the panel on "Loading…".
+ */
+export async function ensureOwnProfile(
+  userId: string,
+  hints?: { email?: string; name?: string },
+): Promise<CommunityProfile> {
+  const sid = await mcp()
+  const existing = await findUserDoc(sid, userId)
+  if (existing) {
+    const profile = toProfile(existing)
+    const set: Record<string, unknown> = {}
+    if (typeof existing.handle !== 'string' || !existing.handle) set.handle = profile.handle
+    if (typeof existing.avatar_emoji !== 'string' || !existing.avatar_emoji) set.avatar_emoji = profile.avatar_emoji
+    if (Object.keys(set).length > 0) {
+      await mcpCall(sid, 'update-many', {
+        database: DB, collection: 'users', filter: { user_id: userId }, update: { $set: set },
+      })
+    }
+    return toProfile({ ...existing, ...set })
+  }
+
+  const emailLocal = (hints?.email ?? '').split('@')[0] || userId
+  const name = (hints?.name ?? '').trim() || emailLocal.replace(/[._]+/g, ' ')
+  const doc = {
+    user_id: userId,
+    handle: defaultHandle(userId),
+    name,
+    email: hints?.email ?? null,
+    bio: '',
+    avatar_emoji: defaultAvatarEmoji(userId),
+    discoverable: true,
+    share_location: false,
+    role: 'client',
+    created_at: nowIso(),
+  }
+  await mcpCall(sid, 'insert-many', { database: DB, collection: 'users', documents: [doc] })
+  return toProfile(doc)
 }
 
 export async function getProfileByHandle(handle: string): Promise<CommunityProfile | null> {
