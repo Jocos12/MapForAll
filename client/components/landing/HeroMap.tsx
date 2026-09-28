@@ -24,8 +24,8 @@ export default function HeroMap({
 }) {
   return (
     <div className={fill
-      ? `absolute inset-0 h-full w-full overflow-hidden bg-[#E7E2DA] dark:bg-[#1A1816] ${className}`
-      : `relative aspect-[4/5] overflow-hidden rounded-2xl border border-black/10 bg-[#E7E2DA] dark:border-white/10 dark:bg-[#1A1816] ${className}`}>
+      ? `absolute inset-0 isolate h-full w-full overflow-hidden bg-[#E7E2DA] dark:bg-[#1A1816] ${className}`
+      : `relative isolate aspect-[4/5] overflow-hidden rounded-2xl border border-black/10 bg-[#E7E2DA] dark:border-white/10 dark:bg-[#1A1816] ${className}`}>
       <KigaliLiveMap />
       <div className="pointer-events-none absolute left-4 top-4 z-[500] flex max-w-[min(230px,calc(100%-2rem))] items-center gap-2.5 rounded-xl border border-black/[0.06] bg-white px-3 py-2.5 shadow-[0_8px_24px_rgba(26,22,20,0.08)] dark:border-white/10 dark:bg-[#1C1916] dark:shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
         <MapPin size={16} className="shrink-0 text-[#1A1614] dark:text-gray-100" />

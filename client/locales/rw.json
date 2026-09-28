@@ -242,6 +242,7 @@
       "bad_credentials": "Imeri cyangwa ijambo ry’ibanga si byo.",
       "invalid_email": "Andika imeri yuzuye.",
       "weak_password": "Koresha nibura inyuguti 8.",
+      "password_mismatch": "Amagambo y’ibanga yombi ntahuye.",
       "name_required": "Andika izina ryawe.",
       "role_required": "Hitamo umukiriya cyangwa umunyir’ubucuruzi.",
       "email_taken": "Iyi imeri isanzwe ifite konti.",
@@ -249,6 +250,22 @@
       "unavailable": "Ububiko bw’amakonti ntibubonetse.",
       "network": "Ikibazo cy’umuyoboro. Ongera ugerageze.",
       "generic": "Habaye ikibazo. Ongera ugerageze."
+    },
+    "roleShort": {
+      "client": "Ndashaka ahantu",
+      "clientHint": "Shakisha, utange amakuru",
+      "owner": "Mfite ubucuruzi",
+      "ownerHint": "Fata ipaji yanjye"
+    },
+    "confirmShort": "Emeza",
+    "confirmPassword": "Emeza ijambo ry’ibanga",
+    "passwordMatch": "Amagambo y’ibanga arahuye",
+    "places": {
+      "city": "Mu mujyi rwagati i Kigali",
+      "convention": "Kigali Convention Centre",
+      "stall": "Aho umucuruzi w’aho acururiza",
+      "market": "Isoko ryo mu gace",
+      "hills": "Imisozi ya Kigali"
     },
     "forkLabel": "Hitamo inzira yawe",
     "joinTitle": "Injira ku ikarita",
@@ -848,6 +865,106 @@
       "body": "Baza ibyo ushaka mu magambo asanzwe. MapForAll ibona ubucuruzi bw’aho n’ahantu abafite ubumuga bashobora kuhagera hafi yawe, buri kamwe gafite ikimenyetso. Nta hantu havumburwa. Byose bigenzurwa n’abaturage.",
       "cta": "Gerageza",
       "bubble": "Shaka ubucuruzi bw’aho hafi y’istadade"
+    },
+    "a11y": {
+      "skip": "Jya ku bikubiyemo",
+      "pause": "Hagarika ibyimuka",
+      "play": "Subukura ibyimuka",
+      "deviceDesc": "Urugero: usaba iduka abafite ubumuga bashobora kwinjiramo hafi ya Kimisagara, MapForAll igusubiza Duka rya Jean, ifite irembo ridafite esikaliye, iminota 4 ugenda n’amaguru."
+    },
+    "hero2": {
+      "pillNew": "Gishya",
+      "pill": "Baza ikibazo, ikarita igusubize",
+      "titleA": "Umujyi wose.",
+      "titleB": "Ugaragara neza.",
+      "sub": "Ubucuruzi buto n’ahantu abafite ubumuga bashobora kuhagera hafi yawe, byongeweho kandi bigenzurwa n’abaturage.",
+      "secondary": "Reba uko bikora",
+      "scroll": "Manura"
+    },
+    "talk": {
+      "app": "MapForAll",
+      "ask": "Shaka iduka abafite ubumuga bashobora kwinjiramo hafi ya Kimisagara",
+      "thinking": "Ndimo ndashakisha hafi yawe",
+      "answer": "Nabonye ahantu 3. Duka rya Jean rifite irembo ridafite esikaliye, iminota 4 n’amaguru.",
+      "placeholder": "Baza ikarita…",
+      "n1Title": "Inzira y’abafite ubumuga yatanzwe",
+      "n1Meta": "Irembo ridafite esikaliye · Nyamirambo",
+      "n2Title": "Ubucuruzi bushya bwongeweho",
+      "n2Meta": "Aho badodera · Kimisagara",
+      "n3Title": "Amasaha yemejwe",
+      "n3Meta": "Isoko rya Kimironko · 7:00 – 19:00"
+    },
+    "ticker": {
+      "label": "Ibyo abaturage batanga",
+      "i1": "Inzira yo kwinjira idafite esikaliye",
+      "i2": "Aho gucururiza hashya mu isoko",
+      "i3": "Ubwiherero bw’abafite ubumuga",
+      "i4": "Amasaha mashya",
+      "i5": "Umuryango mugari w’igare ry’abafite ubumuga",
+      "i6": "Aho guparika hagenewe abafite ubumuga",
+      "i7": "Abakozi bazi ururimi rw’amarenga"
+    },
+    "stats": {
+      "eyebrow": "Mu mibare",
+      "title": "Yakorewe umujyi wose.",
+      "s1": "indimi: Ikinyarwanda, Igifaransa n’Icyongereza.",
+      "s2": "ahantu hahimbwe. Buri hantu hagenzurwa n’abaturage.",
+      "s3": "Iduka rituranye nawe, ubu riri ku ikarita."
+    },
+    "bento": {
+      "eyebrow": "Ibyo ukeneye byose",
+      "title": "Ikarita yumva. Kandi igasubiza.",
+      "localTitle": "Ubucuruzi bw’aho mbere.",
+      "localBody": "Iduka ryo mu gace kawe riza imbere y’amaduka manini.",
+      "rank1": "Duka rya Jean",
+      "rank2": "Iduka ryo ku nguni",
+      "rank3": "Iduka rinini",
+      "localTag": "Iry’aho",
+      "accessTitle": "Ubugerwaho bwagenzuwe.",
+      "accessBody": "Inzira z’abafite ubumuga, imiryango migari, ubwiherero bubakwiriye: byemejwe n’abahajya.",
+      "accessBadge": "Irembo ridafite esikaliye",
+      "voiceTitle": "Vuga uko usanzwe uvuga.",
+      "voiceBody": "Andika cyangwa uvuge ibyo ushaka, nk’uko wabibwira inshuti.",
+      "voicePrompt": "Nafungurira he hafi ya sitade?",
+      "langTitle": "Indimi eshatu.",
+      "langBody": "Ikarita ivuga ururimi rwawe.",
+      "addTitle": "Ongeraho ahantu mu masegonda.",
+      "addStep1": "Shyiraho ikimenyetso",
+      "addStep2": "Ongeraho ifoto",
+      "addStep3": "Biragaragara",
+      "trustTitle": "Byagenzuwe n’abaturage.",
+      "trustBody": "Buri cyemezo gituma ikarita irushaho kwizerwa kuri bose.",
+      "trustCount": "ibyemezo"
+    },
+    "how": {
+      "title": "Intambwe eshatu. Nta kuzenguruka.",
+      "s1Title": "Baza.",
+      "s1Body": "Andika ibyo ushaka, mu Kinyarwanda, mu Gifaransa cyangwa mu Cyongereza.",
+      "s2Title": "MapForAll irashakisha.",
+      "s2Body": "Ubucuruzi bw’aho n’ahantu abafite ubumuga bashobora kuhagera biza mbere, byagenzuwe n’abaturage.",
+      "s3Title": "Genda.",
+      "s3Body": "Inzira y’amaguru, irembo ryoroshye, amasaha: byose biriteguye.",
+      "found": "Ahantu 3 habonetse",
+      "walk": "Iminota 4 n’amaguru",
+      "go": "Genda"
+    },
+    "biz": {
+      "preview": "Icyitegererezo",
+      "card": "Ipaji y’ubucuruzi bwawe",
+      "views": "abantu babonye ipaji yawe",
+      "visible": "Igaragara ku ikarita"
+    },
+    "access2": {
+      "title": "Ubugerwaho, urebye rimwe.",
+      "body": "Buri hantu herekana neza ibyagenzuwe. Urabimenya mbere yo kujyayo.",
+      "l1": "Irembo ridafite esikaliye",
+      "l2": "Umuryango mugari",
+      "l3": "Ubwiherero bubakwiriye",
+      "l4": "Aho guparika hagenewe abafite ubumuga"
+    },
+    "final": {
+      "title": "Umujyi wawe uragutegereje.",
+      "body": "Shakisha, ongeraho, sangiza. Buri hantu ni ingenzi."
     },
     "footer": {
       "copy": "© 2026 MapForAll (Ikarita ya Bose). Yakozwe ku mujyi wuzuye bose.",
