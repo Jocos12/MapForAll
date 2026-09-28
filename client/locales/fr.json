@@ -242,6 +242,7 @@
       "bad_credentials": "E-mail ou mot de passe incorrect.",
       "invalid_email": "Entre une adresse e-mail valide.",
       "weak_password": "Utilise au moins 8 caractères.",
+      "password_mismatch": "Les deux mots de passe ne correspondent pas.",
       "name_required": "Entre ton nom.",
       "role_required": "Choisis Client ou Propriétaire de commerce.",
       "email_taken": "Un compte existe déjà avec cet e-mail. Essaie de te connecter.",
@@ -249,6 +250,22 @@
       "unavailable": "La base des comptes est indisponible. Réessaie dans un instant.",
       "network": "Erreur réseau. Réessaie.",
       "generic": "Une erreur est survenue. Réessaie."
+    },
+    "roleShort": {
+      "client": "Je cherche des lieux",
+      "clientHint": "Explorer et signaler",
+      "owner": "J’ai un commerce",
+      "ownerHint": "Revendiquer ma fiche"
+    },
+    "confirmShort": "Confirmation",
+    "confirmPassword": "Confirmation du mot de passe",
+    "passwordMatch": "Mots de passe identiques",
+    "places": {
+      "city": "Centre-ville de Kigali",
+      "convention": "Kigali Convention Centre",
+      "stall": "Étal d’un commerçant local",
+      "market": "Marché de quartier",
+      "hills": "Les collines de Kigali"
     },
     "forkLabel": "Choisis ton chemin",
     "joinTitle": "Rejoins la carte",
@@ -848,6 +865,106 @@
       "body": "Demande simplement ce que tu cherches. MapForAll localise les commerces locaux et lieux accessibles autour de toi, avec un badge clair pour chacun. Jamais inventé, toujours vérifié par la communauté.",
       "cta": "Essaie toi-même",
       "bubble": "Trouve un commerce local près du stade"
+    },
+    "a11y": {
+      "skip": "Aller au contenu",
+      "pause": "Mettre les animations en pause",
+      "play": "Relancer les animations",
+      "deviceDesc": "Démonstration : tu demandes un commerce accessible près de Kimisagara, MapForAll répond avec Duka rya Jean, une entrée sans marche à 4 minutes à pied."
+    },
+    "hero2": {
+      "pillNew": "Nouveau",
+      "pill": "Pose ta question, la carte te répond",
+      "titleA": "Toute la ville.",
+      "titleB": "Enfin visible.",
+      "sub": "Les petits commerces et les lieux accessibles près de chez toi, ajoutés et vérifiés par la communauté.",
+      "secondary": "Voir comment ça marche",
+      "scroll": "Fais défiler"
+    },
+    "talk": {
+      "app": "MapForAll",
+      "ask": "Trouve un commerce accessible près de Kimisagara",
+      "thinking": "Je cherche autour de toi",
+      "answer": "J’ai trouvé 3 lieux. Duka rya Jean a une entrée sans marche, à 4 min à pied.",
+      "placeholder": "Demande à la carte…",
+      "n1Title": "Rampe d’accès signalée",
+      "n1Meta": "Entrée sans marche · Nyamirambo",
+      "n2Title": "Nouveau commerce ajouté",
+      "n2Meta": "Atelier de couture · Kimisagara",
+      "n3Title": "Horaires confirmés",
+      "n3Meta": "Marché de Kimironko · 7 h – 19 h"
+    },
+    "ticker": {
+      "label": "Ce que la communauté signale",
+      "i1": "Une rampe à l’entrée",
+      "i2": "Un nouveau stand au marché",
+      "i3": "Des toilettes adaptées",
+      "i4": "Des horaires mis à jour",
+      "i5": "Une porte assez large pour un fauteuil",
+      "i6": "Une place de parking réservée",
+      "i7": "Un personnel qui signe"
+    },
+    "stats": {
+      "eyebrow": "En chiffres",
+      "title": "Pensée pour toute la ville.",
+      "s1": "langues : Kinyarwanda, français et anglais.",
+      "s2": "lieu inventé. Chaque lieu est vérifié par la communauté.",
+      "s3": "Le commerce d’à côté, enfin sur la carte."
+    },
+    "bento": {
+      "eyebrow": "Tout ce qu’il faut",
+      "title": "Une carte qui écoute. Et qui répond.",
+      "localTitle": "Les commerces locaux d’abord.",
+      "localBody": "Le petit commerce du quartier passe devant les grandes chaînes.",
+      "rank1": "Duka rya Jean",
+      "rank2": "Boutique du coin",
+      "rank3": "Grande chaîne",
+      "localTag": "Local",
+      "accessTitle": "Accessibilité vérifiée.",
+      "accessBody": "Rampes, portes larges, toilettes adaptées : confirmé par celles et ceux qui y vont.",
+      "accessBadge": "Entrée sans marche",
+      "voiceTitle": "Parle naturellement.",
+      "voiceBody": "Écris ou dis ce que tu cherches, comme à un ami.",
+      "voicePrompt": "Où manger près du stade ?",
+      "langTitle": "Trois langues.",
+      "langBody": "La carte parle ta langue.",
+      "addTitle": "Ajoute un lieu en quelques secondes.",
+      "addStep1": "Place le pin",
+      "addStep2": "Ajoute une photo",
+      "addStep3": "C’est en ligne",
+      "trustTitle": "Vérifié par la communauté.",
+      "trustBody": "Chaque confirmation rend la carte plus sûre pour tout le monde.",
+      "trustCount": "confirmations"
+    },
+    "how": {
+      "title": "Trois étapes. Zéro détour.",
+      "s1Title": "Demande.",
+      "s1Body": "Écris ce que tu cherches, en Kinyarwanda, en français ou en anglais.",
+      "s2Title": "MapForAll cherche.",
+      "s2Body": "Les commerces locaux et les lieux accessibles remontent en premier, vérifiés par la communauté.",
+      "s3Title": "Tu y vas.",
+      "s3Body": "Itinéraire à pied, entrée accessible, horaires : tout est prêt.",
+      "found": "3 lieux trouvés",
+      "walk": "4 min à pied",
+      "go": "Y aller"
+    },
+    "biz": {
+      "preview": "Aperçu",
+      "card": "Ta fiche commerçant",
+      "views": "personnes ont vu ta fiche",
+      "visible": "Visible sur la carte"
+    },
+    "access2": {
+      "title": "L’accessibilité, en un coup d’œil.",
+      "body": "Chaque lieu affiche clairement ce qui a été vérifié. Tu sais avant d’y aller.",
+      "l1": "Entrée sans marche",
+      "l2": "Porte large",
+      "l3": "Toilettes adaptées",
+      "l4": "Place de parking réservée"
+    },
+    "final": {
+      "title": "Ta ville t’attend.",
+      "body": "Explore, ajoute, partage. Chaque lieu compte."
     },
     "footer": {
       "copy": "© 2026 MapForAll (Ikarita ya Bose). Construit pour une ville plus inclusive.",

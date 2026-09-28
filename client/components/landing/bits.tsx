@@ -83,8 +83,19 @@ export function RollText({ children, lineHeight = 20 }: { children: ReactNode; l
   )
 }
 
-/** Live clock for a host-city timezone, HH:MM, ticking every second. */
-export function LiveClock({ city = 'New York', timeZone = 'America/New_York' }: { city?: string; timeZone?: string }) {
+/**
+ * Live clock for a host-city timezone, HH:MM, ticking every second.
+ * `bare` renders just the time, for callers that label the city themselves.
+ */
+export function LiveClock({
+  city = 'New York',
+  timeZone = 'America/New_York',
+  bare = false,
+}: {
+  city?: string
+  timeZone?: string
+  bare?: boolean
+}) {
   const [time, setTime] = useState('--:--')
   useEffect(() => {
     const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone })
@@ -93,6 +104,7 @@ export function LiveClock({ city = 'New York', timeZone = 'America/New_York' }: 
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [timeZone])
+  if (bare) return <span className="tabular-nums">{time}</span>
   return (
     <span className="flex items-center gap-1.5 text-[13px] text-gray-600 dark:text-gray-400">
       <Clock size={14} />
@@ -123,7 +135,15 @@ export function StarburstMark({ className = 'w-5 h-5 sm:w-6 sm:h-6' }: { classNa
  * useLandingTheme, which itself stays false until a useEffect reads the
  * saved theme — so server HTML and the first client render match.
  */
-export function ThemeToggle({ dark = false, onToggle }: { dark?: boolean; onToggle: () => void }) {
+export function ThemeToggle({
+  dark = false,
+  onToggle,
+  className = 'flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-900 transition-colors duration-150 hover:bg-gray-200 active:opacity-70 dark:bg-white/10 dark:text-gray-100 dark:hover:bg-white/20',
+}: {
+  dark?: boolean
+  onToggle: () => void
+  className?: string
+}) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   const isDark = mounted && dark
@@ -132,7 +152,7 @@ export function ThemeToggle({ dark = false, onToggle }: { dark?: boolean; onTogg
       type="button"
       onClick={onToggle}
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-900 transition-colors duration-150 hover:bg-gray-200 active:opacity-70 dark:bg-white/10 dark:text-gray-100 dark:hover:bg-white/20"
+      className={className}
     >
       {isDark ? (
         <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth="2" strokeLinecap="round">

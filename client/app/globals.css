@@ -186,7 +186,114 @@ a:active,
 }
 .landing-marquee-pausable:hover .landing-marquee { animation-play-state: paused; }
 
+/* ── Landing (iOS-style redesign) ─────────────────────────────────────────── */
+/* Headline accent: brand orange sliding slowly through a deeper orange.
+   Darkest stop keeps large text above 3:1 on the cream page. */
+@keyframes mf-shimmer {
+  from { background-position: 0% 50%; }
+  to   { background-position: 200% 50%; }
+}
+.mf-gradient-text,
+.mf-gradient-on-dark {
+  background-image: linear-gradient(90deg, #E8672A 0%, #B8441A 35%, #E8672A 65%, #C2451A 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: mf-shimmer 7s linear infinite;
+}
+/* Same accent for text that always sits on a dark photo (login panel). */
+.mf-gradient-on-dark,
+.dark .mf-gradient-text {
+  background-image: linear-gradient(90deg, #FF9A63 0%, #E8672A 35%, #FFB285 65%, #E8672A 100%);
+}
+
+/* Slow drifting glow behind the closing call to action. */
+@keyframes mf-glow-drift {
+  0%   { transform: translate3d(-12%, -6%, 0) scale(1); }
+  50%  { transform: translate3d(10%, 8%, 0) scale(1.15); }
+  100% { transform: translate3d(-12%, -6%, 0) scale(1); }
+}
+.mf-glow-drift { animation: mf-glow-drift 14s ease-in-out infinite; }
+
+/* Live map inside the phone: the view breathes, reports ripple in one after
+   another, the visitor's dot pulses, and a light runs along the route. */
+@keyframes mf-map-breathe {
+  0%, 100% { transform: scale(1.04) translate3d(0, 0, 0); }
+  50%      { transform: scale(1.1) translate3d(-1.5%, 1%, 0); }
+}
+.mf-map-breathe { animation: mf-map-breathe 18s ease-in-out infinite; transform-origin: 45% 35%; }
+
+@keyframes mf-report-ping {
+  0%, 8%    { transform: scale(0.4); opacity: 0; }
+  14%       { transform: scale(1); opacity: 0.55; }
+  40%, 100% { transform: scale(3.4); opacity: 0; }
+}
+@keyframes mf-report-dot {
+  0%, 6%    { transform: scale(0); opacity: 0; }
+  14%, 70%  { transform: scale(1); opacity: 1; }
+  85%, 100% { transform: scale(0); opacity: 0; }
+}
+.mf-report-ping { animation: mf-report-ping 5.6s ease-out infinite both; }
+.mf-report-dot  { animation: mf-report-dot 5.6s cubic-bezier(0.28, 0.11, 0.32, 1) infinite both; }
+
+@keyframes mf-me-halo {
+  0%, 100% { transform: scale(0.7); opacity: 0.9; }
+  50%      { transform: scale(1.25); opacity: 0.35; }
+}
+.mf-me-halo { animation: mf-me-halo 2.4s ease-in-out infinite; }
+
+@keyframes mf-route-comet {
+  from { stroke-dashoffset: 104; }
+  to   { stroke-dashoffset: 0; }
+}
+.mf-route-comet {
+  stroke-dasharray: 4 100;
+  animation: mf-route-comet 2.6s cubic-bezier(0.45, 0, 0.55, 1) 1.2s infinite both;
+  filter: drop-shadow(0 0 3px rgba(232, 103, 42, 0.9));
+}
+
+/* Login panel slideshow: each photo zooms out slowly while it is shown, and
+   the story bar fills over the same time. The bar's animationend advances
+   the slide, so pausing the page freezes both. */
+@keyframes mf-kenburns {
+  from { transform: scale(1.14) translate3d(1%, 1%, 0); }
+  to   { transform: scale(1.02) translate3d(0, 0, 0); }
+}
+.mf-kenburns { animation: mf-kenburns 9s cubic-bezier(0.28, 0.11, 0.32, 1) both; }
+
+@keyframes mf-story-bar {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+.mf-story-bar { animation: mf-story-bar linear both; }
+
+/* Keyboard focus: a clear orange ring on every control of the landing. */
+.mf-landing a:focus-visible,
+.mf-landing button:focus-visible,
+.mf-landing [tabindex]:focus-visible {
+  outline: 2.5px solid #E8672A;
+  outline-offset: 3px;
+}
+
+/* Visitor pressed the page's pause button: freeze every CSS loop too. */
+.mf-landing.mf-paused *,
+.mf-landing.mf-paused *::before,
+.mf-landing.mf-paused *::after {
+  animation-play-state: paused !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .mf-gradient-text,
+  .mf-gradient-on-dark,
+  .mf-glow-drift,
+  .mf-map-breathe,
+  .mf-report-ping,
+  .mf-report-dot,
+  .mf-me-halo,
+  .mf-route-comet,
+  .mf-kenburns { animation: none; }
+  .mf-report-dot { transform: scale(1); opacity: 1; }
   .hero-map-drift,
   .hero-glow-pulse,
   .hero-sheen,
