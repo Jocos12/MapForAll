@@ -9,7 +9,7 @@ export const runtime = 'nodejs'
 // Public keys are public by design: any authenticated user can fetch them,
 // since they're required to wrap a conversation key for a new chat.
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:keys:${uid}:${clientIp(req)}`, { capacity: 20, refillPerSec: 1 }).allowed) {
     return NextResponse.json({ error: 'Too many requests. Please wait a moment.' }, { status: 429 })

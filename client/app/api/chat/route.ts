@@ -4,6 +4,8 @@ import { clientIp, rateLimit } from '@/lib/rateLimit'
 import { consume, refund, isUnlimited, unlimitedEntitlement, type Identity } from '@/lib/billing'
 import { adkAuthHeaders } from '@/lib/gcpAuth'
 import { failoverAfterGemini, adkFailureIsRetryable } from '@/lib/ai/providers'
+import { detectMessageLang } from '@/lib/detectLang'
+import { logSearchQuery } from '@/lib/searchLogs'
 
 // Full pipeline (Planner → Explorer → Itinerary) can exceed 2 minutes locally.
 export const maxDuration = 300
@@ -120,10 +122,13 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}))
   const message = typeof body.message === 'string' ? body.message : ''
+  if (message.trim().length >= 2) {
+    void logSearchQuery({ query: message, city: 'Kigali' })
+  }
 
   // Identity is resolved first so a repeated question can be served from the
   // process cache without another agent run. The key includes the user id.
-  const sessionEarly = getSession(req)
+  const sessionEarly = await getSession(req)
   let cacheUser = ''
   try {
     cacheUser = sessionEarly?.uid ?? asId(body.userId, 'userId')
@@ -146,7 +151,7 @@ export async function POST(req: NextRequest) {
   // Identity is server-authoritative: a signed-in member from the session
   // cookie, otherwise an anonymous guest keyed by IP. The body userId is only a
   // session-scoping fallback for the ADK run; it never grants entitlement.
-  const session = getSession(req)
+  const session = await getSession(req)
   let userId: string
   let sessionId: string
   try {
@@ -214,7 +219,7 @@ export async function POST(req: NextRequest) {
     const status = adkRes?.status ?? 0
     if (adkFailureIsRetryable(status, detail)) {
       try {
-        const fallback = await failoverAfterGemini(message)
+        const fallback = await failoverAfterGemini(message, detectMessageLang(message))
         if (fallback) {
           console.error(`[ai] Gemini agent unavailable (${status}); answered with ${fallback.provider}`)
           const payload = JSON.stringify({

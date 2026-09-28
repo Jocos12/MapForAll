@@ -9,7 +9,7 @@ export const runtime = 'nodejs'
 // Closed network: only reviews written by the caller or their accepted
 // connections are ever returned, regardless of the filter.
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   const placeId = asIdOrNull(req.nextUrl.searchParams.get('place_id')) ?? undefined
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
 // POST /api/community/reviews { pin_id?, place_id, rating (1-5), text }
 // pin_id-less reviews are standalone place reviews (they feed future AI recs).
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:reviews:${uid}:${clientIp(req)}`, { capacity: 10, refillPerSec: 0.2 }).allowed) {
     return NextResponse.json({ error: 'Too many reviews. Please wait a moment.' }, { status: 429 })

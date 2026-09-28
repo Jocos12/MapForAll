@@ -10,7 +10,7 @@ export const runtime = 'nodejs'
 // Discoverable users only; the caller is always excluded. Each result carries
 // online status and the connection status relative to the caller.
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:search:${uid}:${clientIp(req)}`, { capacity: 20, refillPerSec: 1 }).allowed) {
     return NextResponse.json({ error: 'Too many searches. Please wait a moment.' }, { status: 429 })

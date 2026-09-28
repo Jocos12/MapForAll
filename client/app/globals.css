@@ -46,9 +46,19 @@
 }
 
 /* ── Page shell ─────────────────────────────────────────────────────────── */
+/* Chat/PWA shell needs a fixed viewport. Admin routes scroll inside
+   `.admin-scroll` (see AdminShell) while body stays overflow-hidden. */
 html, body {
   height: 100%;
   overflow: hidden;
+}
+
+/* When AdminShell mounts it toggles this class so the admin content column
+   can scroll without fighting the chat shell. */
+html.admin-app,
+html.admin-app body {
+  overflow: hidden;
+  height: 100%;
 }
 
 /* App viewport height: 100dvh where supported so the iOS/Android URL bar and
@@ -123,6 +133,17 @@ body::before {
 .hero-sheen {
   animation: hero-sheen 11s ease-in-out 2s infinite;
   will-change: transform;
+}
+
+@keyframes admin-nav-progress {
+  0% { transform: scaleX(0.08); opacity: 1; }
+  40% { transform: scaleX(0.55); }
+  80% { transform: scaleX(0.85); }
+  100% { transform: scaleX(1); opacity: 0.35; }
+}
+.admin-nav-progress {
+  animation: admin-nav-progress 0.42s var(--ease-glide, cubic-bezier(0.22, 1, 0.36, 1)) forwards;
+  transform-origin: left center;
 }
 
 @keyframes hero-chip-float {
@@ -350,6 +371,56 @@ a:active,
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Admin content column: thin themed scrollbar (desktop). Mobile keeps native. */
+.admin-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(110, 91, 80, 0.45) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+.admin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.admin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+.admin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(110, 91, 80, 0.35);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.admin-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 103, 42, 0.55);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dark .admin-scroll {
+  scrollbar-color: rgba(251, 243, 231, 0.28) transparent;
+}
+.dark .admin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(251, 243, 231, 0.22);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dark .admin-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 103, 42, 0.65);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+@media (max-width: 767px) {
+  .admin-scroll {
+    scrollbar-width: auto;
+    scrollbar-gutter: auto;
+  }
+  .admin-scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
 
 /* ── Motion system ────────────────────────────────────────────────────────
    Single source of truth for timing. Motion identity: "the map is the

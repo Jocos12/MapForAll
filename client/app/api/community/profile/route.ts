@@ -58,7 +58,7 @@ function fallbackProfile(uid: string, email?: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   const uid = session?.uid ?? null
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/community/profile — update own bio / handle / avatar / privacy / pubkey.
 export async function PUT(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:profile:${uid}:${clientIp(req)}`, { capacity: 10, refillPerSec: 0.5 }).allowed) {
     return NextResponse.json({ error: 'Too many updates. Please wait a moment.' }, { status: 429 })

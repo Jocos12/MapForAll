@@ -113,7 +113,7 @@ function prechecks(doc: Record<string, unknown>, twins: Record<string, unknown>[
 }
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) {
@@ -254,7 +254,7 @@ export async function GET(req: NextRequest) {
 const SUBSTANTIAL = ['name', 'category', 'address', 'location'] as const
 
 export async function PATCH(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) return result.response
@@ -373,10 +373,16 @@ export async function PATCH(req: NextRequest) {
   const previous = typeof doc.status === 'string' ? doc.status : 'validated'
   const contentEdit = [...changed].some((field) => field !== 'recommends' && field !== 'hoursConfirmed')
   let status = previous
-  if (substantial || (previous === 'rejected' && contentEdit)) {
+  const ownerClaimed = doc.claimed_by_owner === true || doc.source === 'owner_claimed'
+  // Owner-claimed listings stay public on edit (cahier §4.2 immediate visibility).
+  // Community / rejected listings still go back to pending for re-check.
+  if (!ownerClaimed && (substantial || (previous === 'rejected' && contentEdit))) {
     status = 'pending'
     set.status = 'pending'
     set.rejection_reason = ''
+    set.resubmitted_at = now
+  } else if (ownerClaimed && substantial) {
+    set.needs_review = true
     set.resubmitted_at = now
   }
   set.updated_at = now
@@ -402,7 +408,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) return result.response

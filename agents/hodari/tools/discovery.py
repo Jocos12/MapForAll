@@ -32,6 +32,25 @@ _PRICE_RANK = {
     "PRICE_LEVEL_VERY_EXPENSIVE": 4,
 }
 
+# Public MapForAll visibility (cahier §4.2): validated (or legacy missing status), not paused.
+_PUBLIC_STATUS = {
+    "$or": [
+        {"status": "validated"},
+        {"status": {"$exists": False}},
+        {"status": None},
+    ],
+    "paused": {"$ne": True},
+}
+
+_STOP_WORDS = {
+    "the", "a", "an", "in", "at", "near", "of", "for", "to", "and", "or",
+    "find", "show", "me", "please", "looking", "search", "places", "place",
+    "kigali", "rwanda", "best", "good", "top", "some", "any",
+    "le", "la", "les", "un", "une", "des", "du", "de", "dans", "près", "pres",
+    "pour", "avec", "sur", "cherche", "montre", "moi", "svp", "commerces",
+    "commerce", "locaux", "local", "accessible", "accessibles",
+}
+
 
 def extract_place_limit(request: str, default: int = 5) -> int:
     direct = re.search(
@@ -152,59 +171,146 @@ def rank_places(
     return ranked
 
 
-def _catalog_by_category(category: str) -> list[dict[str, Any]]:
-    """Validated Kigali rows whose stored category matches. Empty if Mongo is down."""
+def _escape_regex(text: str) -> str:
+    return re.sub(r"[.*+?^${}()|[\]\\]", r"\\\g<0>", text)
+
+
+def _name_tokens(request: str) -> list[str]:
+    words = re.findall(r"[A-Za-zÀ-ÿ0-9']{3,}", request or "")
+    out: list[str] = []
+    seen: set[str] = set()
+    for word in words:
+        key = word.lower()
+        if key in _STOP_WORDS or key in seen:
+            continue
+        seen.add(key)
+        out.append(word)
+        if len(out) >= 6:
+            break
+    return out
+
+
+def _doc_to_candidate(doc: dict[str, Any], fallback_category: str | None = None) -> dict[str, Any] | None:
+    """Map a Mongo places document to the client Place shape (full listing fidelity)."""
+    coords = (doc.get("location") or {}).get("coordinates") or [None, None]
+    lng, lat = coords[0], coords[1]
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        return None
+    place_id = str(doc.get("place_id") or "")
+    if not place_id:
+        return None
+    photo_url = doc.get("photo_url")
+    # Owner covers are stored inline as base64; hand the model a URL, not the image.
+    if isinstance(photo_url, str) and photo_url.startswith("data:image/"):
+        photo_url = f"/api/places/photo?placeId={quote(place_id)}&i=0"
+    photo_count = doc.get("photo_count")
+    if not isinstance(photo_count, int):
+        photos_raw = doc.get("photos")
+        photo_count = len(photos_raw) if isinstance(photos_raw, list) else (1 if photo_url else 0)
+    photos = [
+        f"/api/places/photo?placeId={quote(place_id)}&i={i}"
+        for i in range(1, max(0, min(photo_count, 4)))
+    ]
+    categories = doc.get("categories") or ([fallback_category] if fallback_category else [])
+    if not isinstance(categories, list):
+        categories = [fallback_category] if fallback_category else []
+    access = doc.get("access") if isinstance(doc.get("access"), dict) else None
+    accessible = bool(doc.get("accessible")) or bool(access and access.get("entrance") is True)
+    return {
+        "place_id": place_id,
+        "name": doc.get("name") or "",
+        "address": doc.get("address") or "Kigali",
+        "coordinates": {"lat": float(lat), "lng": float(lng)},
+        "categories": [c for c in categories if isinstance(c, str)],
+        "rating": doc.get("rating"),
+        "price_level": doc.get("price_level"),
+        "summary": doc.get("summary") or doc.get("description") or "",
+        "maps_url": doc.get("maps_url"),
+        "photo_url": photo_url if isinstance(photo_url, str) and photo_url else None,
+        "photos": photos,
+        "hours": doc.get("hours") if isinstance(doc.get("hours"), str) else None,
+        "hours_week": doc.get("hours_week") if isinstance(doc.get("hours_week"), dict) else None,
+        "phone": doc.get("phone") if isinstance(doc.get("phone"), str) else None,
+        "tags": [t for t in (doc.get("tags") or []) if isinstance(t, str)] if isinstance(doc.get("tags"), list) else [],
+        "local_business": bool(doc.get("local_business")),
+        "accessible": accessible,
+        "access": access,
+        "status": doc.get("status") or "validated",
+        "source": doc.get("source"),
+        "claimed_by_owner": bool(doc.get("claimed_by_owner")),
+        "confirmations_count": int(doc.get("confirmations_count") or 0),
+        "personalization_score": 0.0,
+    }
+
+
+def _catalog_find(extra_filter: dict[str, Any], *, limit: int = 40) -> list[dict[str, Any]]:
+    """Validated (public) Kigali rows matching `extra_filter`. Empty if Mongo is down."""
+    filt: dict[str, Any] = {**_PUBLIC_STATUS, **extra_filter}
     try:
         result = _mcp_tool(
             "find",
             {
                 "database": HODARI_DB,
                 "collection": "places",
-                "filter": {
-                    "categories": category,
-                    "city": "Kigali",
-                    "status": {"$nin": ["pending", "rejected"]},
-                    "paused": {"$ne": True},
-                },
+                "filter": filt,
                 "projection": {"photos": 0},
-                "sort": {"claimed_by_owner": -1, "created_at": -1},
-                "limit": 12,
+                "sort": {"claimed_by_owner": -1, "local_business": -1, "created_at": -1},
+                "limit": limit,
             },
         )
     except Exception as exc:
-        logger.info("catalog category lookup skipped: %s", exc)
+        logger.info("catalog lookup skipped: %s", exc)
         return []
     places: list[dict[str, Any]] = []
     for doc in _parse_docs(result):
-        coords = (doc.get("location") or {}).get("coordinates") or [None, None]
-        lng, lat = coords[0], coords[1]
-        if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
-            continue
-        place_id = doc.get("place_id") or ""
-        photo_url = doc.get("photo_url")
-        # Owner covers are stored inline as base64; hand the model a URL, not the image.
-        if isinstance(photo_url, str) and photo_url.startswith("data:image/"):
-            photo_url = f"/api/places/photo?placeId={quote(place_id)}&i=0"
-        places.append(
-            {
-                "place_id": place_id,
-                "name": doc.get("name") or "",
-                "address": doc.get("address") or "Kigali",
-                "coordinates": {"lat": float(lat), "lng": float(lng)},
-                "categories": doc.get("categories") or [category],
-                "rating": doc.get("rating"),
-                "price_level": doc.get("price_level"),
-                "summary": doc.get("summary") or doc.get("description") or "",
-                "maps_url": doc.get("maps_url"),
-                "photo_url": photo_url,
-                "local_business": bool(doc.get("local_business")),
-                "accessible": bool(doc.get("accessible")),
-                "status": doc.get("status"),
-                "source": doc.get("source"),
-                "personalization_score": 0.0,
-            }
-        )
+        candidate = _doc_to_candidate(doc)
+        if candidate and candidate.get("name"):
+            places.append(candidate)
     return places
+
+
+def _catalog_by_category(category: str) -> list[dict[str, Any]]:
+    return _catalog_find({"categories": category}, limit=40)
+
+
+def _catalog_by_name(request: str) -> list[dict[str, Any]]:
+    """Find validated listings whose name matches tokens from the user request."""
+    tokens = _name_tokens(request)
+    if not tokens:
+        return []
+    # Prefer multi-word phrase first (e.g. "Coffee Shop"), then individual tokens.
+    phrase = " ".join(tokens[:3])
+    patterns = [phrase] if len(tokens) > 1 else []
+    patterns.extend(tokens)
+    seen_ids: set[str] = set()
+    hits: list[dict[str, Any]] = []
+    for pattern in patterns:
+        escaped = _escape_regex(pattern)
+        rows = _catalog_find(
+            {"name": {"$regex": escaped, "$options": "i"}},
+            limit=20,
+        )
+        for row in rows:
+            pid = row.get("place_id") or ""
+            if pid and pid not in seen_ids:
+                seen_ids.add(pid)
+                hits.append(row)
+        if len(hits) >= 15:
+            break
+    return hits
+
+
+def _merge_candidates(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for group in groups:
+        for place in group:
+            pid = place.get("place_id") or place.get("name") or ""
+            if not pid or pid in seen:
+                continue
+            seen.add(str(pid))
+            out.append(place)
+    return out
 
 
 async def discover_places(request: str, tool_context: ToolContext) -> str:
@@ -217,9 +323,14 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         limit, category, prefer_local, require_accessible, request[:120],
     )
 
-    # Only the Maps call is cached: the catalog is re-read every time so a
-    # listing validated a minute ago shows up without waiting for the TTL.
-    catalog = _catalog_by_category(category) if category else []
+    # Catalog is re-read every time (no TTL) so a listing validated a minute ago
+    # shows up without waiting for any cache. Maps results may still be cached.
+    name_hits = _catalog_by_name(request)
+    category_hits = _catalog_by_category(category) if category else []
+    local_hits = _catalog_find({"local_business": True}, limit=30) if prefer_local else []
+    access_hits = _catalog_find({"accessible": True}, limit=30) if require_accessible else []
+    catalog = _merge_candidates(name_hits, category_hits, local_hits, access_hits)
+
     maps_query = category_search_query(category) if category else request
     cache = get_response_cache()
     cache_key = f"maps::{maps_query}"
@@ -244,7 +355,9 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
                 }
             )
 
-    pooled = catalog + raw_places
+    # Prefer Mongo catalog (owner listings) ahead of Maps so published businesses
+    # are never crowded out by Google ratings alone.
+    pooled = _merge_candidates(catalog, raw_places)
     if category:
         pooled = keep_for_category(pooled, category)
 
@@ -255,6 +368,17 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         prefer_local=prefer_local,
         require_accessible=require_accessible,
     )
+
+    # Guarantee name-matched catalog rows appear even if ranking truncated them.
+    if name_hits:
+        guaranteed = rank_places(
+            name_hits,
+            request,
+            min(limit, len(name_hits)),
+            prefer_local=prefer_local,
+            require_accessible=require_accessible,
+        )
+        candidates = _merge_candidates(guaranteed, candidates)[:limit]
 
     if not candidates:
         payload: dict[str, Any] = {

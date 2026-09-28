@@ -192,8 +192,8 @@ export default function BusinessDashboard() {
   }
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
-    router.replace('/login')
+    const { logoutAndRedirect } = await import('@/lib/authClient')
+    await logoutAndRedirect('/login')
   }
 
   function openPlace(id: string) {

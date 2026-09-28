@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GOOGLE_TOKEN_URL, OAUTH_STATE_COOKIE, appUrl, decodeIdToken, redirectUri } from '@/lib/oauth'
 import { SESSION_COOKIE, SESSION_COOKIE_OPTS, signSession } from '@/lib/session'
-import { destinationFor, findOrCreateUser, setGoogleRefreshToken } from '@/lib/users'
+import { destinationFor, findOrCreateUser, getTokenVersion, setGoogleRefreshToken } from '@/lib/users'
 
 function fail(req: NextRequest, code: string): NextResponse {
   const res = NextResponse.redirect(appUrl(req, `/login?error=${code}`))
@@ -56,10 +56,11 @@ export async function GET(req: NextRequest) {
     }
 
     const next = req.cookies.get('hodari_oauth_next')?.value || await destinationFor(user)
+    const tv = await getTokenVersion(user.user_id)
     const res = NextResponse.redirect(appUrl(req, next.startsWith('/') ? next : '/chat'))
     res.cookies.set(OAUTH_STATE_COOKIE, '', { ...SESSION_COOKIE_OPTS, maxAge: 0 })
     res.cookies.set('hodari_oauth_next', '', { ...SESSION_COOKIE_OPTS, maxAge: 0 })
-    res.cookies.set(SESSION_COOKIE, signSession(user.user_id, user.email), SESSION_COOKIE_OPTS)
+    res.cookies.set(SESSION_COOKIE, signSession(user.user_id, user.email, tv), SESSION_COOKIE_OPTS)
     return res
   } catch (err) {
     console.error('[auth/google/callback]', err)

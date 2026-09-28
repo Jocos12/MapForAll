@@ -9,7 +9,7 @@ export const runtime = 'nodejs'
 // Members only; returns up to 100 ciphertext messages ordered by seq and
 // advances the caller's read cursor (the unread hint in the conversation list).
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:messages:get:${uid}`, { capacity: 30, refillPerSec: 2 }).allowed) {
     return NextResponse.json({ error: 'Polling too fast. Please slow down.' }, { status: 429 })
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 // The server stores ONLY ciphertext — plaintext never reaches this route.
 // Image messages are the encrypted image bytes; payload capped at 400KB base64.
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:messages:post:${uid}:${clientIp(req)}`, { capacity: 30, refillPerSec: 1 }).allowed) {
     return NextResponse.json({ error: 'Sending too fast. Please slow down.' }, { status: 429 })

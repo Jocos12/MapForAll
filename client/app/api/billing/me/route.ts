@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 
 /** Entitlement snapshot for the UI: remaining free runs, credit balance, packs. */
 export async function GET(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   const identity: Identity = session
     ? { kind: 'user', userId: session.uid }
     : { kind: 'guest', key: `guest:${clientIp(req)}` }

@@ -1,13 +1,25 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { AlertTriangle, Camera, CheckCircle2, Loader2, ShieldCheck, Star, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  Clock,
+  ImageIcon,
+  Loader2,
+  MapPin,
+  ShieldCheck,
+  Store,
+  Star,
+  X,
+} from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
 import { compressImage } from '@/lib/imageCompress'
 import { summarizeWeek, type WeekHours } from '@/lib/hours'
 import { MAX_PHOTOS, MAX_TAGS, PLACE_CATEGORIES } from '@/lib/places'
 import { HoursEditor } from '@/components/business/HoursEditor'
-import { LocationPicker } from '@/components/business/LocationPicker'
+import { LocationPicker, type AddressResolveState } from '@/components/business/LocationPicker'
 import { BIZ } from '@/components/business/ui'
 
 export interface BusinessFormValues {
@@ -42,6 +54,16 @@ export const EMPTY_FORM: BusinessFormValues = {
 
 export const fieldClass = BIZ.field
 
+/** Ignore auto-fill if the user typed in the address field within this window. */
+const MANUAL_ADDRESS_MS = 4000
+
+const CREATE_STEPS = [
+  { id: 'identity', icon: Store, titleKey: 'biz.form.stepIdentity' },
+  { id: 'address', icon: MapPin, titleKey: 'biz.form.stepAddress' },
+  { id: 'hours', icon: Clock, titleKey: 'biz.form.stepHours' },
+  { id: 'photos', icon: ImageIcon, titleKey: 'biz.form.stepPhotos' },
+] as const
+
 export function substantialChange(before: BusinessFormValues, after: BusinessFormValues): boolean {
   return (
     before.name.trim() !== after.name.trim() ||
@@ -70,9 +92,15 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
   const [photoError, setPhotoError] = useState('')
   const [localError, setLocalError] = useState('')
   const [confirming, setConfirming] = useState<BusinessFormValues | null>(null)
+  const [step, setStep] = useState(0)
+  const [geoLoading, setGeoLoading] = useState(false)
+  const [geoFailed, setGeoFailed] = useState(false)
+  const addressManualAt = useRef(0)
   const fileRef = useRef<HTMLInputElement>(null)
   const willRemoderate = mode === 'edit' && substantialChange(initial, values)
   const dirty = useMemo(() => JSON.stringify(values) !== JSON.stringify(initial), [values, initial])
+  const stepped = mode === 'create'
+  const totalSteps = CREATE_STEPS.length
 
   useEffect(() => {
     if (!confirming) return
@@ -83,6 +111,22 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
 
   function patch<K extends keyof BusinessFormValues>(key: K, value: BusinessFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }))
+  }
+
+  function onAddressInput(value: string) {
+    addressManualAt.current = Date.now()
+    setGeoFailed(false)
+    patch('address', value)
+  }
+
+  function onAddressResolve(state: AddressResolveState) {
+    setGeoLoading(state.loading)
+    if (state.loading) return
+    setGeoFailed(state.failed && !state.address)
+    if (!state.address) return
+    const recentlyTyped = Date.now() - addressManualAt.current < MANUAL_ADDRESS_MS
+    if (recentlyTyped) return
+    patch('address', state.address)
   }
 
   function addTag(raw: string) {
@@ -147,11 +191,50 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
     return { ...values, tags, hours }
   }
 
+  function validateStep(index: number): string {
+    if (index === 0) {
+      if (!values.name.trim()) return t('biz.form.needName')
+      if (!values.category) return t('biz.form.needCategory')
+    }
+    if (index === 1) {
+      if (values.latitude == null || values.longitude == null) return t('biz.form.pinNeed')
+    }
+    return ''
+  }
+
+  function goNext() {
+    const err = validateStep(step)
+    if (err) {
+      setLocalError(err)
+      return
+    }
+    setLocalError('')
+    setStep((s) => Math.min(totalSteps - 1, s + 1))
+  }
+
+  function goBack() {
+    setLocalError('')
+    setStep((s) => Math.max(0, s - 1))
+  }
+
   function submit(e: FormEvent) {
     e.preventDefault()
     setLocalError('')
+    if (stepped && step < totalSteps - 1) {
+      goNext()
+      return
+    }
+    for (let i = 0; i < totalSteps; i++) {
+      const err = validateStep(i)
+      if (err) {
+        setLocalError(err)
+        if (stepped) setStep(i)
+        return
+      }
+    }
     if (values.latitude == null || values.longitude == null) {
       setLocalError(t('biz.form.pinNeed'))
+      if (stepped) setStep(1)
       return
     }
     const next = finalValues()
@@ -173,174 +256,265 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
       on ? 'border-[#E8672A] bg-[#FDE8DC] font-medium text-[#9A3412]' : 'border-[#D4D4D8] bg-white text-[#3F3F46] hover:border-[#A1A1AA]'
     }`
 
+  const showIdentity = !stepped || step === 0
+  const showAddress = !stepped || step === 1
+  const showHours = !stepped || step === 2
+  const showPhotos = !stepped || step === 3
+
   return (
-    <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
-      <section id="biz-identity" className={`${BIZ.card} p-5`}>
-        <h3 className={BIZ.cardTitle}>{t('biz.form.identity')}</h3>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="block sm:col-span-2">
-            <span className={BIZ.label}>{t('business.name')} *</span>
-            <input required maxLength={120} value={values.name} onChange={(e) => patch('name', e.target.value)} className={BIZ.field} />
-          </label>
-          <label className="block">
-            <span className={BIZ.label}>{t('business.category')} *</span>
-            <select value={values.category} onChange={(e) => patch('category', e.target.value)} className={BIZ.field}>
-              {PLACE_CATEGORIES.map((id) => (
-                <option key={id} value={id}>{t(`categories.${id}`)}</option>
-              ))}
-            </select>
-          </label>
-          <label id="biz-phone" className="block">
-            <span className={BIZ.label}>{t('biz.form.phone')}</span>
-            <input
-              type="tel"
-              inputMode="tel"
-              maxLength={30}
-              value={values.phone}
-              onChange={(e) => patch('phone', e.target.value)}
-              placeholder="+250 7xx xxx xxx"
-              className={BIZ.field}
-            />
-          </label>
-          <label id="biz-description" className="block sm:col-span-2">
-            <span className={BIZ.label}>{t('biz.form.description')}</span>
-            <textarea
-              rows={3}
-              maxLength={400}
-              value={values.description}
-              onChange={(e) => patch('description', e.target.value)}
-              placeholder={t('biz.form.descriptionHint')}
-              className={`${BIZ.field} resize-none`}
-            />
-            <span className="mt-1 block text-right text-[11.5px] text-[#52525B]">{values.description.length}/400</span>
-          </label>
-        </div>
-      </section>
+    <form onSubmit={submit} className="flex flex-col gap-5 pb-24" noValidate>
+      {stepped && (
+        <nav aria-label={t('biz.form.stepsNav')} className={`${BIZ.card} p-4`}>
+          <ol className="flex items-center gap-1 sm:gap-2">
+            {CREATE_STEPS.map((s, i) => {
+              const Icon = s.icon
+              const done = i < step
+              const active = i === step
+              return (
+                <li key={s.id} className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (i < step) {
+                        setLocalError('')
+                        setStep(i)
+                      } else if (i > step) {
+                        const err = validateStep(step)
+                        if (err) setLocalError(err)
+                        else {
+                          setLocalError('')
+                          setStep(i)
+                        }
+                      }
+                    }}
+                    className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-center transition-colors ${BIZ.focus} ${
+                      active ? 'bg-[#FDE8DC]' : done ? 'hover:bg-[#FAFAFA]' : 'opacity-60'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-8 w-8 items-center justify-center rounded-full text-[12px] font-semibold ${
+                        done || active ? 'bg-[#E8672A] text-white' : 'bg-[#F4F4F5] text-[#71717A]'
+                      }`}
+                    >
+                      {done ? <CheckCircle2 size={16} /> : <Icon size={14} />}
+                    </span>
+                    <span className={`hidden truncate text-[11px] font-medium sm:block ${active ? 'text-[#9A3412]' : 'text-[#52525B]'}`}>
+                      {t(s.titleKey)}
+                    </span>
+                  </button>
+                  {i < CREATE_STEPS.length - 1 && (
+                    <span className={`hidden h-0.5 w-3 shrink-0 rounded-full sm:block ${i < step ? 'bg-[#E8672A]' : 'bg-[#E4E4E7]'}`} aria-hidden />
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+        </nav>
+      )}
 
-      <section id="biz-where" className={`${BIZ.card} p-5`}>
-        <h3 className={BIZ.cardTitle}>{t('biz.form.where')}</h3>
-        <label className="mt-4 block">
-          <span className={BIZ.label}>{t('biz.form.address')}</span>
-          <input
-            maxLength={200}
-            value={values.address}
-            onChange={(e) => patch('address', e.target.value)}
-            placeholder={t('biz.form.addressHint')}
-            className={BIZ.field}
-          />
-        </label>
-        <div className="mt-4">
-          <span className={BIZ.label}>{t('biz.form.position')} *</span>
-          <LocationPicker
-            latitude={values.latitude}
-            longitude={values.longitude}
-            onChange={(latitude, longitude) => setValues((prev) => ({ ...prev, latitude, longitude }))}
-          />
-        </div>
-      </section>
-
-      <section id="biz-hours" className={`${BIZ.card} p-5`}>
-        <h3 className={BIZ.cardTitle}>{t('business.hours')}</h3>
-        <p className="mt-1 text-[12.5px] text-[#52525B]">{t('biz.hours.hint')}</p>
-        <div className="mt-4">
-          <HoursEditor value={values.hoursWeek} legacy={initial.hours} onChange={(week) => patch('hoursWeek', week)} />
-        </div>
-      </section>
-
-      <section id="biz-access" className={`${BIZ.card} p-5`}>
-        <h3 className={BIZ.cardTitle}>
-          <ShieldCheck size={16} className="text-[#2E8B57]" />
-          {t('biz.form.access')}
-        </h3>
-        <p className="mt-1 text-[12.5px] text-[#52525B]">{t('biz.form.accessHint')}</p>
-        <fieldset className="mt-4">
-          <legend className="sr-only">{t('biz.form.access')}</legend>
-          <div className="flex flex-wrap gap-2">
-            {ACCESS_KEYS.map((key) => (
-              <label key={key} className={chip(values.access[key])}>
-                <input type="checkbox" className="sr-only" checked={values.access[key]} onChange={(e) => toggleAccess(key, e.target.checked)} />
-                {values.access[key] && <CheckCircle2 size={14} />}
-                {t(`biz.form.access_${key}`)}
-              </label>
-            ))}
-            <label className={chip(noneDeclared)}>
-              <input type="checkbox" className="sr-only" checked={noneDeclared} onChange={declareNone} />
-              {noneDeclared && <CheckCircle2 size={14} />}
-              {t('biz.form.access_none')}
+      {showIdentity && (
+        <section id="biz-identity" className={`${BIZ.card} p-5`}>
+          <h3 className={BIZ.cardTitle}>
+            <Store size={16} className="text-[#E8672A]" aria-hidden />
+            {t('biz.form.identity')}
+          </h3>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className={BIZ.label}>{t('business.name')} *</span>
+              <input required={stepped ? step === 0 : true} maxLength={120} value={values.name} onChange={(e) => patch('name', e.target.value)} className={BIZ.field} />
+            </label>
+            <label className="block">
+              <span className={BIZ.label}>{t('business.category')} *</span>
+              <select value={values.category} onChange={(e) => patch('category', e.target.value)} className={BIZ.field}>
+                {PLACE_CATEGORIES.map((id) => (
+                  <option key={id} value={id}>{t(`categories.${id}`)}</option>
+                ))}
+              </select>
+            </label>
+            <label id="biz-phone" className="block">
+              <span className={BIZ.label}>{t('biz.form.phone')}</span>
+              <input
+                type="tel"
+                inputMode="tel"
+                maxLength={30}
+                value={values.phone}
+                onChange={(e) => patch('phone', e.target.value)}
+                placeholder="+250 7xx xxx xxx"
+                className={BIZ.field}
+              />
+            </label>
+            <label id="biz-description" className="block sm:col-span-2">
+              <span className={BIZ.label}>{t('biz.form.description')}</span>
+              <p className="mb-1.5 text-[12px] text-[#71717A]">{t('biz.form.descriptionTone')}</p>
+              <textarea
+                rows={3}
+                maxLength={400}
+                value={values.description}
+                onChange={(e) => patch('description', e.target.value)}
+                placeholder={t('biz.form.descriptionHint')}
+                className={`${BIZ.field} resize-none`}
+              />
+              <span className={`mt-1.5 flex justify-end text-[12px] tabular-nums ${values.description.length > 360 ? 'font-semibold text-[#C2410C]' : 'text-[#52525B]'}`}>
+                {values.description.length}/400
+              </span>
             </label>
           </div>
-        </fieldset>
-      </section>
+        </section>
+      )}
 
-      <section id="biz-photos" className={`${BIZ.card} p-5`}>
-        <h3 className={BIZ.cardTitle}>{t('biz.form.showcase')}</h3>
-        <span className={`${BIZ.label} mt-4`}>{t('biz.form.photos')} ({values.photos.length}/{MAX_PHOTOS})</span>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {values.photos.map((url, index) => (
-            <div key={`${index}-${url.slice(-24)}`} className="relative aspect-[4/3] overflow-hidden rounded-xl border border-[#E4E4E7]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt={`${t('biz.form.photos')} ${index + 1}`} className="h-full w-full object-cover" />
-              {index === 0 ? (
-                <span className="absolute left-1.5 top-1.5 rounded-full bg-[#1A1614] px-2 py-0.5 text-[10.5px] font-medium text-white">{t('biz.form.cover')}</span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => makeCover(index)}
-                  aria-label={t('biz.form.makeCover')}
-                  title={t('biz.form.makeCover')}
-                  className={`absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-[#E8672A] ${BIZ.focus}`}
-                >
-                  <Star size={13} />
-                </button>
+      {showAddress && (
+        <section id="biz-where" className={`${BIZ.card} p-5`}>
+          <h3 className={BIZ.cardTitle}>
+            <MapPin size={16} className="text-[#E8672A]" aria-hidden />
+            {t('biz.form.where')}
+          </h3>
+          <label className="mt-4 block">
+            <span className={`${BIZ.label} flex items-center gap-2`}>
+              {t('biz.form.address')}
+              {geoLoading && (
+                <span className="inline-flex items-center gap-1 text-[11.5px] font-normal normal-case tracking-normal text-[#71717A]">
+                  <Loader2 size={12} className="animate-spin" aria-hidden />
+                  {t('biz.form.addressLooking')}
+                </span>
               )}
-              <button
-                type="button"
-                onClick={() => patch('photos', values.photos.filter((_, i) => i !== index))}
-                aria-label={t('biz.form.removePhoto')}
-                title={t('biz.form.removePhoto')}
-                className={`absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600 ${BIZ.focus}`}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-          {values.photos.length < MAX_PHOTOS && (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className={`flex aspect-[4/3] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#A1A1AA] bg-[#FAFAFA] text-[12.5px] text-[#3F3F46] transition-colors hover:border-[#E8672A] hover:text-[#C2410C] ${BIZ.focus}`}
-            >
-              <Camera size={18} />
-              {t('biz.form.addPhotos')}
-            </button>
-          )}
-        </div>
-        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
-        {photoError && <p className="mt-2 text-[12.5px] text-[#B91C1C]">{photoError}</p>}
-
-        <label id="biz-tags" className="mt-5 block">
-          <span className={BIZ.label}>{t('biz.form.tags')} ({values.tags.length}/{MAX_TAGS})</span>
-          <div className={`${BIZ.field} flex flex-wrap items-center gap-1.5 py-2`}>
-            {values.tags.map((tag) => (
-              <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-[#F4F4F5] px-2.5 py-0.5 text-[12.5px] text-[#18181B]">
-                {tag}
-                <button type="button" onClick={() => patch('tags', values.tags.filter((item) => item !== tag))} aria-label={`${t('biz.form.removeTag')} ${tag}`}>
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
+            </span>
             <input
-              value={tagDraft}
-              onChange={(e) => setTagDraft(e.target.value)}
-              onKeyDown={onTagKey}
-              onBlur={() => addTag(tagDraft)}
-              disabled={values.tags.length >= MAX_TAGS}
-              placeholder={values.tags.length ? '' : t('biz.form.tagsHint')}
-              className="min-w-[8rem] flex-1 bg-transparent text-[14px] outline-none"
+              maxLength={200}
+              value={values.address}
+              onChange={(e) => onAddressInput(e.target.value)}
+              placeholder={t('biz.form.addressHint')}
+              className={BIZ.field}
+            />
+            {geoFailed && !geoLoading && (
+              <p className="mt-1.5 text-[12px] text-[#9A3412]">{t('biz.form.addressNotFound')}</p>
+            )}
+          </label>
+          <div className="mt-4">
+            <span className={BIZ.label}>{t('biz.form.position')} *</span>
+            <LocationPicker
+              latitude={values.latitude}
+              longitude={values.longitude}
+              onChange={(latitude, longitude) => setValues((prev) => ({ ...prev, latitude, longitude }))}
+              onAddressResolve={onAddressResolve}
             />
           </div>
-        </label>
-      </section>
+        </section>
+      )}
+
+      {showHours && (
+        <>
+          <section id="biz-hours" className={`${BIZ.card} p-5`}>
+            <h3 className={BIZ.cardTitle}>
+              <Clock size={16} className="text-[#E8672A]" aria-hidden />
+              {t('business.hours')}
+            </h3>
+            <p className="mt-1 text-[12.5px] text-[#52525B]">{t('biz.hours.hint')}</p>
+            <div className="mt-4">
+              <HoursEditor value={values.hoursWeek} legacy={initial.hours} onChange={(week) => patch('hoursWeek', week)} />
+            </div>
+          </section>
+
+          <section id="biz-access" className={`${BIZ.card} p-5`}>
+            <h3 className={BIZ.cardTitle}>
+              <ShieldCheck size={16} className="text-[#2E8B57]" />
+              {t('biz.form.access')}
+            </h3>
+            <p className="mt-1 text-[12.5px] text-[#52525B]">{t('biz.form.accessHint')}</p>
+            <fieldset className="mt-4">
+              <legend className="sr-only">{t('biz.form.access')}</legend>
+              <div className="flex flex-wrap gap-2">
+                {ACCESS_KEYS.map((key) => (
+                  <label key={key} className={chip(values.access[key])}>
+                    <input type="checkbox" className="sr-only" checked={values.access[key]} onChange={(e) => toggleAccess(key, e.target.checked)} />
+                    {values.access[key] && <CheckCircle2 size={14} />}
+                    {t(`biz.form.access_${key}`)}
+                  </label>
+                ))}
+                <label className={chip(noneDeclared)}>
+                  <input type="checkbox" className="sr-only" checked={noneDeclared} onChange={declareNone} />
+                  {noneDeclared && <CheckCircle2 size={14} />}
+                  {t('biz.form.access_none')}
+                </label>
+              </div>
+            </fieldset>
+          </section>
+        </>
+      )}
+
+      {showPhotos && (
+        <section id="biz-photos" className={`${BIZ.card} p-5`}>
+          <h3 className={BIZ.cardTitle}>
+            <ImageIcon size={16} className="text-[#E8672A]" aria-hidden />
+            {t('biz.form.showcase')}
+          </h3>
+          <span className={`${BIZ.label} mt-4`}>{t('biz.form.photos')} ({values.photos.length}/{MAX_PHOTOS})</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {values.photos.map((url, index) => (
+              <div key={`${index}-${url.slice(-24)}`} className="relative aspect-[4/3] overflow-hidden rounded-xl border border-[#E4E4E7]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`${t('biz.form.photos')} ${index + 1}`} className="h-full w-full object-cover" />
+                {index === 0 ? (
+                  <span className="absolute left-1.5 top-1.5 rounded-full bg-[#1A1614] px-2 py-0.5 text-[10.5px] font-medium text-white">{t('biz.form.cover')}</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => makeCover(index)}
+                    aria-label={t('biz.form.makeCover')}
+                    title={t('biz.form.makeCover')}
+                    className={`absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-[#E8672A] ${BIZ.focus}`}
+                  >
+                    <Star size={13} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => patch('photos', values.photos.filter((_, i) => i !== index))}
+                  aria-label={t('biz.form.removePhoto')}
+                  title={t('biz.form.removePhoto')}
+                  className={`absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600 ${BIZ.focus}`}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            {values.photos.length < MAX_PHOTOS && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className={`flex aspect-[4/3] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#A1A1AA] bg-[#FAFAFA] text-[12.5px] text-[#3F3F46] transition-colors hover:border-[#E8672A] hover:text-[#C2410C] ${BIZ.focus}`}
+              >
+                <Camera size={18} />
+                {t('biz.form.addPhotos')}
+              </button>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
+          {photoError && <p className="mt-2 text-[12.5px] text-[#B91C1C]">{photoError}</p>}
+
+          <label id="biz-tags" className="mt-5 block">
+            <span className={BIZ.label}>{t('biz.form.tags')} ({values.tags.length}/{MAX_TAGS})</span>
+            <div className={`${BIZ.field} flex flex-wrap items-center gap-1.5 py-2`}>
+              {values.tags.map((tag) => (
+                <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-[#F4F4F5] px-2.5 py-0.5 text-[12.5px] text-[#18181B]">
+                  {tag}
+                  <button type="button" onClick={() => patch('tags', values.tags.filter((item) => item !== tag))} aria-label={`${t('biz.form.removeTag')} ${tag}`}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+              <input
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={onTagKey}
+                onBlur={() => addTag(tagDraft)}
+                disabled={values.tags.length >= MAX_TAGS}
+                placeholder={values.tags.length ? '' : t('biz.form.tagsHint')}
+                className="min-w-[8rem] flex-1 bg-transparent text-[14px] outline-none"
+              />
+            </div>
+          </label>
+        </section>
+      )}
 
       {mode === 'edit' && (
         <p
@@ -362,13 +536,37 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
         </p>
       )}
 
-      <div className="sticky bottom-20 z-10 flex justify-end md:bottom-4">
-        <button type="submit" disabled={busy || (mode === 'edit' && !dirty)} className={`${BIZ.primary} h-11 w-full shadow-lg sm:w-auto sm:px-8`}>
-          {busy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" />}
-          {mode === 'create'
-            ? busy ? t('business.submitting') : t('business.submit')
-            : busy ? t('biz.form.saving') : t('biz.form.save')}
-        </button>
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#E4E4E7] bg-white/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/90 md:sticky md:bottom-0 md:rounded-xl md:border md:shadow-sm">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+          <div className="min-w-0">
+            {stepped ? (
+              <p className="text-[12.5px] font-medium text-[#52525B]">
+                {t('biz.form.stepOf').replace('{n}', String(step + 1)).replace('{total}', String(totalSteps))}
+              </p>
+            ) : (
+              <span className="sr-only">{t('biz.form.save')}</span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {stepped && step > 0 && (
+              <button type="button" onClick={goBack} className={`${BIZ.secondary} h-11 px-4`}>
+                {t('biz.form.back')}
+              </button>
+            )}
+            {stepped && step < totalSteps - 1 ? (
+              <button type="submit" className={`${BIZ.primary} h-11 px-6`}>
+                {t('biz.form.next')}
+              </button>
+            ) : (
+              <button type="submit" disabled={busy || (mode === 'edit' && !dirty)} className={`${BIZ.primary} h-11 px-6`}>
+                {busy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" />}
+                {mode === 'create'
+                  ? busy ? t('business.submitting') : t('business.submit')
+                  : busy ? t('biz.form.saving') : t('biz.form.save')}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {confirming && (

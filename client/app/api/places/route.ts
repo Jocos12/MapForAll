@@ -58,7 +58,8 @@ export async function GET(req: NextRequest) {
   const local = req.nextUrl.searchParams.get('local_business') === '1'
   const accessible = req.nextUrl.searchParams.get('accessible') === '1'
   const category = (req.nextUrl.searchParams.get('category') ?? '').trim().toLowerCase()
-  const session = getSession(req)
+  const q = (req.nextUrl.searchParams.get('q') ?? '').trim().slice(0, 120)
+  const session = await getSession(req)
   const statusOr: Record<string, unknown>[] = [
     { status: 'validated' },
     { status: { $exists: false } },
@@ -68,6 +69,19 @@ export async function GET(req: NextRequest) {
   if (local) filter.local_business = true
   if (accessible) filter.accessible = true
   if (category) filter.categories = category
+  if (q) {
+    // Case-insensitive name / address match so chat and chips find owner listings by title.
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    filter.$and = [
+      {
+        $or: [
+          { name: { $regex: escaped, $options: 'i' } },
+          { address: { $regex: escaped, $options: 'i' } },
+          { tags: { $regex: escaped, $options: 'i' } },
+        ],
+      },
+    ]
+  }
   try {
     const sid = await mcpConnected()
     const texts = await mcpCall(sid, 'find', {
@@ -75,8 +89,8 @@ export async function GET(req: NextRequest) {
       collection: 'places',
       filter,
       projection: { photos: 0 },
-      sort: { claimed_by_owner: -1, created_at: -1 },
-      limit: 200,
+      sort: { claimed_by_owner: -1, local_business: -1, created_at: -1 },
+      limit: q ? 40 : 200,
     })
     let places = extractDocs(texts)
       .map(toClientPlace)
@@ -103,7 +117,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in to add a place.' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const name = typeof body.name === 'string' ? body.name.trim() : ''
@@ -150,6 +164,9 @@ export async function POST(req: NextRequest) {
   const week = cleanWeek(body.hoursWeek)
   const createdAt = new Date().toISOString()
   const placeId = `user_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+  // Owner-claimed listings go live immediately (cahier §4.2): validated + public map.
+  // Community submissions stay pending until an admin approves them.
+  const status = claim ? 'validated' : 'pending'
   const doc = {
     place_id: placeId,
     name,
@@ -167,7 +184,7 @@ export async function POST(req: NextRequest) {
     local_business: claim ? true : body.local_business === true,
     accessible: entrance,
     access,
-    status: 'pending',
+    status,
     source: claim ? 'owner_claimed' : 'user_submitted',
     claimed_by_owner: claim,
     hours: hours || null,
@@ -175,6 +192,7 @@ export async function POST(req: NextRequest) {
     hours_confirmed_at: week || hours ? createdAt : null,
     access_declared: rawAccess?.declared === true || entrance || access.toilet || access.parking,
     photo_url: null,
+    photo_count: 0,
     added_by: session.uid,
     confirmations_count: 0,
     views: 0,
@@ -185,7 +203,7 @@ export async function POST(req: NextRequest) {
     await mcpCall(sid, 'insert-many', { database: DB, collection: 'places', documents: [doc] })
     if (claim) await setOwnedPlaces(session.uid, [...ownedBefore, placeId])
     if (photos.length) await writePlacePhotos((tool, args) => mcpCall(sid, tool, args), DB, placeId, photos)
-    return NextResponse.json({ ok: true, place_id: placeId, status: 'pending' })
+    return NextResponse.json({ ok: true, place_id: placeId, status })
   } catch (err) {
     console.error('[places POST]', err)
     if (isMcpUnavailable(err)) {

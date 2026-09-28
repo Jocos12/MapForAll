@@ -53,6 +53,8 @@ export interface Place {
   tags?: string[]
   /** Temporarily withdrawn by its owner; hidden from the public map. */
   paused?: boolean
+  /** Owner-claimed listing awaiting or past verification. */
+  claimed_by_owner?: boolean
   /** Place ids the owner recommends. */
   recommends?: string[]
   views?: number

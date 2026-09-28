@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   let userId: string
   let placeId: string
   try {
-    userId = getSessionUser(req) ?? asId(body.userId, 'userId')
+    userId = await getSessionUser(req) ?? asId(body.userId, 'userId')
     placeId = asId(body.placeId, 'placeId')
   } catch {
     return NextResponse.json({ error: 'Missing or invalid userId/placeId' }, { status: 400 })

@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 
 /** Whether the signed-in user has connected Google Calendar (for one-click sync). */
 export async function GET(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ connected: false, authed: false })
   try {
     return NextResponse.json({ connected: await isCalendarConnected(session.uid), authed: true })

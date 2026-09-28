@@ -6,7 +6,8 @@
     "dev": "node --use-system-ca ./node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed:demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",
@@ -15,19 +16,27 @@
     "bootstrap": "^5.3.8",
     "clsx": "^2.1.1",
     "framer-motion": "^12.40.0",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.17.0",
+    "mongodb": "^7.7.0",
     "next": "^15.0.0",
+    "nodemailer": "^10.0.12",
+    "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-icons": "^5.5.0",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "stripe": "^18.5.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^20.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.0",

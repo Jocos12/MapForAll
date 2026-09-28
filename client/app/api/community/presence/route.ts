@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 // POST /api/community/presence — heartbeat. Bumps last_seen_at; if the caller
 // has share_location enabled and sends { lat, lng }, refreshes their location.
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:presence:${uid}:${clientIp(req)}`, { capacity: 10, refillPerSec: 0.5 }).allowed) {
     return NextResponse.json({ error: 'Heartbeating too fast.' }, { status: 429 })
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 // GET /api/community/presence?ids=a,b,c — online status for accepted
 // connections only (ids outside the caller's network are silently omitted).
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   const ids = (req.nextUrl.searchParams.get('ids') ?? '')

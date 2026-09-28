@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
     reviews.sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt))
     const count = reviews.length
     const average = count ? Math.round((reviews.reduce((sum, row) => sum + row.rating, 0) / count) * 10) / 10 : null
-    const viewerId = getSession(req)?.uid ?? null
+    const viewerId = (await getSession(req))?.uid ?? null
     const mine = viewerId ? reviews.find((row) => row.userId === viewerId) ?? null : null
     return NextResponse.json({
       average,
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in to leave a review.' }, { status: 401 })
   if (!rateLimit(`reviews:${session.uid}:${clientIp(req)}`, { capacity: 12, refillPerSec: 0.2 }).allowed) {
     return NextResponse.json({ error: 'Too many reviews. Please wait a moment.' }, { status: 429 })

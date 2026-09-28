@@ -14,6 +14,8 @@ import { PlaceDetailsPanel } from '@/components/PlaceDetailsPanel'
 import { streamChat, fetchSessionState, ChatGateError } from '@/lib/stream'
 import { placesForAsk } from '@/lib/placeCategory'
 import { markPrioritized } from '@/lib/priority'
+import { fetchCatalogPlaces, mergeCatalogFirst } from '@/lib/catalogPlaces'
+import { SCORING_DEFAULTS, type ScoringWeights } from '@/lib/scoringSettings'
 import Paywall, { type GateState } from '@/components/Paywall'
 import { VoiceOrb } from '@/components/VoiceOrb'
 import { MobileChatSheet, SHEET_PEEK_PX, type SheetSnap } from '@/components/MobileChatSheet'
@@ -191,6 +193,11 @@ function enrichMapPlace(item: Place | ItineraryStop, memory: Map<string, Place>)
     price_level: ('price_level' in item && item.price_level) || known?.price_level,
     summary: ('summary' in item && item.summary) || known?.summary,
     website: ('website' in item && item.website) || known?.website,
+    hours: ('hours' in item && item.hours) || known?.hours,
+    hours_week: ('hours_week' in item && item.hours_week) || known?.hours_week,
+    phone: ('phone' in item && item.phone) || known?.phone,
+    tags: ('tags' in item && item.tags?.length ? item.tags : known?.tags),
+    claimed_by_owner: ('claimed_by_owner' in item && item.claimed_by_owner) || known?.claimed_by_owner,
   } as Place
 }
 
@@ -293,6 +300,24 @@ export default function LandingPage() {
   const [preferLocal, setPreferLocal] = useState(false)
   const [requireAccessible, setRequireAccessible] = useState(false)
   const [marketOnly, setMarketOnly] = useState(false)
+  const scoringRef = useRef<ScoringWeights>(SCORING_DEFAULTS)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/scoring/weights', { cache: 'no-store' })
+        if (!res.ok || cancelled) return
+        const w = await res.json()
+        if (!cancelled && typeof w.local_bonus === 'number') {
+          scoringRef.current = {
+            local_bonus: w.local_bonus,
+            accessible_bonus: w.accessible_bonus ?? SCORING_DEFAULTS.accessible_bonus,
+          }
+        }
+      } catch { /* keep defaults */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
   const [mapExpanded, setMapExpanded] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const [uiMode, setUiMode] = useState<'chat' | 'voice'>('chat')
@@ -396,6 +421,8 @@ export default function LandingPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then(async (data) => {
         if (!alive) return
+        if (data?.user?.name) setUserName(String(data.user.name))
+        else if (data?.user?.email) setUserName(String(data.user.email).split('@')[0])
         if (data?.user?.role === 'business_owner') {
           setWorkspaceRole('business_owner')
           const res = await fetch('/api/business?summary=1', { cache: 'no-store' }).catch(() => null)
@@ -796,13 +823,18 @@ export default function LandingPage() {
     if (!isRouteAsk(text)) {
       const hit = replyCacheRef.current.get(replyCacheKey(opts?.display ?? text))
       if (hit && Date.now() - hit.at < REPLY_CACHE_TTL_MS) {
+        const catalog = await fetchCatalogPlaces(text).catch(() => [] as Place[])
+        const mergedPlaces = mergeCatalogFirst(catalog, hit.places ?? [])
+        const ranked = mergedPlaces.length
+          ? markPrioritized(mergedPlaces, /prefer_local/i.test(text), scoringRef.current)
+          : undefined
         setLoading(false)
         setMessages((prev) => [
           ...prev,
-          { id: assistantId, role: 'assistant', content: hit.content, places: hit.places },
+          { id: assistantId, role: 'assistant', content: hit.content, places: ranked ?? hit.places },
         ])
-        if (hit.places?.length) {
-          setPlaces(hit.places)
+        if (ranked?.length) {
+          setPlaces(ranked)
           setMapVisible(true)
           setActiveStop(0)
         }
@@ -820,11 +852,42 @@ export default function LandingPage() {
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
+    // Parallel: validated Mongo listings so owner-published businesses always surface.
+    const catalogPromise = fetchCatalogPlaces(text, ctrl.signal).catch(() => [] as Place[])
 
     let assistantText = ''
     let rememberReply = false
     let earlyItinerarySet = false
     let pipelineRan = false
+
+    const publishPlaces = (agentPlaces: Place[]) => {
+      void catalogPromise.then((catalog) => {
+        if (ctrl.signal.aborted || soloPlaceModeRef.current) return
+        const merged = placesForAsk(mergeCatalogFirst(catalog, agentPlaces), text)
+        if (!merged.length) return
+        const ranked = markPrioritized(merged, /prefer_local/i.test(text), scoringRef.current)
+        placesRef.current = ranked
+        setPlaces(ranked)
+        setItinerary(null)
+        setMapZoomFocus(false)
+        setMapVisible(true)
+        setActiveStop((prev) => prev ?? 0)
+        if (!routeRequest) { setRouteFromUser(false); setRouteInfo(null) }
+        setMessages((prev) => {
+          const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
+          if (ri === -1) {
+            return [...prev, {
+              id: assistantId,
+              role: 'assistant' as const,
+              content: `Found ${ranked.length} place${ranked.length !== 1 ? 's' : ''} for you!`,
+              places: ranked,
+            }]
+          }
+          const ai = prev.length - 1 - ri
+          return prev.map((m, i) => i === ai ? { ...m, places: ranked, itinerary: undefined } : m)
+        })
+      })
+    }
 
     const processSessionMapActions = (state: Record<string, unknown>) => {
       const raw = state.map_actions
@@ -880,25 +943,7 @@ export default function LandingPage() {
       }
       if (!earlyItinerarySet && s.candidates && !soloPlaceModeRef.current) {
         const parsed = placesForAsk(parseCandidates(s.candidates) ?? [], text)
-        if (parsed.length) {
-          const ranked = markPrioritized(parsed, /prefer_local/i.test(text))
-          placesRef.current = ranked
-          setPlaces(ranked)
-          setItinerary(null)
-          setMapZoomFocus(false)
-          setMapVisible(true)
-          setActiveStop((prev) => prev ?? 0)
-          if (!routeRequest) { setRouteFromUser(false); setRouteInfo(null) }
-          setMessages((prev) => {
-            const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
-            if (ri === -1) {
-              const text = `Found ${parsed.length} place${parsed.length !== 1 ? 's' : ''} for you!`
-              return [...prev, { id: assistantId, role: 'assistant' as const, content: text, places: ranked }]
-            }
-            const ai = prev.length - 1 - ri
-            return prev.map((m, i) => i === ai ? { ...m, places: ranked, itinerary: undefined } : m)
-          })
-        }
+        if (parsed.length) publishPlaces(parsed)
       }
       processSessionMapActions(s)
       if (s.suppress_gps_context === '1') setSuppressGpsContext(true)
@@ -942,7 +987,6 @@ export default function LandingPage() {
         speak(stripEmDashes(assistantText))
       }
 
-      const wantsMap = isMapShowRequest(text)
       try {
         const state = await fetchSessionState(USER_ID, sessionId.current, ctrl.signal)
         processSessionMapActions(state)
@@ -967,31 +1011,15 @@ export default function LandingPage() {
           })
         }
 
-        if ((pipelineRan && !earlyItinerarySet) || wantsMap) {
+        if (!earlyItinerarySet) {
           const intent = state.intent_type as string | undefined
           const parsedCandidates = state.candidates
             ? placesForAsk(parseCandidates(state.candidates) ?? [], text)
             : null
-          const parsedItinerary =
-            state.itinerary && !earlyItinerarySet ? parseItinerary(state.itinerary) : null
+          const parsedItinerary = state.itinerary ? parseItinerary(state.itinerary) : null
 
           if (parsedCandidates?.length && (intent === 'LIST_DISCOVERY' || !parsedItinerary) && !soloPlaceModeRef.current) {
-            const ranked = markPrioritized(parsedCandidates, /prefer_local/i.test(text))
-            placesRef.current = ranked
-            setPlaces(ranked)
-            setItinerary(null)
-            setMapZoomFocus(false)
-            setMapVisible(true)
-            setActiveStop((prev) => prev ?? 0)
-            setMessages((prev) => {
-              const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
-              if (ri === -1) {
-                const text = `Found ${ranked.length} place${ranked.length !== 1 ? 's' : ''} for you!`
-                return [...prev, { id: assistantId, role: 'assistant' as const, content: text, places: ranked }]
-              }
-              const ai = prev.length - 1 - ri
-              return prev.map((m, i) => i === ai ? { ...m, places: ranked, itinerary: undefined } : m)
-            })
+            publishPlaces(parsedCandidates)
           } else if (parsedItinerary && intent !== 'LIST_DISCOVERY') {
             setItinerary(parsedItinerary)
             placesRef.current = []
@@ -1008,6 +1036,9 @@ export default function LandingPage() {
               const ai = prev.length - 1 - ri
               return prev.map((m, i) => i === ai ? { ...m, itinerary: parsedItinerary, places: undefined } : m)
             })
+          } else if (!soloPlaceModeRef.current) {
+            // Always try Mongo catalog (owner-published) even if Maps/agent returned nothing.
+            publishPlaces(parsedCandidates ?? [])
           }
         }
       } catch { /* non-critical */ }
@@ -1268,19 +1299,7 @@ export default function LandingPage() {
 
   const handleLogout = useCallback(() => {
     cancelSpeech()
-    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
-    try {
-      localStorage.removeItem('hodari_uid')
-      localStorage.removeItem('hodari_email')
-      localStorage.removeItem('hodari_name')
-      localStorage.removeItem('hodari_active_session')
-      // Clear personal data so a shared/public browser doesn't leak the previous
-      // user's chats or saved places to the next person.
-      localStorage.removeItem('hodari_history')
-      localStorage.removeItem('hodari_chat_index')
-      localStorage.removeItem('hodari_saved')
-    } catch { /* ignore */ }
-    window.location.href = '/login'
+    void import('@/lib/authClient').then(({ logoutAndRedirect }) => logoutAndRedirect('/login'))
   }, [])
 
   const handleNewChat = useCallback(() => {
@@ -1750,7 +1769,7 @@ export default function LandingPage() {
       const res = await fetch(`/api/places?${params.toString()}`)
       const data = await res.json()
       if (Array.isArray(data.places)) {
-        const ranked = markPrioritized(data.places, nextLocal)
+        const ranked = markPrioritized(data.places, nextLocal, scoringRef.current)
         setPlaces(ranked)
         if (ranked.length) setMapVisible(true)
       }
@@ -1783,7 +1802,7 @@ export default function LandingPage() {
       const list = next
         ? all.filter((place) => (place.categories ?? []).includes('market'))
         : all
-      const ranked = markPrioritized(list, false)
+      const ranked = markPrioritized(list, false, scoringRef.current)
       setPlaces(ranked)
       if (next) {
         setMessages((prev) => [...prev, {
@@ -1859,6 +1878,10 @@ export default function LandingPage() {
       onEnterVoiceMode={enterVoiceMode}
       userName={userName}
       onLogout={handleLogout}
+      onUserNameChange={(name) => {
+        setUserName(name)
+        try { localStorage.setItem('hodari_name', name) } catch { /* ignore */ }
+      }}
       workspace={workspace}
       onOpenCommunity={showCommunity ? openCommunity : undefined}
       communityInviteCount={communityInviteCount}
