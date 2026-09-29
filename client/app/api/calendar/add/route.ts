@@ -35,7 +35,7 @@ async function accessTokenFromRefresh(refreshToken: string): Promise<string | nu
  * "add to calendar" template link (which works for everyone).
  */
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ added: false, needsConnect: true, authed: false }, { status: 401 })
 
   const body = (await req.json().catch(() => ({}))) as Partial<CalendarEvent>

@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'placeId required' }, { status: 400 })
   }
-  const session = getSession(req)
+  const session = await getSession(req)
   try {
     const sid = await mcpConnected()
     const summary = await tally(sid, placeId, session?.uid)
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in to confirm this place.' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   let placeId = ''

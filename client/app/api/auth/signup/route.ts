@@ -1,20 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createUserWithPassword, destinationFor, isPublicRole } from '@/lib/users'
+import { createUserWithPassword, isPublicRole } from '@/lib/users'
 import { isValidEmail } from '@/lib/password'
 import { isMcpUnavailable } from '@/lib/mcp'
-import { SESSION_COOKIE, SESSION_COOKIE_OPTS, signSession } from '@/lib/session'
+import { sendMail } from '@/lib/mailer'
+import { mailLang, welcomeEmail, withAdminMailOverrides } from '@/lib/emailTemplates'
+import { appUrl } from '@/lib/oauth'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
+
+export const runtime = 'nodejs'
 
 const MIN_PASSWORD = 8
 
-// Register a new email/password user, then issue our session cookie so sign-up
-// logs them straight in. Mirrors the Google callback's session handling.
+// Register a new email/password user and send the welcome email. No session
+// is issued here: the user signs in afterwards (password + emailed code).
 export async function POST(req: NextRequest) {
   if (!rateLimit(`signup:${clientIp(req)}`, { capacity: 8, refillPerSec: 0.2 }).allowed) {
     return NextResponse.json({ error: 'Too many attempts. Please wait a moment.' }, { status: 429 })
   }
 
-  let body: { name?: unknown; email?: unknown; password?: unknown; role?: unknown }
+  let body: { name?: unknown; email?: unknown; password?: unknown; role?: unknown; lang?: unknown }
   try {
     body = await req.json()
   } catch {
@@ -25,6 +29,7 @@ export async function POST(req: NextRequest) {
   const email = typeof body.email === 'string' ? body.email.trim() : ''
   const password = typeof body.password === 'string' ? body.password : ''
   const role = isPublicRole(body.role) ? body.role : null
+  const lang = mailLang(body.lang)
 
   if (!role) return NextResponse.json({ error: 'Choose how you will use MapForAll.', code: 'role_required' }, { status: 400 })
   if (!name || name.length > 120) return NextResponse.json({ error: 'Please enter your name.', code: 'name_required' }, { status: 400 })
@@ -34,24 +39,33 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await createUserWithPassword(email, name, password, role)
+    const result = await createUserWithPassword(email, name, password, role, lang)
     if (!result.ok) {
       return NextResponse.json({ error: 'An account with this email already exists. Try signing in.', code: 'email_taken' }, { status: 409 })
     }
-    const redirect = await destinationFor(result.user)
-    const res = NextResponse.json({
+    const { user } = result
+    const displayName = user.name ?? name
+    const welcome = await sendMail(
+      user.email,
+      await withAdminMailOverrides(
+        'welcome',
+        welcomeEmail({
+          name: displayName,
+          role: user.role,
+          lang,
+          loginUrl: appUrl(req, `/login?email=${encodeURIComponent(user.email)}`),
+        }),
+        { name: displayName },
+        lang,
+      ),
+    )
+    return NextResponse.json({
       ok: true,
-      redirect,
-      user: { name: result.user.name, email: result.user.email, role: result.user.role },
+      welcome_sent: welcome.ok,
+      user: { name: user.name, email: user.email, role: user.role },
     })
-    res.cookies.set(SESSION_COOKIE, signSession(result.user.user_id, result.user.email), SESSION_COOKIE_OPTS)
-    return res
   } catch (err) {
     console.error('[auth/signup]', err)
-    const message = err instanceof Error ? err.message : ''
-    if (message.includes('HODARI_SESSION_SECRET')) {
-      return NextResponse.json({ error: 'Account sign-in is not configured on this server yet.' }, { status: 500 })
-    }
     if (isMcpUnavailable(err)) {
       return NextResponse.json({ error: 'The account database is unavailable. Please try again in a moment.' }, { status: 503 })
     }

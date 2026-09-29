@@ -40,6 +40,7 @@ import { CollapsibleMessage } from './CollapsedReply'
 import { TypingIndicator, ThinkingTrace } from './TypingIndicator'
 import { OpenMapButton } from './OpenMapButton'
 import { WorkspaceShortcut, type WorkspaceLink } from './WorkspaceShortcut'
+import { AccountPanel } from './AccountPanel'
 import { InlinePlaceGallery, PhotoGallery } from './InlinePlaceGallery'
 import { googleCalendarUrl } from '@/lib/calendar'
 import { shownMessages } from '@/lib/animationMemory'
@@ -116,6 +117,8 @@ interface Props {
   onEnterVoiceMode?: () => void
   userName?: string
   onLogout?: () => void
+  /** Called when the account panel saves a new display name. */
+  onUserNameChange?: (name: string) => void
   /** Owner/admin shortcut back to their back-office; absent for plain client accounts. */
   workspace?: WorkspaceLink
   /** Opens the community panel (people, encrypted chats, shared pins). */
@@ -187,6 +190,7 @@ export function ChatPanel({
   onEnterVoiceMode,
   userName,
   onLogout,
+  onUserNameChange,
   workspace,
   onOpenCommunity,
   communityInviteCount,
@@ -209,6 +213,8 @@ export function ChatPanel({
   const moreRef = useRef<HTMLDivElement>(null)
   const [langOpen, setLangOpen] = useState(false)
   const langRef = useRef<HTMLDivElement>(null)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const accountTriggerRef = useRef<HTMLButtonElement>(null)
   const [caretVisible, setCaretVisible] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -912,22 +918,35 @@ export function ChatPanel({
                 {workspace.cta}
               </a>
             )}
-            <div className="flex items-center gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--bg-header)] px-3 py-2.5 shadow-[0_8px_20px_-14px_rgba(26,22,20,0.45)]">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF8C2F] to-terracotta text-[13px] font-semibold text-white shadow-[0_6px_14px_-6px_rgba(196,92,38,0.8)] ring-2 ring-white dark:ring-[#3A322C]">
-                {(userName?.trim()?.[0] ?? 'U').toUpperCase()}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                  {userName || t('header.signedIn')}
-                </p>
-                <p className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)]">{t('header.account')}</p>
-              </div>
+            <div className="flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg-header)] p-1.5 shadow-[0_8px_20px_-14px_rgba(26,22,20,0.45)]">
+              <button
+                ref={accountTriggerRef}
+                type="button"
+                onClick={() => setAccountOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={accountOpen}
+                aria-label={t('accountPanel.open')}
+                className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-[#E8672A]/10 focus-visible:bg-[#E8672A]/10 ${focusRing}`}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF8C2F] to-terracotta text-[13px] font-semibold text-white shadow-[0_6px_14px_-6px_rgba(196,92,38,0.8)] ring-2 ring-white dark:ring-[#3A322C]">
+                  {(userName?.trim()?.[0] ?? 'U').toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                    {userName || t('header.signedIn')}
+                  </p>
+                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)]">{t('header.account')}</p>
+                </div>
+              </button>
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onLogout()
+                }}
                 aria-label={t('header.logout')}
                 title={t('header.logout')}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-red-500/10 hover:text-red-500"
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-red-500/10 hover:text-red-500 ${focusRing}`}
               >
                 <LogOut className="h-4 w-4" />
               </button>
@@ -935,6 +954,15 @@ export function ChatPanel({
           </div>
         )}
       </aside>
+
+      <AccountPanel
+        open={accountOpen}
+        onClose={() => {
+          setAccountOpen(false)
+          queueMicrotask(() => accountTriggerRef.current?.focus())
+        }}
+        onNameChange={onUserNameChange}
+      />
 
       {/* History is an overlay drawer (with a backdrop), NOT a layout push —
           the chat panel can be a narrow centered column, and pushing it by the
@@ -998,9 +1026,11 @@ export function ChatPanel({
             </div>
             <button
               type="button"
-              onClick={() => setHistoryOpen(true)}
-              aria-label={t('header.account')}
-              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1614] text-[12px] font-semibold text-white transition-opacity duration-150 active:opacity-70 dark:bg-white dark:text-[#1A1614]"
+              onClick={() => setAccountOpen(true)}
+              aria-label={t('accountPanel.open')}
+              aria-haspopup="dialog"
+              aria-expanded={accountOpen}
+              className={`ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1614] text-[12px] font-semibold text-white transition-opacity duration-150 hover:opacity-90 active:opacity-70 dark:bg-white dark:text-[#1A1614] ${focusRing}`}
             >
               {(userName?.trim()?.[0] ?? 'M').toUpperCase()}
             </button>

@@ -127,7 +127,7 @@ function CompletionCard({ data, jump, style }: { data: OwnerDashboard; jump: (an
         )}
       </div>
       <div
-        className="mt-3.5 flex gap-1"
+        className="mt-3.5 flex gap-1.5"
         role="progressbar"
         aria-labelledby="completion-title"
         aria-valuemin={0}
@@ -139,9 +139,15 @@ function CompletionCard({ data, jump, style }: { data: OwnerDashboard; jump: (an
           <span
             key={item.id}
             title={`${label(item)} — ${t(item.done ? 'biz.completion.itemDone' : 'biz.completion.itemTodo')}`}
-            className={`biz-bar-x h-2 flex-1 rounded-full ${item.done ? 'bg-[#2E8B57]' : 'bg-[var(--biz-empty-bar)]'}`}
+            className={`biz-bar-x relative flex h-3 flex-1 items-center justify-center rounded-full ${
+              item.done ? 'bg-[#2E8B57]' : 'bg-[var(--biz-empty-bar)]'
+            }`}
             style={{ animationDelay: `${120 + i * 40}ms` }}
-          />
+          >
+            {item.done && (
+              <CheckCircle2 size={10} className="text-white drop-shadow-sm" aria-hidden strokeWidth={2.5} />
+            )}
+          </span>
         ))}
       </div>
       {next && (

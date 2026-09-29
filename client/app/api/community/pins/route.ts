@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 // GET /api/community/pins — every pin visible to the caller (own, shared with
 // them, or in one of their conversations), with owner attribution.
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   try {
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/community/pins { place, note?, shared_with? | conversation_id? }
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:pins:${uid}:${clientIp(req)}`, { capacity: 10, refillPerSec: 0.2 }).allowed) {
     return NextResponse.json({ error: 'Too many pins. Please wait a moment.' }, { status: 429 })
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/community/pins?pin_id=… — remove a pin the caller owns.
 export async function DELETE(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   const pinId = asIdOrNull(req.nextUrl.searchParams.get('pin_id'))

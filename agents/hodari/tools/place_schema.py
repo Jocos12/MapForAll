@@ -11,7 +11,7 @@ import os
 from typing import Any
 
 PLACE_STATUSES = ("pending", "validated", "rejected")
-PLACE_SOURCES = ("official", "user_submitted")
+PLACE_SOURCES = ("official", "user_submitted", "owner_claimed", "business_owner")
 
 # Equity bonuses added on top of rating + budget. Configurable so the pitch
 # can tune how strongly local / accessible places rise without a code change.
@@ -70,6 +70,8 @@ def inclusion_bonus(place: dict[str, Any], *, prefer_local: bool) -> float:
     surface at equal relevance without drowning an unrelated query.
     Accessible places always receive ACCESS_BONUS. A strict accessibility
     filter is applied by the caller (drop non-accessible places) before scoring.
+    Owner-claimed MapForAll listings get an extra boost so they are not buried
+    by Google Maps ratings when the catalog and Maps results are merged.
     """
     bonus = 0.0
     if place.get("local_business") is True:
@@ -81,4 +83,9 @@ def inclusion_bonus(place: dict[str, Any], *, prefer_local: bool) -> float:
             bonus += 0.35
         if detail.get("parking") is True:
             bonus += 0.35
+    if place.get("claimed_by_owner") is True or place.get("source") in (
+        "owner_claimed",
+        "business_owner",
+    ):
+        bonus += 3.0
     return bonus

@@ -6,7 +6,7 @@ import { getSession } from '@/lib/session'
 
 /** Public owner reply under one review of the owner's own listing. Empty text removes it. */
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) return result.response

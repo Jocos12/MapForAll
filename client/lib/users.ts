@@ -9,7 +9,7 @@ import { isAdminEmail } from '@/lib/places'
 
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
 
-export type UserRole = 'client' | 'business_owner' | 'admin'
+export type UserRole = 'client' | 'business_owner' | 'admin' | 'moderator'
 export type PublicRole = 'client' | 'business_owner'
 
 export interface HodariUser {
@@ -22,6 +22,8 @@ export interface HodariUser {
   role: UserRole
   owned_place_id: string | null
   owned_place_ids: string[]
+  avatar_url?: string | null
+  status?: 'active' | 'suspended'
 }
 
 export const MAX_OWNED_PLACES = 5
@@ -38,7 +40,9 @@ function ownedIds(doc: Record<string, unknown>): string[] {
 
 function storedRole(doc: Record<string, unknown>, email: string): UserRole {
   if (isAdminEmail(email)) return 'admin'
-  if (doc.role === 'admin' || doc.role === 'business_owner' || doc.role === 'client') return doc.role
+  if (doc.role === 'admin' || doc.role === 'moderator' || doc.role === 'business_owner' || doc.role === 'client') {
+    return doc.role
+  }
   return 'client'
 }
 
@@ -54,6 +58,8 @@ function publicUser(doc: Record<string, unknown>): HodariUser {
     role: storedRole(doc, email),
     owned_place_id: typeof doc.owned_place_id === 'string' ? doc.owned_place_id : null,
     owned_place_ids: ownedIds(doc),
+    avatar_url: typeof doc.avatar_url === 'string' ? doc.avatar_url : null,
+    status: doc.status === 'suspended' ? 'suspended' : 'active',
   }
 }
 
@@ -97,6 +103,8 @@ export async function findOrCreateUser(email: string, name: string): Promise<Hod
     user_id: userId, name: cleanName, email: cleanEmail,
     role: isAdminEmail(cleanEmail) ? 'admin' : 'client',
     owned_place_id: null,
+    token_version: 0,
+    last_active_at: null,
     home_country: null, languages: ['en'], dietary: [], budget_tier: 'moderate', accessibility: [],
     created_at: new Date().toISOString(),
   }
@@ -112,9 +120,60 @@ export async function findUserById(userId: string): Promise<HodariUser | null> {
   return docs[0] ? publicUser(docs[0]) : null
 }
 
+const lastTouched = new Map<string, number>()
+
+/**
+ * Record activity on the user document (`last_active_at`, plus `last_login_at`
+ * on sign-in). Throttled to at most one write per minute (logout/session
+ * invalidation uses `token_version` separately).
+ */
+export async function touchUserActivity(userId: string, login = false): Promise<void> {
+  const now = Date.now()
+  if (!login && now - (lastTouched.get(userId) ?? 0) < 60_000) return
+  lastTouched.set(userId, now)
+  const stamp = new Date(now).toISOString()
+  const sid = await mcpConnected()
+  await mcpCall(sid, 'update-many', {
+    database: DB,
+    collection: 'users',
+    filter: { user_id: userId },
+    update: { $set: login ? { last_active_at: stamp, last_login_at: stamp } : { last_active_at: stamp } },
+  })
+}
+
+/** Current token_version (defaults to 0 for older documents). */
+export async function getTokenVersion(userId: string): Promise<number> {
+  const sid = await mcpConnected()
+  const docs = extractDocs(
+    await mcpCall(sid, 'find', {
+      database: DB, collection: 'users', filter: { user_id: userId },
+      projection: { token_version: 1 }, limit: 1,
+    }),
+  )
+  const tv = docs[0]?.token_version
+  return typeof tv === 'number' ? tv : 0
+}
+
+/**
+ * Bump token_version so every outstanding session cookie fails
+ * `resolveSession` (logout / password reset).
+ */
+export async function bumpTokenVersion(userId: string): Promise<number> {
+  const sid = await mcpConnected()
+  const current = await getTokenVersion(userId)
+  const next = current + 1
+  await mcpCall(sid, 'update-many', {
+    database: DB,
+    collection: 'users',
+    filter: { user_id: userId },
+    update: { $set: { token_version: next } },
+  })
+  return next
+}
+
 /** Where a signed-in account should land. Owners with no fiche yet start onboarding. */
 export async function destinationFor(user: HodariUser): Promise<string> {
-  if (user.role === 'admin') return '/admin'
+  if (user.role === 'admin' || user.role === 'moderator') return '/admin/dashboard'
   if (user.role === 'business_owner') {
     if (user.owned_place_ids.length) return '/business/dashboard'
     try {
@@ -152,6 +211,7 @@ export async function createUserWithPassword(
   name: string,
   plainPassword: string,
   role: PublicRole = 'client',
+  lang: 'fr' | 'en' | 'rw' = 'fr',
 ): Promise<SignupResult> {
   const cleanEmail = email.trim().toLowerCase()
   const cleanName = name.trim() || cleanEmail.split('@')[0]
@@ -174,7 +234,9 @@ export async function createUserWithPassword(
     password_hash: hashPassword(plainPassword),
     role: isAdminEmail(cleanEmail) ? 'admin' : role,
     owned_place_id: null,
-    home_country: null, languages: ['en'], dietary: [], budget_tier: 'moderate', accessibility: [],
+    token_version: 0,
+    last_active_at: null,
+    home_country: null, languages: [lang], lang, dietary: [], budget_tier: 'moderate', accessibility: [],
     created_at: new Date().toISOString(),
   }
   await mcpCall(sid, 'insert-many', { database: DB, collection: 'users', documents: [doc] })
@@ -245,14 +307,19 @@ export async function getAccountProfile(userId: string): Promise<AccountProfile 
   return doc ? toProfile(doc) : null
 }
 
-/** Name, phone and avatar only — role and email are never writable from the profile page. */
+/** Name, phone, avatar and preferred language — role and email stay server-owned. */
 export async function updateAccountProfile(
   userId: string,
-  patch: { name?: string; phone?: string | null; avatar_url?: string | null },
+  patch: { name?: string; phone?: string | null; avatar_url?: string | null; lang?: 'fr' | 'en' | 'rw' },
 ): Promise<AccountProfile | null> {
   const sid = await mcpConnected()
-  if (Object.keys(patch).length) {
-    await mcpCall(sid, 'update-many', { database: DB, collection: 'users', filter: { user_id: userId }, update: { $set: patch } })
+  const $set: Record<string, unknown> = { ...patch }
+  if (patch.lang) {
+    $set.lang = patch.lang
+    $set.languages = [patch.lang]
+  }
+  if (Object.keys($set).length) {
+    await mcpCall(sid, 'update-many', { database: DB, collection: 'users', filter: { user_id: userId }, update: { $set } })
   }
   const doc = await readUserDoc(sid, userId)
   return doc ? toProfile(doc) : null

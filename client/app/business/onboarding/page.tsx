@@ -90,10 +90,10 @@ export default function BusinessOnboarding() {
           )}
         </div>
       </header>
-      <main className="px-4 py-8">
+      <main className="px-4 py-8 pb-28">
         <div className="mx-auto w-full max-w-3xl">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-[#C2410C]">{hasPlaces ? t('biz.places.addKicker') : t('business.kicker')}</p>
-          <h1 className="mt-2 text-[28px] font-semibold tracking-tight">{hasPlaces ? t('biz.places.addTitle') : t('business.onboardTitle')}</h1>
+          <h1 className="mt-2 font-display text-[28px] font-semibold tracking-tight sm:text-[32px]">{hasPlaces ? t('biz.places.addTitle') : t('business.onboardTitle')}</h1>
           <p className="mb-6 mt-2 text-[14px] leading-relaxed text-[#3F3F46]">{t('business.onboardBody')}</p>
           <BusinessForm
             mode="create"

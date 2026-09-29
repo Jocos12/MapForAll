@@ -9,7 +9,7 @@ export const runtime = 'nodejs'
  * Guests get `{ authed: false }` and fall back to localStorage on the client.
  */
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ authed: false, chats: [] })
   try {
     return NextResponse.json({ authed: true, chats: await listChats(uid) })
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ ok: false, authed: false }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ ok: false }, { status: 401 })
   let sessionId: string
   try {

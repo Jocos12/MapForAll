@@ -18,7 +18,7 @@ type Action = (typeof ACTIONS)[number]
 // GET /api/community/connections — the caller's edges, split into accepted +
 // pending (incoming/outgoing), with the other party's public attribution.
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   try {
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/community/connections { action: 'invite'|'accept'|'decline'|'block', user_id }
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:connections:${uid}:${clientIp(req)}`, { capacity: 20, refillPerSec: 0.5 }).allowed) {
     return NextResponse.json({ error: 'Too many requests. Please wait a moment.' }, { status: 429 })

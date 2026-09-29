@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const placeId = typeof body.placeId === 'string' ? body.placeId.trim() : ''
   const source = typeof body.source === 'string' && SOURCES.has(body.source) ? body.source : null
   if (!/^user_[a-z0-9]{6,32}$/i.test(placeId)) return NextResponse.json({ ok: false }, { status: 400 })
-  const session = getSession(req)
+  const session = await getSession(req)
   const viewer = session?.uid ?? clientIp(req)
   if (!rateLimit(`view:${viewer}:${placeId}`, { capacity: 1, refillPerSec: 1 / 1800 }).allowed) {
     return NextResponse.json({ ok: true, counted: false })

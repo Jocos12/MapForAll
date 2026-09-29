@@ -12,7 +12,7 @@ function asPlaceId(value: unknown): string {
 
 export async function GET(req: NextRequest) {
   const placeId = asPlaceId(req.nextUrl.searchParams.get('placeId'))
-  const session = getSession(req)
+  const session = await getSession(req)
   try {
     const sid = await mcpConnected()
     const placeDocs = extractDocs(await mcpCall(sid, 'find', {
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) return NextResponse.json({ error: 'Sign in to confirm accessibility.' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   let placeId = ''

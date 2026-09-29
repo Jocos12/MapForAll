@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   let userId: string
   let sessionId: string
   try {
-    userId = getSessionUser(req) ?? asId(req.nextUrl.searchParams.get('userId'), 'userId')
+    userId = await getSessionUser(req) ?? asId(req.nextUrl.searchParams.get('userId'), 'userId')
     sessionId = asId(req.nextUrl.searchParams.get('sessionId'), 'sessionId')
   } catch {
     return NextResponse.json({ error: 'Missing or invalid params' }, { status: 400 })

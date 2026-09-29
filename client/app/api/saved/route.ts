@@ -30,7 +30,7 @@ function dedupeSaved(docs: unknown[]): unknown[] {
 // Identity comes from the signed session cookie; the ?userId= param is only a
 // fallback for clients that predate the cookie (see SECURITY_HARDENING.md P0.1).
 export async function GET(req: NextRequest) {
-  const userId = getSessionUser(req) ?? asIdOrNull(req.nextUrl.searchParams.get('userId'))
+  const userId = await getSessionUser(req) ?? asIdOrNull(req.nextUrl.searchParams.get('userId'))
   if (!userId) return NextResponse.json({ saved: [] })
 
   try {
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   let userId: string
   let placeId: string
   try {
-    userId = getSessionUser(req) ?? asId(body.userId, 'userId')
+    userId = await getSessionUser(req) ?? asId(body.userId, 'userId')
     placeId = asId(body.placeId, 'placeId')
   } catch {
     return NextResponse.json({ error: 'Missing or invalid userId/placeId' }, { status: 400 })

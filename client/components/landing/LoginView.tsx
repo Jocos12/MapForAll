@@ -4,13 +4,14 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from 'framer-motion'
-import { AlertCircle, ArrowRight, Check, ChevronLeft, Compass, Eye, EyeOff, Loader2, MapPin, Store } from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle2, Check, ChevronLeft, Clock, Compass, Eye, EyeOff, Loader2, MapPin, Store } from 'lucide-react'
 import { LiveClock, ThemeToggle, useLandingTheme } from '@/components/landing/bits'
 import { LangMenu } from '@/components/landing/MapForAllLanding'
 import { LiveProvider, NotificationBanner, PauseToggle, TalkingDevice, useLive } from '@/components/landing/live'
 import { useTransitionLinks } from '@/components/landing/pageTransition'
 import { APPLE_EASE, BlurInWords, IntroIn } from '@/components/landing/scrollFx'
 import { useI18n } from '@/components/I18nProvider'
+import { OtpStep, type OtpChallenge } from '@/components/landing/OtpStep'
 
 /**
  * Sign in / create account, in the landing page's iOS style.
@@ -21,9 +22,9 @@ import { useI18n } from '@/components/I18nProvider'
  *   story-style progress bars, the talking phone and notifications, and a
  *   pause control that always sits on the photo.
  *
- * Behaviour matches the previous view (same endpoints, validation, error
- * mapping, Google OAuth and redirects), plus a confirm-password field on
- * sign-up, checked before anything is sent.
+ * Sign-up creates the account without signing in and shows a success card.
+ * Sign-in is two steps: password, then the 6-digit code sent by email
+ * (OtpStep). The session cookie is only set once the code is accepted.
  */
 
 const ERROR_CODES: Record<string, string> = {
@@ -37,6 +38,7 @@ const ERROR_CODES: Record<string, string> = {
 }
 
 type Mode = 'login' | 'signup'
+type Step = 'form' | 'signedUp' | 'otp'
 type FieldErrors = { name?: string; email?: string; password?: string; confirm?: string; role?: string; form?: string }
 type PublicRole = 'client' | 'business_owner'
 
@@ -401,6 +403,57 @@ function LivePanel() {
   )
 }
 
+/** Shown after sign-up instead of signing in: the account exists, sign in next. */
+function SignedUpCard({ email, welcomeSent, onContinue }: { email: string; welcomeSent: boolean; onContinue: () => void }) {
+  const { t } = useI18n()
+  const button = useRef<HTMLButtonElement>(null)
+  useEffect(() => { button.current?.focus() }, [])
+
+  return (
+    <motion.div
+      role="status"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: APPLE_EASE }}
+      className="text-center"
+    >
+      <motion.span
+        aria-hidden
+        initial={{ scale: 0.6, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 20, delay: 0.1 }}
+        className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#1F8A5B]/12 text-[#1F8A5B] dark:bg-[#1F8A5B]/25 dark:text-[#5BD49A]"
+      >
+        <CheckCircle2 size={36} strokeWidth={2} />
+      </motion.span>
+      <h1 className="mt-5 text-[26px] font-semibold leading-[1.1] tracking-[-0.03em] text-[#1A1614] dark:text-gray-50">
+        {t('auth.signedUp.title')}
+      </h1>
+      <p className="mt-2 text-[14.5px] leading-relaxed text-[#6E5B50] dark:text-gray-400">
+        {welcomeSent ? t('auth.signedUp.bodySent') : t('auth.signedUp.bodyNotSent')}
+      </p>
+      <p className="mt-1 truncate text-[13.5px] font-medium text-[#1A1614] dark:text-gray-200">{email}</p>
+      {!welcomeSent && (
+        <p className="mt-3 flex items-start gap-2 rounded-[14px] bg-[#FFF7DB] px-3.5 py-2.5 text-left text-[12.5px] leading-snug text-[#6B4E00] dark:bg-[#F2C94C]/10 dark:text-[#F5D77A]">
+          <AlertCircle size={14} className="mt-px shrink-0" aria-hidden />
+          {t('auth.signedUp.mailFailed')}
+        </p>
+      )}
+      <button
+        ref={button}
+        type="button"
+        onClick={onContinue}
+        className={`group mt-6 flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-[#1A1614] text-[15px] font-medium text-white transition-[transform,background-color] duration-300 ${EASE_CSS} hover:-translate-y-px hover:bg-black dark:bg-white dark:text-[#1A1614] dark:hover:bg-gray-100`}
+      >
+        {t('auth.signedUp.cta')}
+        <span aria-hidden className="flex h-7 w-7 items-center justify-center rounded-full bg-[#E8672A] text-white">
+          <ArrowRight size={14} strokeWidth={2.25} />
+        </span>
+      </button>
+    </motion.div>
+  )
+}
+
 export default function LoginView({ googleEnabled = false }: { googleEnabled?: boolean }) {
   return (
     <LiveProvider>
@@ -411,7 +464,7 @@ export default function LoginView({ googleEnabled = false }: { googleEnabled?: b
 
 function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
   const router = useRouter()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { dark, toggle } = useLandingTheme()
   const { paused } = useLive()
   const reduced = useReducedMotion()
@@ -425,7 +478,11 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [formBusy, setFormBusy] = useState(false)
-  const [done, setDone] = useState(false)
+  const [sendingCode, setSendingCode] = useState(false)
+  const [step, setStep] = useState<Step>('form')
+  const [welcomeSent, setWelcomeSent] = useState(false)
+  const [challenge, setChallenge] = useState<OtpChallenge | null>(null)
+  const [notice, setNotice] = useState('')
   const [forgot, setForgot] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
@@ -436,6 +493,9 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
+    const prefill = params.get('email')
+    if (prefill) setEmail(prefill)
+    if (params.get('expired')) setNotice(t('auth.expired'))
     const code = params.get('error')
     if (!code) return
     if (!googleEnabled && code.startsWith('oauth_')) {
@@ -454,6 +514,19 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
     setMode(next)
     setFields({})
     setForgot(false)
+    setNotice('')
+  }
+
+  /** From the sign-up success card, or back from the code step: the sign-in form, email kept. */
+  function toSignIn(message = '') {
+    setStep('form')
+    setMode('login')
+    setChallenge(null)
+    setPassword('')
+    setConfirm('')
+    setFields(message ? { form: message } : {})
+    setForgot(false)
+    setNotice('')
   }
 
   function messageFor(data: { code?: string; error?: string }, status: number) {
@@ -484,10 +557,13 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
       return
     }
     setFields({})
+    setNotice('')
     setFormBusy(true)
+    // The password check is quick; after that the wait is the email going out.
+    const sendingTimer = signup ? 0 : window.setTimeout(() => setSendingCode(true), 700)
     try {
       const endpoint = signup ? '/api/auth/signup' : '/api/auth/login'
-      const payload = signup ? { name, email, password, role } : { email, password }
+      const payload = signup ? { name, email, password, role, lang } : { email, password, lang }
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -495,24 +571,47 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const msg = messageFor(data, res.status)
         const code = data.code as string | undefined
-        if (code === 'bad_credentials' || code === 'weak_password') refuse({ password: msg })
-        else if (code === 'invalid_email' || code === 'email_taken') refuse({ email: msg })
-        else if (code === 'name_required') refuse({ name: msg })
-        else if (code === 'role_required') refuse({ role: msg })
-        else refuse({ form: msg })
-        setFormBusy(false)
+        if (code === 'otp_locked') {
+          refuse({ form: t('auth.otp.errors.otp_locked').replace('{m}', String(Math.max(1, Math.ceil((Number(data.retry_after) || 600) / 60)))) })
+        } else if (code === 'email_failed') {
+          refuse({ form: t('auth.otp.errors.email_failed') })
+        } else {
+          const msg = messageFor(data, res.status)
+          if (code === 'bad_credentials' || code === 'weak_password') refuse({ password: msg })
+          else if (code === 'invalid_email' || code === 'email_taken') refuse({ email: msg })
+          else if (code === 'name_required') refuse({ name: msg })
+          else if (code === 'role_required') refuse({ role: msg })
+          else refuse({ form: msg })
+        }
         return
       }
-      // Let the check mark land before leaving the page.
-      setDone(true)
-      const target = typeof data.redirect === 'string' ? data.redirect : '/chat'
-      setTimeout(() => { window.location.href = target }, reduced ? 0 : 450)
+      if (signup) {
+        setWelcomeSent(Boolean(data.welcome_sent))
+        setPassword('')
+        setConfirm('')
+        setStep('signedUp')
+        return
+      }
+      setChallenge({
+        email: typeof data.email === 'string' ? data.email : email,
+        expiresIn: Number(data.expires_in) || 600,
+        resendIn: Number(data.resend_in) || 45,
+        demoCode: typeof data.demo_code === 'string' ? data.demo_code : undefined,
+      })
+      setStep('otp')
     } catch {
       refuse({ form: t('auth.errors.network') })
+    } finally {
+      window.clearTimeout(sendingTimer)
+      setSendingCode(false)
       setFormBusy(false)
     }
+  }
+
+  function onVerified(target: string) {
+    // Let the check mark land before leaving the page.
+    window.setTimeout(() => { window.location.href = target }, reduced ? 0 : 450)
   }
 
   const roles = [
@@ -585,6 +684,12 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
           {/* Only scrolls on very short screens; the header stays put. */}
           <main className="relative min-h-0 flex-1 overflow-y-auto px-6 sm:px-9">
             <div className="mx-auto flex min-h-full w-full max-w-[380px] flex-col justify-center py-3">
+              {step === 'otp' && challenge ? (
+                <OtpStep challenge={challenge} onVerified={onVerified} onRestart={toSignIn} />
+              ) : step === 'signedUp' ? (
+                <SignedUpCard email={email} welcomeSent={welcomeSent} onContinue={() => toSignIn()} />
+              ) : (
+              <>
               <IntroIn delay={0.05}>
                 <Segmented
                   mode={mode}
@@ -616,6 +721,12 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
                   </motion.p>
                 </AnimatePresence>
 
+                {notice && (
+                  <p role="status" className="mt-3 flex items-start gap-2 rounded-[14px] bg-[#FDE8DC] px-3.5 py-2.5 text-[13px] leading-snug text-[#8A3412] dark:bg-[#E8672A]/15 dark:text-[#FFB38A]">
+                    <Clock size={15} className="mt-px shrink-0" aria-hidden />
+                    {notice}
+                  </p>
+                )}
                 <motion.form animate={shake} onSubmit={submitEmail} className="mt-4" noValidate>
                   <AnimatePresence initial={false}>
                     {signup && (
@@ -735,27 +846,23 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
                   <button
                     type="submit"
                     disabled={formBusy}
-                    className={`group relative mt-4 flex h-12 w-full items-center justify-center overflow-hidden rounded-full text-[15px] font-medium tracking-[-0.01em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_1px_2px_rgba(26,22,20,0.22),0_12px_28px_-12px_rgba(26,22,20,0.6)] transition-[transform,background-color] duration-300 ${EASE_CSS} enabled:hover:-translate-y-px enabled:active:translate-y-0 enabled:active:scale-[0.99] disabled:cursor-default ${done ? 'bg-[#1F8A5B]' : 'bg-[#1A1614] enabled:hover:bg-black dark:bg-white dark:text-[#1A1614] dark:enabled:hover:bg-gray-100'}`}
+                    className={`group relative mt-4 flex h-12 w-full items-center justify-center overflow-hidden rounded-full bg-[#1A1614] text-[15px] font-medium tracking-[-0.01em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_1px_2px_rgba(26,22,20,0.22),0_12px_28px_-12px_rgba(26,22,20,0.6)] transition-[transform,background-color] duration-300 ${EASE_CSS} enabled:hover:-translate-y-px enabled:hover:bg-black enabled:active:translate-y-0 enabled:active:scale-[0.99] disabled:cursor-default dark:bg-white dark:text-[#1A1614] dark:enabled:hover:bg-gray-100`}
                   >
                     <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-1/3 -translate-x-[150%] skew-x-[-20deg] bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 ease-out group-enabled:group-hover:translate-x-[400%] dark:via-black/10" />
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.span
-                        key={done ? 'done' : formBusy ? 'busy' : mode}
+                        key={sendingCode ? 'sending' : formBusy ? 'busy' : mode}
                         initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
                         animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                         exit={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
                         transition={{ duration: 0.25, ease: APPLE_EASE }}
                         className="relative flex items-center gap-2.5"
+                        aria-live="polite"
                       >
-                        {done ? (
-                          <>
-                            <Check size={18} strokeWidth={2.75} aria-hidden />
-                            <span className="sr-only">{signup ? t('auth.busyUp') : t('auth.busyIn')}</span>
-                          </>
-                        ) : formBusy ? (
+                        {formBusy ? (
                           <>
                             <Loader2 size={16} className="animate-spin motion-reduce:animate-none" aria-hidden />
-                            {signup ? t('auth.busyUp') : t('auth.busyIn')}
+                            {signup ? t('auth.busyUp') : sendingCode ? t('auth.otp.sending') : t('auth.checking')}
                           </>
                         ) : (
                           <>
@@ -790,6 +897,8 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
                   </>
                 )}
               </div>
+              </>
+              )}
             </div>
           </main>
         </div>

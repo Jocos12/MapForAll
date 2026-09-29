@@ -15,7 +15,7 @@ export const runtime = 'nodejs'
  * which pack.
  */
 export async function POST(req: NextRequest) {
-  const session = getSession(req)
+  const session = await getSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to buy credits.', gate: 'login' }, { status: 401 })
   }

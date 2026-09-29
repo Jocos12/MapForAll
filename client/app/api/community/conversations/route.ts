@@ -10,7 +10,7 @@ const TYPES: ConversationType[] = ['dm', 'group', 'pin']
 // GET /api/community/conversations — the caller's conversations with member
 // profiles, last message seq, and an unread hint (last_seq vs read cursor).
 export async function GET(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
   try {
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 // Every member must be an accepted connection of the creator. DMs dedupe to
 // one conversation per pair. wrapped_keys are opaque E2EE key blobs per member.
 export async function POST(req: NextRequest) {
-  const uid = getSessionUser(req)
+  const uid = await getSessionUser(req)
   if (!uid) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   if (!rateLimit(`community:conversations:${uid}:${clientIp(req)}`, { capacity: 10, refillPerSec: 0.2 }).allowed) {
     return NextResponse.json({ error: 'Too many requests. Please wait a moment.' }, { status: 429 })

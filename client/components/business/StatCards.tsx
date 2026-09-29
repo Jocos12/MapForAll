@@ -106,7 +106,12 @@ export function StatCards({ stats, published, onOpen, delay = 0 }: { stats: Owne
           </span>
           {empty ? (
             <span className="mt-2 flex flex-1 flex-col justify-between gap-2">
-              <span className="text-[11.5px] leading-snug text-[#52525B]">{t(`biz.stats.empty.${published ? 'live' : 'draft'}.${id}`)}</span>
+              <span className="flex items-start gap-2">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FDE8DC] text-[#C2410C]" aria-hidden>
+                  <Icon size={18} />
+                </span>
+                <span className="text-[11.5px] leading-snug text-[#52525B]">{t(`biz.stats.empty.${published ? 'live' : 'draft'}.${id}`)}</span>
+              </span>
               <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#C2410C]">
                 {t(`biz.stats.empty.cta.${published ? 'live' : 'draft'}`)}
                 <ArrowRight size={13} className="transition-transform duration-150 group-hover:translate-x-0.5" aria-hidden />

@@ -27,17 +27,34 @@ function initials(name: string) {
     .join('')
 }
 
+const AVATAR_TONES = [
+  'bg-[#E8672A]/20 text-[#C2410C]',
+  'bg-sky-500/20 text-sky-800 dark:text-sky-300',
+  'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300',
+  'bg-violet-500/20 text-violet-800 dark:text-violet-300',
+  'bg-amber-500/20 text-amber-900 dark:text-amber-300',
+  'bg-rose-500/20 text-rose-800 dark:text-rose-300',
+]
+
+function toneFromName(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return AVATAR_TONES[h % AVATAR_TONES.length]
+}
+
 /** Avatar — image with graceful initials fallback and an optional presence dot. */
 export function Avatar({ src, name, size = 'md', status, className }: AvatarProps) {
   const [failed, setFailed] = useState(false)
   const showImg = src && !failed
+  const tone = toneFromName(name || '?')
 
   return (
     <span className={cn('relative inline-flex shrink-0', className)}>
       <span
         className={cn(
           'inline-flex items-center justify-center rounded-full overflow-hidden',
-          'bg-surface2 border border-border text-text2 font-mono font-medium uppercase',
+          'border border-border font-mono font-medium uppercase',
+          showImg ? 'bg-surface2 text-text2' : tone,
           SIZES[size],
         )}
       >
