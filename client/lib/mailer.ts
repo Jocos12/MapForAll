@@ -16,7 +16,24 @@ export interface MailContent {
   text: string
 }
 
-export type SendResult = { ok: true } | { ok: false; reason: 'unconfigured' | 'failed' }
+export type SendResult = { ok: true } | { ok: false; reason: 'unconfigured' | 'failed' | 'dev_domain' }
+
+/**
+ * Local development only: recipients on these domains (comma-separated
+ * DEV_EMAIL_DOMAINS, e.g. the seeded `mapforall.rw` demo accounts) never get a
+ * real email. The send is reported as not delivered, so the OTP flow falls
+ * back to showing the code on screen when OTP_DEV_FALLBACK=true. Ignored in
+ * production, so it can never swallow a real user's mail.
+ */
+function isDevOnlyRecipient(to: string): boolean {
+  if (process.env.NODE_ENV === 'production') return false
+  const domains = (process.env.DEV_EMAIL_DOMAINS ?? '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean)
+  const domain = to.split('@')[1]?.trim().toLowerCase()
+  return Boolean(domain) && domains.includes(domain)
+}
 
 let transporter: Transporter | null = null
 let verified = false
@@ -113,6 +130,10 @@ async function ensureVerified(): Promise<void> {
 }
 
 export async function sendMail(to: string, content: MailContent): Promise<SendResult> {
+  if (isDevOnlyRecipient(to)) {
+    console.info(`[mailer] dev-only address ${maskEmail(to)}: "${content.subject}" not sent`)
+    return { ok: false, reason: 'dev_domain' }
+  }
   logSmtpConfigPresence()
   if (!isSmtpConfigured()) {
     console.warn(`[mailer] SMTP is not configured; "${content.subject}" to ${maskEmail(to)} was not sent`)

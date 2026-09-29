@@ -62,7 +62,7 @@ function Screen({ step }: { step: number }) {
       )}
       {step === 1 && (
         <motion.div key="search" {...fade} className="absolute inset-0">
-          <img src="/landing/kigali-aerial.jpg" alt="" className="h-full w-full object-cover" />
+          <img src="/landing/kigali-aerial.webp" alt="" className="h-full w-full object-cover" />
           <span className="absolute inset-0 bg-[#1A1614]/20" />
           {PINS.map((p, i) => (
             <motion.span
@@ -92,7 +92,7 @@ function Screen({ step }: { step: number }) {
       )}
       {step === 2 && (
         <motion.div key="go" {...fade} className="absolute inset-0 flex flex-col bg-[#FBF3E7]">
-          <img src="/landing/kigali-ramp.jpg" alt="" className="h-[48%] w-full object-cover" />
+          <img src="/landing/kigali-ramp.webp" alt="" className="h-[48%] w-full object-cover" />
           <motion.div
             initial={{ y: 40, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}

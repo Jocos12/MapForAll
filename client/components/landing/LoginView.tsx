@@ -49,11 +49,11 @@ const HEADER_GHOST =
 
 /** Kigali places for the panel slideshow (all real photos in /public/landing). */
 const SLIDES = [
-  { src: '/landing/kigali-convention-center.jpg', key: 'convention', pos: 'center 45%' },
-  { src: '/landing/kigali-city-real.jpg', key: 'city', pos: 'center 45%' },
-  { src: '/landing/kigali-stall-real.jpg', key: 'stall', pos: 'center 40%' },
-  { src: '/landing/kigali-market-real.jpg', key: 'market', pos: 'center 50%' },
-  { src: '/landing/kigali-view-real.jpg', key: 'hills', pos: 'center 50%' },
+  { src: '/landing/kigali-convention-center.webp', key: 'convention', pos: 'center 45%' },
+  { src: '/landing/kigali-city-real.webp', key: 'city', pos: 'center 45%' },
+  { src: '/landing/kigali-stall-real.webp', key: 'stall', pos: 'center 40%' },
+  { src: '/landing/kigali-market-real.webp', key: 'market', pos: 'center 50%' },
+  { src: '/landing/kigali-view-real.webp', key: 'hills', pos: 'center 50%' },
 ] as const
 const SLIDE_MS = 6500
 

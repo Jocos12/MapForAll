@@ -49,26 +49,26 @@ function useSmoothProgress(target: RefObject<HTMLElement | null>, offset: Offset
   return useSpring(scrollYProgress, SPRING)
 }
 
-const blur = (px: number) => `blur(${Math.max(0, px).toFixed(2)}px)`
-
 /**
- * Text/content block: rises out of a blur as it enters from the bottom, and
- * softly lifts + blurs away as it leaves through the top.
+ * Text/content block: fades and rises as it enters from the bottom, and
+ * softly lifts away as it leaves through the top.
  * `stagger` (0–0.2, fraction of viewport) delays a block behind its siblings.
+ *
+ * Only opacity and transforms are scroll-linked: both run on the GPU
+ * compositor. A blur filter here would repaint the block on every scroll
+ * frame, which is what made long pages stutter.
  */
 export function ScrollReveal({
   children,
   className = '',
   stagger = 0,
   distance = 56,
-  maxBlur = 10,
   exit = true,
 }: {
   children: ReactNode
   className?: string
   stagger?: number
   distance?: number
-  maxBlur?: number
   exit?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -83,11 +83,10 @@ export function ScrollReveal({
   const opacity = useTransform([enter, leave], ([e, l]: number[]) => e * (exit ? 1 - l * 0.7 : 1))
   const y = useTransform([enter, leave], ([e, l]: number[]) => (1 - e) * distance - (exit ? l * distance * 0.7 : 0))
   const scale = useTransform(enter, [0, 1], [0.97, 1])
-  const filter = useTransform([enter, leave], ([e, l]: number[]) => blur((1 - e) * maxBlur + (exit ? l * maxBlur * 0.6 : 0)))
 
   if (reduced) return <div className={className}>{children}</div>
   return (
-    <motion.div ref={ref} style={{ opacity, y, scale, filter }} className={`will-change-transform ${className}`}>
+    <motion.div ref={ref} style={{ opacity, y, scale }} className={`will-change-transform ${className}`}>
       {children}
     </motion.div>
   )
@@ -244,7 +243,7 @@ export function IntroIn({
 }
 
 /**
- * Hero exit: as the hero scrolls away, the copy lifts, blurs and fades while
+ * Hero exit: as the hero scrolls away, the copy lifts and fades while
  * the visual sinks back and shrinks — and both come back on the way up.
  * `target` is the hero <section>.
  */
@@ -266,11 +265,10 @@ export function HeroLayer({
   const y = useTransform(p, [0, 1], isCopy ? [0, -140] : [0, 90])
   const scale = useTransform(p, [0, 1], isCopy ? [1, 0.94] : [1, 0.88])
   const opacity = useTransform(p, isCopy ? [0, 0.55] : [0.1, 0.85], [1, 0])
-  const filter = useTransform(p, [0, isCopy ? 0.55 : 0.85], [blur(0), blur(isCopy ? 12 : 6)])
 
   if (reduced) return <div className={className}>{children}</div>
   return (
-    <motion.div style={{ y, scale, opacity, filter }} className={`will-change-transform ${className}`}>
+    <motion.div style={{ y, scale, opacity }} className={`will-change-transform ${className}`}>
       {children}
     </motion.div>
   )

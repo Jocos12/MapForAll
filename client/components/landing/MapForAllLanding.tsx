@@ -286,11 +286,11 @@ function Landing() {
     { label: t('landing.nav.access'), href: '#access' },
   ]
   const slides = [
-    { src: '/landing/kigali-market-real.jpg', tag: t('landing.cards.localKicker'), title: t('landing.cards.localTitle') },
-    { src: '/landing/kigali-stall-real.jpg', tag: t('landing.cards.tableKicker'), title: t('landing.cards.tableTitle') },
-    { src: '/landing/kigali-street-real.jpg', tag: t('landing.cards.accessKicker'), title: t('landing.cards.accessTitle') },
-    { src: '/landing/kigali-city-real.jpg', tag: t('landing.cards.missionKicker'), title: t('landing.cards.missionTitle') },
-    { src: '/landing/kigali-view-real.jpg', tag: t('landing.cards.sceneKicker'), title: t('landing.cards.sceneTitle') },
+    { src: '/landing/kigali-market-real.webp', tag: t('landing.cards.localKicker'), title: t('landing.cards.localTitle') },
+    { src: '/landing/kigali-stall-real.webp', tag: t('landing.cards.tableKicker'), title: t('landing.cards.tableTitle') },
+    { src: '/landing/kigali-street-real.webp', tag: t('landing.cards.accessKicker'), title: t('landing.cards.accessTitle') },
+    { src: '/landing/kigali-city-real.webp', tag: t('landing.cards.missionKicker'), title: t('landing.cards.missionTitle') },
+    { src: '/landing/kigali-view-real.webp', tag: t('landing.cards.sceneKicker'), title: t('landing.cards.sceneTitle') },
   ]
   const accessList = [1, 2, 3, 4].map((n) => t(`landing.access2.l${n}`))
 
@@ -421,7 +421,7 @@ function Landing() {
               behind the phone; the bottom fades into the ticker. */}
           <div aria-hidden className="pointer-events-none absolute inset-0">
             <img
-              src="/landing/kigali-city-real.jpg"
+              src="/landing/kigali-city-real.webp"
               alt=""
               fetchPriority="high"
               className="hero-map-drift h-full w-full object-cover object-[center_45%] [filter:saturate(1.15)_sepia(0.22)]"
@@ -525,10 +525,10 @@ function Landing() {
           </div>
           <div className="mx-auto mt-12 grid max-w-[1120px] gap-4 sm:mt-16 sm:grid-cols-2">
             <ScrollZoom>
-              <ParallaxImage src="/landing/kigali-market-real.jpg" alt={t('landing.about.marketAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
+              <ParallaxImage src="/landing/kigali-market-real.webp" alt={t('landing.about.marketAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
             </ScrollZoom>
             <ScrollZoom>
-              <ParallaxImage src="/landing/kigali-view-real.jpg" alt={t('landing.about.aerialAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
+              <ParallaxImage src="/landing/kigali-view-real.webp" alt={t('landing.about.aerialAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
             </ScrollZoom>
           </div>
           <p className="mx-auto mt-3 max-w-[1120px] text-[12px] text-[#6E5B50] dark:text-gray-400">{t('landing.about.credit')}</p>
@@ -583,7 +583,7 @@ function Landing() {
 
               <ScrollReveal exit={false} stagger={0.04} className="lg:col-span-2 lg:row-span-2">
                 <article className="group relative h-full min-h-[360px] overflow-hidden rounded-[26px] bg-[#1A1614] shadow-[0_18px_48px_-24px_rgba(90,40,10,0.4)]">
-                  <img src="/landing/kigali-ramp.jpg" alt="" loading="lazy" className={`absolute inset-0 h-full w-full object-cover transition-transform duration-[1.2s] ${EASE_CSS} group-hover:scale-105`} />
+                  <img src="/landing/kigali-ramp.webp" alt="" loading="lazy" className={`absolute inset-0 h-full w-full object-cover transition-transform duration-[1.2s] ${EASE_CSS} group-hover:scale-105`} />
                   <span aria-hidden className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent" />
                   <span aria-hidden className="absolute left-6 top-6 flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-1.5 pr-3.5 text-[13px] font-semibold text-[#1A1614] shadow-lg backdrop-blur-xl">
                     <span className="relative flex h-6 w-6 items-center justify-center rounded-full bg-[#1F8A5B] text-white">
@@ -669,7 +669,7 @@ function Landing() {
                     <span className="rounded-full bg-[#FBF3E7] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#B8441A] dark:bg-white/10 dark:text-[#FF9A63]">{t('landing.biz.preview')}</span>
                   </div>
                   <div className="mt-5 flex items-center gap-3.5">
-                    <img src="/landing/kigali-table.jpg" alt="" className="h-12 w-12 rounded-[14px] object-cover" />
+                    <img src="/landing/kigali-table.webp" alt="" className="h-12 w-12 rounded-[14px] object-cover" />
                     <span>
                       <span className="block text-[17px] font-semibold tracking-[-0.02em] text-[#1A1614] dark:text-gray-50">Duka rya Jean</span>
                       <span className="flex items-center gap-1.5 text-[13px] text-[#1F8A5B]">
@@ -748,7 +748,7 @@ function Landing() {
                   where the white text sits, so it always reads clearly. */}
               <div aria-hidden className="pointer-events-none absolute inset-0">
                 <img
-                  src="/landing/kigali-convention-center.jpg"
+                  src="/landing/kigali-convention-center.webp"
                   alt=""
                   loading="lazy"
                   decoding="async"

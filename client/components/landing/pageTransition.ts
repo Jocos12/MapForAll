@@ -125,22 +125,22 @@ export function transitionTo(href: string, push: (href: string) => void) {
   curtain.appendChild(sun)
   document.body.appendChild(curtain)
 
-  // Quick and snappy: the whole round trip is about a second.
+  // Quick and snappy: the whole round trip is about 0.7 s.
   const sweepIn = bands.map((band, i) =>
     band.animate([{ transform: 'translateX(-101%)' }, { transform: 'translateX(0)' }], {
-      duration: 380,
-      delay: i * 45,
+      duration: 280,
+      delay: i * 30,
       easing: EASE_IN_OUT,
       fill: 'forwards',
     }),
   )
-  shade.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 150, easing: EASE_OUT, fill: 'forwards' })
+  shade.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, delay: 100, easing: EASE_OUT, fill: 'forwards' })
   sun.animate(
     [
       { opacity: 0, transform: 'scale(0.4) rotate(-90deg)' },
       { opacity: 1, transform: 'scale(1) rotate(0deg)' },
     ],
-    { duration: 380, delay: 220, easing: EASE_OUT, fill: 'forwards' },
+    { duration: 280, delay: 140, easing: EASE_OUT, fill: 'forwards' },
   )
   // Keep the sun turning gently while the next page loads.
   const spin = sun.firstElementChild?.animate(
@@ -148,14 +148,27 @@ export function transitionTo(href: string, push: (href: string) => void) {
     { duration: 24000, iterations: Infinity },
   )
 
-  // Safety net: never leave the curtain up if something goes wrong.
-  const failsafe = setTimeout(() => curtain.remove(), 8000)
+  let pushed = false
+  const go = () => {
+    if (pushed) return
+    pushed = true
+    push(href)
+  }
+
+  // Safety net: never leave the curtain up if something goes wrong. Browsers
+  // pause animations in a hidden tab, so a visitor who switches tabs mid-sweep
+  // would otherwise stay on this page: the net still takes them where they
+  // clicked.
+  const failsafe = setTimeout(() => {
+    go()
+    curtain.remove()
+  }, 4000)
   const from = location.pathname
 
   // Navigate as soon as the screen is covered — no idle hold.
   Promise.all(sweepIn.map((a) => a.finished))
     .then(() => {
-      push(href)
+      go()
       return waitForRoute(from)
     })
     .then(() => {
@@ -164,13 +177,13 @@ export function transitionTo(href: string, push: (href: string) => void) {
           { opacity: 1, transform: 'scale(1) rotate(0deg)' },
           { opacity: 0, transform: 'scale(0.7) rotate(60deg)' },
         ],
-        { duration: 240, easing: EASE_IN_OUT, fill: 'forwards' },
+        { duration: 180, easing: EASE_IN_OUT, fill: 'forwards' },
       )
-      shade.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: EASE_OUT, fill: 'forwards' })
+      shade.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: EASE_OUT, fill: 'forwards' })
       const sweepOut = bands.map((band, i) =>
         band.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(101%)' }], {
-          duration: 400,
-          delay: 60 + i * 45,
+          duration: 300,
+          delay: 20 + i * 30,
           easing: EASE_IN_OUT,
           fill: 'forwards',
         }),
@@ -192,6 +205,29 @@ export function transitionTo(href: string, push: (href: string) => void) {
 export function useTransitionLinks(root: RefObject<HTMLElement | null>, hrefs: string[]) {
   const router = useRouter()
   const key = hrefs.join('|')
+
+  // Get the destination pages ready while the visitor is still reading, so a
+  // click never waits on the network (production prefetch) or, in `next dev`,
+  // on the first compile of the page — that wait is what kept the flag on
+  // screen. Runs once, when the browser is idle.
+  useEffect(() => {
+    const targets = key.split('|')
+    const warm = () => {
+      for (const href of targets) {
+        router.prefetch(href)
+        if (process.env.NODE_ENV !== 'production') {
+          fetch(href, { credentials: 'same-origin' }).catch(() => {})
+        }
+      }
+    }
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (id: number) => void }
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(warm)
+      return () => w.cancelIdleCallback?.(id)
+    }
+    const id = window.setTimeout(warm, 1200)
+    return () => window.clearTimeout(id)
+  }, [key, router])
 
   useEffect(() => {
     const el = root.current

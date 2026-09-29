@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node --use-system-ca ./node_modules/next/dist/bin/next dev",
+    "dev": "node --use-system-ca ./node_modules/next/dist/bin/next dev --turbopack",
+    "dev:webpack": "node --use-system-ca ./node_modules/next/dist/bin/next dev",
+    "mcp": "node scripts/mcp.mjs",
+    "user:create": "node scripts/create-user.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

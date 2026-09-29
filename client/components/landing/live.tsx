@@ -334,7 +334,7 @@ export function TalkingDevice({ className = '' }: { className?: string }) {
             )}
             {phase === 3 && (
               <motion.div key="card" layout {...bubble} className="flex items-center gap-3 rounded-[22px] bg-white p-2.5 shadow-[0_10px_30px_-10px_rgba(26,22,20,0.35)]">
-                <img src="/landing/kigali-ramp.jpg" alt="" className="h-12 w-12 rounded-[14px] object-cover" />
+                <img src="/landing/kigali-ramp.webp" alt="" className="h-12 w-12 rounded-[14px] object-cover" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] font-semibold leading-tight text-[#1A1614]">{t('landing.hero.card2Title')}</span>
                   <span className="mt-0.5 flex items-center gap-1 text-[11px] leading-tight text-[#6E5B50]">
