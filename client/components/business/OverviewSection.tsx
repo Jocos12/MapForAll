@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import {
   Accessibility,
   ArrowRight,
@@ -26,13 +26,14 @@ import { useI18n } from '@/components/I18nProvider'
 import { accessDetail } from '@/lib/access'
 import { RatingBarChart, ViewsLineChart, useChartEmpty } from '@/components/business/charts'
 import { ClientPreview } from '@/components/business/ListingPreview'
-import { StatCards, type StatTarget } from '@/components/business/StatCards'
+import { StatCards } from '@/components/business/StatCards'
 import { StatusCard } from '@/components/business/StatusCard'
 import { checklistFor, MIN_PHOTOS, type ChecklistItem } from '@/components/business/checklist'
-import type { OwnerDashboard } from '@/components/business/types'
+import type { SectionId } from '@/components/business/BizShell'
+import { withPlace, type OwnerDashboard } from '@/components/business/types'
 import { BIZ } from '@/components/business/ui'
 
-type Go = (section: StatTarget) => void
+type Go = (section: SectionId) => void
 
 /** Entrance cascade step; the whole overview settles in well under a second. */
 const STAGGER = 50
@@ -321,17 +322,98 @@ function ImpactCard({ data, go, jump, style }: { data: OwnerDashboard; go: Go; j
   )
 }
 
+function QuickActions({ go, jump }: { go: Go; jump: (anchor: string) => void }) {
+  const { t } = useI18n()
+  const actions = [
+    { id: 'photos', label: t('biz.quick.photos'), run: () => jump('biz-photos') },
+    { id: 'hours', label: t('biz.quick.hours'), run: () => jump('biz-hours') },
+    { id: 'share', label: t('biz.quick.share'), run: () => go('promotion') },
+    { id: 'staff', label: t('biz.quick.staff'), run: () => go('team') },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {actions.map((action) => (
+        <button key={action.id} type="button" onClick={action.run} className={`${BIZ.secondary} min-h-11 justify-center`}>
+          {action.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function AttendanceStrip({ placeId }: { placeId: string }) {
+  const { t } = useI18n()
+  const [state, setState] = useState<'load' | 'ok' | 'err'>('load')
+  const [present, setPresent] = useState(0)
+  const [absent, setAbsent] = useState(0)
+  const [last, setLast] = useState('')
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    const timer = window.setTimeout(() => ctrl.abort(), 8000)
+    void fetch(withPlace('/api/business/attendance/today', placeId), { cache: 'no-store', signal: ctrl.signal })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('attendance'))))
+      .then((json) => {
+        const rows = Array.isArray(json.employees) ? json.employees as Array<{ presence?: { kind?: string }; punches?: Array<{ time?: string; source?: string }> }> : []
+        let here = 0
+        let away = 0
+        let latest = ''
+        for (const row of rows) {
+          if (row.presence?.kind === 'present' || row.presence?.kind === 'left') here += 1
+          else away += 1
+          for (const punch of row.punches ?? []) {
+            if (punch.source === 'rfid' && punch.time && punch.time > latest) latest = punch.time
+          }
+        }
+        setPresent(here)
+        setAbsent(away)
+        setLast(latest)
+        setState('ok')
+      })
+      .catch(() => setState('err'))
+      .finally(() => window.clearTimeout(timer))
+    return () => {
+      ctrl.abort()
+      window.clearTimeout(timer)
+    }
+  }, [placeId])
+
+  return (
+    <section className={`${BIZ.card} p-4 sm:p-5`} aria-labelledby="attendance-title">
+      <h2 id="attendance-title" className={BIZ.cardTitle}>
+        <Users size={16} className="text-[#E8672A]" aria-hidden />
+        {t('biz.overview.attendance')}
+      </h2>
+      {state === 'load' && <p className="mt-2 text-[13px] text-[#52525B]">{t('biz.loading')}</p>}
+      {state === 'err' && <p className="mt-2 text-[13px] text-[#B91C1C]" role="alert">{t('biz.overview.attendanceError')}</p>}
+      {state === 'ok' && present + absent === 0 && <p className="mt-2 text-[13px] text-[#52525B]">{t('biz.overview.attendanceEmpty')}</p>}
+      {state === 'ok' && present + absent > 0 && (
+        <p className="mt-2 text-[13.5px] text-[#18181B]">
+          {t('biz.overview.present').replace('{n}', String(present))}
+          {' · '}
+          {t('biz.overview.absent').replace('{n}', String(absent))}
+          {last ? ` · ${t('biz.overview.lastScan').replace('{time}', last)}` : ''}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function OverviewSection({ data, go, jump }: { data: OwnerDashboard; go: Go; jump: (anchor: string) => void }) {
   const { t } = useI18n()
   const [preview, setPreview] = useState(false)
+  const [span, setSpan] = useState<7 | 30>(30)
   const place = data.place
   const published = place?.status === 'validated' && !place?.paused
   const empty = useChartEmpty(published)
   if (!place) return null
   const at = (step: number): CSSProperties => ({ animationDelay: `${step * STAGGER}ms` })
+  const series = span === 7 ? data.stats.daily.slice(-7) : data.stats.daily
+  const viewTotal = span === 7 ? data.stats.views7 : data.stats.views30
 
   return (
     <div className="flex flex-col gap-5">
+      <QuickActions go={go} jump={jump} />
       <CompletionCard data={data} jump={jump} style={at(0)} />
       <StatCards stats={data.stats} published={published} onOpen={go} delay={STAGGER} />
 
@@ -342,20 +424,33 @@ export function OverviewSection({ data, go, jump }: { data: OwnerDashboard; go: 
               <BarChart3 size={16} className="text-[#E8672A]" aria-hidden />
               {t('biz.charts.views30')}
             </h2>
-            {data.stats.views30 > 0 && (
-              <span className="text-[12.5px] text-[#52525B]">{t('biz.stats.chartTotal').replace('{n}', String(data.stats.views30)).replace('{d}', '30')}</span>
+            <div className="flex gap-1">
+              {([7, 30] as const).map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  onClick={() => setSpan(days)}
+                  className={`min-h-11 rounded-full px-3 text-[12.5px] font-semibold ${span === days ? 'bg-[#E8672A] text-white' : 'text-[#52525B]'} ${BIZ.focus}`}
+                >
+                  {t('biz.stats.days').replace('{n}', String(days))}
+                </button>
+              ))}
+            </div>
+            {viewTotal > 0 && (
+              <span className="text-[12.5px] text-[#52525B]">{t('biz.stats.chartTotal').replace('{n}', String(viewTotal)).replace('{d}', String(span))}</span>
             )}
           </div>
           <div className="mt-4">
-            <ViewsLineChart daily={data.stats.daily} title={t('biz.charts.views30')} empty={empty.views} />
+            <ViewsLineChart daily={series} title={t('biz.charts.views30')} empty={empty.views} />
           </div>
         </section>
         <StatusCard
-          status={place.status ?? 'pending'}
+          status={place.status ?? 'in_review'}
           reason={place.rejection_reason}
           paused={place.paused}
           placeId={place.place_id}
           checks={data.checks}
+          completeness={checklistFor(data).filter((item) => item.done).length / Math.max(1, checklistFor(data).length)}
           onFix={() => go('business')}
           onPreview={() => setPreview(true)}
           className="animate-fade-up"
@@ -376,6 +471,7 @@ export function OverviewSection({ data, go, jump }: { data: OwnerDashboard; go: 
         <TodoCard data={data} go={go} jump={jump} style={at(8)} />
       </div>
 
+      <AttendanceStrip placeId={place.place_id} />
       <ImpactCard data={data} go={go} jump={jump} style={at(9)} />
 
       {preview && <ClientPreview data={data} onClose={() => setPreview(false)} />}

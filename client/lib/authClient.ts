@@ -12,6 +12,9 @@ export function clearLocalAuth(): void {
     localStorage.removeItem('hodari_history')
     localStorage.removeItem('hodari_chat_index')
     localStorage.removeItem('hodari_saved')
+    localStorage.removeItem('hodari_biz_seen')
+    localStorage.removeItem('hodari_biz_draft')
+    localStorage.removeItem('hodari_biz_idem')
   } catch { /* private mode */ }
   try {
     sessionStorage.clear()

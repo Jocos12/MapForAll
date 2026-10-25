@@ -14,8 +14,21 @@ import {
   toClientPlace,
   writePlacePhotos,
 } from '@/lib/places'
-import { getSession } from '@/lib/session'
+import { getSession, SessionUnavailableError } from '@/lib/session'
 import { setOwnedPlaces } from '@/lib/users'
+
+async function ownerSession(req: NextRequest) {
+  try {
+    const session = await getSession(req)
+    if (!session) return { error: NextResponse.json({ error: 'Sign in required.' }, { status: 401 }) }
+    return { session }
+  } catch (err) {
+    if (err instanceof SessionUnavailableError || isMcpUnavailable(err)) {
+      return { error: NextResponse.json({ error: 'Service temporarily unavailable, reconnecting...' }, { status: 503 }) }
+    }
+    throw err
+  }
+}
 
 function dayKey(date: Date): string {
   return date.toISOString().slice(0, 10)
@@ -101,20 +114,24 @@ function prechecks(doc: Record<string, unknown>, twins: Record<string, unknown>[
   const letters = form.name.replace(/[^a-zA-ZÀ-ÿ]/g, '')
   const shouting = letters.length >= 6 && letters.replace(/[^A-ZÀ-Þ]/g, '').length / letters.length > 0.8
   const here = coordsOf(doc)
+  const pin = !!here && here[1] >= RWANDA.south && here[1] <= RWANDA.north && here[0] >= RWANDA.west && here[0] <= RWANDA.east
   return {
+    name: form.name.trim().length >= 2,
+    category: !!form.category,
+    pin,
+    photos: storedPhotos(doc).length >= 1 || (typeof doc.photo_count === 'number' && doc.photo_count >= 1),
     duplicate: !here || !twins.some((row) => {
       const there = coordsOf(row)
       return !!there && metersBetween(here, there) <= DUPLICATE_METERS
     }),
     spam: !/(https?:\/\/|www\.|\S+@\S+\.\S+)/i.test(text) && !/(.)\1{4,}/.test(text) && !shouting,
-    consistent: form.name.trim().length >= 2 && !!form.category && (!!form.address.trim() || form.description.trim().length >= 10),
-    position: !!here && here[1] >= RWANDA.south && here[1] <= RWANDA.north && here[0] >= RWANDA.west && here[0] <= RWANDA.east,
   }
 }
 
 export async function GET(req: NextRequest) {
-  const session = await getSession(req)
-  if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
+  const gate = await ownerSession(req)
+  if ('error' in gate) return gate.error
+  const session = gate.session
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) {
     if (result.response.status === 404) return NextResponse.json({ owned: false, place: null, places: [] })
@@ -128,12 +145,15 @@ export async function GET(req: NextRequest) {
     ? doc.recommends.filter((id): id is string => typeof id === 'string').slice(0, MAX_RECOMMENDS)
     : []
   const name = typeof doc.name === 'string' ? doc.name.trim() : ''
-  const [viewRows, sourceRows, confirmRows, ratingRows, reviewRows, recommendRows, recommendedByRows, twinRows] = await Promise.all([
-    safeAggregate(sid, 'place_views', [
+  const publishedNow = isPublicPlace(doc)
+  const noRows = Promise.resolve([] as Record<string, unknown>[])
+  const [viewRows, dailyStats, sourceRows, confirmRows, ratingRows, reviewRows, recommendRows, recommendedByRows, twinRows] = await Promise.all([
+    publishedNow ? safeAggregate(sid, 'place_views', [
       { $match: { placeId, day: { $gte: dayKey(since90) } } },
       { $group: { _id: { day: '$day', source: '$source' }, count: { $sum: 1 } } },
-    ]),
-    safeAggregate(sid, 'place_views', [{ $match: { placeId } }, { $group: { _id: '$source', count: { $sum: 1 } } }]),
+    ]) : noRows,
+    publishedNow ? safeFind(sid, { collection: 'place_stats_daily', filter: { placeId, day: { $gte: dayKey(since90) } }, limit: 100 }) : Promise.resolve([]),
+    publishedNow ? safeAggregate(sid, 'place_views', [{ $match: { placeId } }, { $group: { _id: '$source', count: { $sum: 1 } } }]) : noRows,
     safeAggregate(sid, 'place_exists', [{ $match: { placeId } }, { $count: 'n' }]),
     safeAggregate(sid, 'reviews', [
       { $match: { placeId, rating: { $type: 'number' } } },
@@ -173,7 +193,24 @@ export async function GET(req: NextRequest) {
     const slot = perDay.get(day) ?? { app: 0, link: 0 }
     return { day, count: slot.app + slot.link, app: slot.app, link: slot.link }
   })
+  if (dailyStats.length) {
+    const byDay = new Map(dailyStats.map((row) => [String(row.day), row]))
+    for (let i = 0; i < daily90.length; i += 1) {
+      const row = byDay.get(daily90[i].day)
+      if (!row) continue
+      const views = count(row.views)
+      const link = count(row.sourceLink)
+      daily90[i] = { day: daily90[i].day, count: views, app: Math.max(0, views - link), link }
+    }
+  }
   const daily = daily90.slice(-30).map(({ day, count: n }) => ({ day, count: n }))
+  const actionTotals = dailyStats.reduce((sum: { route: number; call: number; website: number; save: number; unique: number }, row) => ({
+    route: sum.route + count(row.routeClicks),
+    call: sum.call + count(row.calls),
+    website: sum.website + count(row.websiteClicks),
+    save: sum.save + count(row.saves),
+    unique: sum.unique + count(row.uniqueVisitors),
+  }), { route: 0, call: 0, website: 0, save: 0, unique: 0 })
 
   const histogram = [0, 0, 0, 0, 0]
   for (const row of ratingRows) {
@@ -234,13 +271,14 @@ export async function GET(req: NextRequest) {
       resubmittedAt: dateOf(doc.resubmitted_at),
     },
     stats: {
-      reach,
-      views: Math.max(typeof doc.views === 'number' ? doc.views : 0, views30),
-      views7,
-      viewsPrev7,
-      views30,
-      daily,
-      daily90,
+      reach: publishedNow ? reach : { app: 0, link: 0 },
+      views: publishedNow ? (typeof doc.views_total === 'number' ? doc.views_total : typeof doc.views === 'number' ? doc.views : views30) : 0,
+      actions: publishedNow ? actionTotals : { route: 0, call: 0, website: 0, save: 0, unique: 0 },
+      views7: publishedNow ? views7 : 0,
+      viewsPrev7: publishedNow ? viewsPrev7 : 0,
+      views30: publishedNow ? views30 : 0,
+      daily: publishedNow ? daily : daily.map((row) => ({ ...row, count: 0 })),
+      daily90: publishedNow ? daily90 : daily90.map((row) => ({ ...row, count: 0, app: 0, link: 0 })),
       confirmations: count(confirmRows[0]?.n),
       reviewCount,
       average,
@@ -254,8 +292,9 @@ export async function GET(req: NextRequest) {
 const SUBSTANTIAL = ['name', 'category', 'address', 'location'] as const
 
 export async function PATCH(req: NextRequest) {
-  const session = await getSession(req)
-  if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
+  const gate = await ownerSession(req)
+  if ('error' in gate) return gate.error
+  const session = gate.session
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) return result.response
   const { sid, doc, placeId } = result.owned
@@ -376,12 +415,18 @@ export async function PATCH(req: NextRequest) {
   const ownerClaimed = doc.claimed_by_owner === true || doc.source === 'owner_claimed'
   // Owner-claimed listings stay public on edit (cahier §4.2 immediate visibility).
   // Community / rejected listings still go back to pending for re-check.
-  if (!ownerClaimed && (substantial || (previous === 'rejected' && contentEdit))) {
-    status = 'pending'
-    set.status = 'pending'
+  const backToReview = previous === 'changes_requested' || previous === 'rejected' || previous === 'draft'
+  if (backToReview && contentEdit) {
+    status = 'in_review'
+    set.status = 'in_review'
     set.rejection_reason = ''
     set.resubmitted_at = now
-  } else if (ownerClaimed && substantial) {
+  } else if (!ownerClaimed && (substantial || (previous === 'rejected' && contentEdit))) {
+    status = 'in_review'
+    set.status = 'in_review'
+    set.rejection_reason = ''
+    set.resubmitted_at = now
+  } else if (ownerClaimed && substantial && previous === 'validated') {
     set.needs_review = true
     set.resubmitted_at = now
   }
@@ -399,7 +444,7 @@ export async function PATCH(req: NextRequest) {
       ok: true,
       changed: [...changed],
       status,
-      remoderated: status === 'pending' && previous !== 'pending',
+      remoderated: status === 'in_review' && previous !== 'in_review',
     })
   } catch (err) {
     if (isMcpUnavailable(err)) return NextResponse.json({ error: 'Database unavailable' }, { status: 503 })
@@ -408,8 +453,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await getSession(req)
-  if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
+  const gate = await ownerSession(req)
+  if ('error' in gate) return gate.error
+  const session = gate.session
   const result = await resolveOwnedPlace(session.uid, requestedPlace(req.nextUrl))
   if (!result.ok) return result.response
   const { sid, doc, placeId, user } = result.owned

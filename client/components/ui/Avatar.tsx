@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { cn } from '@/lib/design/cn'
 
 type Size = 'sm' | 'md' | 'lg'
@@ -9,14 +10,16 @@ export interface AvatarProps {
   src?: string | null
   /** Used for the alt text and the initials fallback. */
   name: string
+  /** Stable id so the fallback color does not change when the display name does. */
+  seed?: string | null
   size?: Size
-  /** Presence dot: green = online, muted = away/offline. */
+  /** Presence ring: green = online, muted = away/offline. Omit when presence is irrelevant. */
   status?: 'online' | 'offline'
   className?: string
 }
 
 const SIZES: Record<Size, string> = { sm: 'w-7 h-7 text-[11px]', md: 'w-9 h-9 text-xs', lg: 'w-12 h-12 text-sm' }
-const DOT: Record<Size, string> = { sm: 'w-2 h-2', md: 'w-2.5 h-2.5', lg: 'w-3 h-3' }
+const PX: Record<Size, number> = { sm: 28, md: 36, lg: 48 }
 
 function initials(name: string) {
   return name
@@ -36,45 +39,52 @@ const AVATAR_TONES = [
   'bg-rose-500/20 text-rose-800 dark:text-rose-300',
 ]
 
-function toneFromName(name: string): string {
+function toneFromSeed(seed: string): string {
   let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
   return AVATAR_TONES[h % AVATAR_TONES.length]
 }
 
-/** Avatar — image with graceful initials fallback and an optional presence dot. */
-export function Avatar({ src, name, size = 'md', status, className }: AvatarProps) {
+const BLUR =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+/** Avatar — photo or initials on a color picked from the user id, plus an optional presence ring. */
+export function Avatar({ src, name, seed, size = 'md', status, className }: AvatarProps) {
   const [failed, setFailed] = useState(false)
-  const showImg = src && !failed
-  const tone = toneFromName(name || '?')
+  const showImg = Boolean(src) && !failed
+  const tone = toneFromSeed(seed || name || '?')
+  const px = PX[size]
+  const local = !!src && src.startsWith('/') && !src.startsWith('//')
 
   return (
     <span className={cn('relative inline-flex shrink-0', className)}>
       <span
         className={cn(
-          'inline-flex items-center justify-center rounded-full overflow-hidden',
+          'relative inline-flex items-center justify-center overflow-hidden rounded-full',
           'border border-border font-mono font-medium uppercase',
           showImg ? 'bg-surface2 text-text2' : tone,
+          status === 'online' && 'ring-2 ring-emerald-500',
+          status === 'offline' && 'ring-2 ring-zinc-300 dark:ring-white/30',
           SIZES[size],
         )}
       >
-        {showImg ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt={name} className="w-full h-full object-cover" onError={() => setFailed(true)} />
+        {showImg && src ? (
+          <Image
+            src={src}
+            alt={name}
+            width={px}
+            height={px}
+            sizes={`${px}px`}
+            className="h-full w-full object-cover"
+            placeholder={local ? 'blur' : 'empty'}
+            blurDataURL={local ? BLUR : undefined}
+            unoptimized={!local || src.startsWith('data:')}
+            onError={() => setFailed(true)}
+          />
         ) : (
           <span aria-hidden>{initials(name) || '?'}</span>
         )}
       </span>
-      {status && (
-        <span
-          aria-label={status === 'online' ? 'Online' : 'Offline'}
-          className={cn(
-            'absolute -bottom-0 -right-0 rounded-full ring-2 ring-bg',
-            DOT[size],
-            status === 'online' ? 'bg-green' : 'bg-text3',
-          )}
-        />
-      )}
     </span>
   )
 }

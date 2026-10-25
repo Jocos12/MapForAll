@@ -5,6 +5,7 @@ import { writeAudit } from '@/lib/audit'
 import { isMcpUnavailable } from '@/lib/mcp'
 import { isValidEmail } from '@/lib/password'
 import { createAdminUser, listAdminUsers, updateAdminUser } from '@/lib/adminUsers'
+import { logSpan } from '@/lib/devTiming'
 import { saveAvatarBuffer, parseDataUrl } from '@/lib/adminAvatar'
 import type { UserRole } from '@/lib/users'
 
@@ -18,7 +19,7 @@ const ListQuery = z.object({
   status: z.enum(['active', 'suspended', 'deleted', 'all']).optional().default('active'),
   sort: z.enum(['created_desc', 'created_asc', 'name', 'last_active', 'email']).optional().default('created_desc'),
   page: z.coerce.number().int().min(1).optional().default(1),
-  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 })
 
 const CreateBody = z.object({
@@ -38,8 +39,10 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid query.', details: parsed.error.flatten() }, { status: 400 })
   }
+  const started = Date.now()
   try {
     const result = await listAdminUsers(parsed.data)
+    logSpan('api', 'GET /api/admin/users', Date.now() - started)
     const res = NextResponse.json(result)
     res.headers.set('Cache-Control', 'private, max-age=20')
     return withSessionRefresh(res, gate.refreshedCookie)

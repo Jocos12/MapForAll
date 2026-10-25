@@ -155,11 +155,14 @@ export type PlacesListQuery = {
   sort?: string
   page: number
   limit: number
+  includeHidden?: boolean
 }
 
 export function placeStatus(raw: Record<string, unknown>): string {
-  if (raw.archived === true) return 'archived'
-  return typeof raw.status === 'string' ? raw.status : 'validated'
+  if (typeof raw.deleted_at === 'string' && raw.deleted_at) return 'deleted'
+  if (raw.archived === true || raw.status === 'archived') return 'archived'
+  if (raw.paused === true || raw.status === 'paused') return 'paused'
+  return typeof raw.status === 'string' && raw.status ? raw.status : 'validated'
 }
 
 export function matchesFilters(raw: Record<string, unknown>, q: PlacesListQuery): boolean {
@@ -167,8 +170,12 @@ export function matchesFilters(raw: Record<string, unknown>, q: PlacesListQuery)
   if (q.status) {
     if (q.status === 'validated') {
       if (status !== 'validated' && status !== '') return false
+    } else if (q.status === 'in_review') {
+      if (status !== 'in_review' && status !== 'submitted') return false
+    } else if (q.status === 'pending') {
+      if (status !== 'pending') return false
     } else if (status !== q.status) return false
-  } else if (status === 'archived') {
+  } else if (!q.includeHidden && (status === 'archived' || status === 'deleted')) {
     return false
   }
   if (q.category) {

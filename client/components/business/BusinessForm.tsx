@@ -21,6 +21,9 @@ import { MAX_PHOTOS, MAX_TAGS, PLACE_CATEGORIES } from '@/lib/places'
 import { HoursEditor } from '@/components/business/HoursEditor'
 import { LocationPicker, type AddressResolveState } from '@/components/business/LocationPicker'
 import { BIZ } from '@/components/business/ui'
+import { motion, useReducedMotion } from 'framer-motion'
+import { firstErrorField, stepFieldErrors, type FormStepId } from '@/lib/businessFormSchema'
+import { motionTransition } from '@/lib/motion'
 
 export interface BusinessFormValues {
   name: string
@@ -39,7 +42,7 @@ export interface BusinessFormValues {
 
 export const EMPTY_FORM: BusinessFormValues = {
   name: '',
-  category: 'shop',
+  category: '',
   description: '',
   address: '',
   phone: '',
@@ -64,6 +67,13 @@ const CREATE_STEPS = [
   { id: 'photos', icon: ImageIcon, titleKey: 'biz.form.stepPhotos' },
 ] as const
 
+const DRAFT_KEY = 'hodari_biz_draft'
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null
+  return <p className="mt-1.5 text-[12.5px] text-[#B91C1C]" role="alert">{message}</p>
+}
+
 export function substantialChange(before: BusinessFormValues, after: BusinessFormValues): boolean {
   return (
     before.name.trim() !== after.name.trim() ||
@@ -87,7 +97,9 @@ const ACCESS_KEYS = ['entrance', 'toilet', 'parking'] as const
 
 export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: Props) {
   const { t } = useI18n()
+  const reduce = useReducedMotion()
   const [values, setValues] = useState<BusinessFormValues>(initial)
+  const [reviewing, setReviewing] = useState(false)
   const [tagDraft, setTagDraft] = useState('')
   const [photoError, setPhotoError] = useState('')
   const [localError, setLocalError] = useState('')
@@ -108,6 +120,29 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [confirming])
+
+  useEffect(() => {
+    if (mode !== 'create') return
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (!raw) {
+        if (!localStorage.getItem('hodari_biz_idem')) localStorage.setItem('hodari_biz_idem', crypto.randomUUID())
+        return
+      }
+      const saved = JSON.parse(raw) as { values?: Partial<BusinessFormValues>; step?: number }
+      if (saved.values) setValues((prev) => ({ ...prev, ...saved.values }))
+      if (typeof saved.step === 'number') setStep(Math.min(CREATE_STEPS.length - 1, saved.step))
+      if (!localStorage.getItem('hodari_biz_idem')) localStorage.setItem('hodari_biz_idem', crypto.randomUUID())
+    } catch { /* ignore */ }
+  }, [mode])
+
+  useEffect(() => {
+    if (mode !== 'create') return
+    const timer = window.setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ values, step })) } catch { /* ignore */ }
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [mode, step, values])
 
   function patch<K extends keyof BusinessFormValues>(key: K, value: BusinessFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }))
@@ -191,36 +226,61 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
     return { ...values, tags, hours }
   }
 
+  const stepId = CREATE_STEPS[step].id
+  const fieldErrors = stepped ? stepFieldErrors(stepId, values) : {}
+  const stepValid = Object.keys(fieldErrors).length === 0
+
+  function messageFor(field: string): string {
+    const key = fieldErrors[field]
+    return key ? t(key) : ''
+  }
+
+  function focusError(errors: Record<string, string>) {
+    const field = firstErrorField(errors)
+    const id = field === 'latitude' ? 'biz-pin' : field === 'hoursWeek' ? 'biz-hours' : field === 'photos' ? 'biz-photos' : field ? `biz-${field}` : ''
+    if (!id) return
+    const node = document.getElementById(id)
+    if (node instanceof HTMLElement) node.focus()
+  }
+
   function validateStep(index: number): string {
-    if (index === 0) {
-      if (!values.name.trim()) return t('biz.form.needName')
-      if (!values.category) return t('biz.form.needCategory')
-    }
-    if (index === 1) {
-      if (values.latitude == null || values.longitude == null) return t('biz.form.pinNeed')
-    }
-    return ''
+    const errors = stepFieldErrors(CREATE_STEPS[index].id as FormStepId, values)
+    const first = firstErrorField(errors)
+    return first ? t(errors[first]) : ''
   }
 
   function goNext() {
-    const err = validateStep(step)
-    if (err) {
-      setLocalError(err)
+    const errors = stepFieldErrors(stepId, values)
+    if (Object.keys(errors).length) {
+      setLocalError('')
+      focusError(errors)
       return
     }
     setLocalError('')
+    if (step >= totalSteps - 1) {
+      setReviewing(true)
+      return
+    }
     setStep((s) => Math.min(totalSteps - 1, s + 1))
   }
 
   function goBack() {
     setLocalError('')
+    if (reviewing) {
+      setReviewing(false)
+      return
+    }
     setStep((s) => Math.max(0, s - 1))
   }
 
   function submit(e: FormEvent) {
     e.preventDefault()
     setLocalError('')
-    if (stepped && step < totalSteps - 1) {
+    if (reviewing) {
+      onSubmit(finalValues())
+      return
+    }
+    if (stepped) {
       goNext()
       return
     }
@@ -256,10 +316,10 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
       on ? 'border-[#E8672A] bg-[#FDE8DC] font-medium text-[#9A3412]' : 'border-[#D4D4D8] bg-white text-[#3F3F46] hover:border-[#A1A1AA]'
     }`
 
-  const showIdentity = !stepped || step === 0
-  const showAddress = !stepped || step === 1
-  const showHours = !stepped || step === 2
-  const showPhotos = !stepped || step === 3
+  const showIdentity = !reviewing && (!stepped || step === 0)
+  const showAddress = !reviewing && (!stepped || step === 1)
+  const showHours = !reviewing && (!stepped || step === 2)
+  const showPhotos = !reviewing && (!stepped || step === 3)
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-5 pb-24" noValidate>
@@ -321,19 +381,23 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="block sm:col-span-2">
               <span className={BIZ.label}>{t('business.name')} *</span>
-              <input required={stepped ? step === 0 : true} maxLength={120} value={values.name} onChange={(e) => patch('name', e.target.value)} className={BIZ.field} />
+              <input id="biz-name" required={stepped ? step === 0 : true} maxLength={120} value={values.name} onChange={(e) => patch('name', e.target.value)} className={BIZ.field} aria-invalid={!!messageFor('name')} />
+              <FieldError message={showIdentity ? messageFor('name') : ''} />
             </label>
             <label className="block">
               <span className={BIZ.label}>{t('business.category')} *</span>
-              <select value={values.category} onChange={(e) => patch('category', e.target.value)} className={BIZ.field}>
+              <select id="biz-category" value={values.category} onChange={(e) => patch('category', e.target.value)} className={BIZ.field} aria-invalid={!!messageFor('category')}>
+                <option value="">{t('biz.form.errors.category')}</option>
                 {PLACE_CATEGORIES.map((id) => (
                   <option key={id} value={id}>{t(`categories.${id}`)}</option>
                 ))}
               </select>
+              <FieldError message={showIdentity ? messageFor('category') : ''} />
             </label>
-            <label id="biz-phone" className="block">
+              <label className="block">
               <span className={BIZ.label}>{t('biz.form.phone')}</span>
               <input
+                id="biz-phone"
                 type="tel"
                 inputMode="tel"
                 maxLength={30}
@@ -341,7 +405,9 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
                 onChange={(e) => patch('phone', e.target.value)}
                 placeholder="+250 7xx xxx xxx"
                 className={BIZ.field}
+                aria-invalid={!!messageFor('phone')}
               />
+              <FieldError message={showIdentity ? messageFor('phone') : ''} />
             </label>
             <label id="biz-description" className="block sm:col-span-2">
               <span className={BIZ.label}>{t('biz.form.description')}</span>
@@ -389,8 +455,9 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
               <p className="mt-1.5 text-[12px] text-[#9A3412]">{t('biz.form.addressNotFound')}</p>
             )}
           </label>
-          <div className="mt-4">
+          <div id="biz-pin" tabIndex={-1} className="mt-4 outline-none">
             <span className={BIZ.label}>{t('biz.form.position')} *</span>
+            <FieldError message={showAddress ? messageFor('latitude') : ''} />
             <LocationPicker
               latitude={values.latitude}
               longitude={values.longitude}
@@ -403,7 +470,7 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
 
       {showHours && (
         <>
-          <section id="biz-hours" className={`${BIZ.card} p-5`}>
+          <section id="biz-hours" tabIndex={-1} className={`${BIZ.card} p-5 outline-none`}>
             <h3 className={BIZ.cardTitle}>
               <Clock size={16} className="text-[#E8672A]" aria-hidden />
               {t('business.hours')}
@@ -411,6 +478,7 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
             <p className="mt-1 text-[12.5px] text-[#52525B]">{t('biz.hours.hint')}</p>
             <div className="mt-4">
               <HoursEditor value={values.hoursWeek} legacy={initial.hours} onChange={(week) => patch('hoursWeek', week)} />
+              <FieldError message={showHours ? messageFor('hoursWeek') : ''} />
             </div>
           </section>
 
@@ -490,6 +558,7 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
           </div>
           <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
           {photoError && <p className="mt-2 text-[12.5px] text-[#B91C1C]">{photoError}</p>}
+          <FieldError message={showPhotos ? messageFor('photos') : ''} />
 
           <label id="biz-tags" className="mt-5 block">
             <span className={BIZ.label}>{t('biz.form.tags')} ({values.tags.length}/{MAX_TAGS})</span>
@@ -528,12 +597,36 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
         </p>
       )}
 
+      {reviewing && (
+        <section className={`${BIZ.card} p-5`} aria-labelledby="biz-review">
+          <h3 id="biz-review" className={BIZ.cardTitle}>{t('biz.form.reviewTitle')}</h3>
+          <dl className="mt-4 grid gap-2 text-[13.5px] text-[#27272A]">
+            <div><dt className="text-[12px] text-[#71717A]">{t('business.name')}</dt><dd className="font-medium">{values.name}</dd></div>
+            <div><dt className="text-[12px] text-[#71717A]">{t('business.category')}</dt><dd>{values.category ? t(`categories.${values.category}`) : '—'}</dd></div>
+            <div><dt className="text-[12px] text-[#71717A]">{t('biz.form.address')}</dt><dd>{values.address || '—'}</dd></div>
+            <div><dt className="text-[12px] text-[#71717A]">{t('biz.form.photos')}</dt><dd>{values.photos.length}</dd></div>
+          </dl>
+        </section>
+      )}
+
       {shownError && <p className="text-[13px] text-[#B91C1C]" role="alert">{shownError}</p>}
       {success && (mode === 'create' || !dirty) && (
-        <p className="flex items-center gap-2 rounded-xl border border-[#2E8B57]/30 bg-[#2E8B57]/10 px-3.5 py-2.5 text-[13px] font-medium text-[#1F6B43]" role="status">
-          <CheckCircle2 size={16} />
-          {success}
-        </p>
+        <div className="relative overflow-hidden rounded-xl border border-[#2E8B57]/30 bg-[#2E8B57]/10 px-3.5 py-4 text-[13px] font-medium text-[#1F6B43]" role="status">
+          <p className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden>
+              <motion.circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={motionTransition(!!reduce, 0.35)} />
+              <motion.path d="M7 12.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={motionTransition(!!reduce, 0.3)} />
+            </svg>
+            {success}
+          </p>
+          {!reduce && (
+            <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 flex justify-center gap-3">
+              {['#E8672A', '#2E8B57', '#F5C542', '#1A1614'].map((color, i) => (
+                <motion.span key={color} className="mt-1 h-1.5 w-1.5 rounded-full" style={{ background: color }} initial={{ y: 0, opacity: 0 }} animate={{ y: 18, opacity: [0, 1, 0] }} transition={{ duration: 0.4, delay: i * 0.04 }} />
+              ))}
+            </span>
+          )}
+        </div>
       )}
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#E4E4E7] bg-white/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/90 md:sticky md:bottom-0 md:rounded-xl md:border md:shadow-sm">
@@ -548,20 +641,20 @@ export function BusinessForm({ mode, initial, busy, error, success, onSubmit }: 
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {stepped && step > 0 && (
+            {stepped && (step > 0 || reviewing) && (
               <button type="button" onClick={goBack} className={`${BIZ.secondary} h-11 px-4`}>
                 {t('biz.form.back')}
               </button>
             )}
-            {stepped && step < totalSteps - 1 ? (
-              <button type="submit" className={`${BIZ.primary} h-11 px-6`}>
+            {stepped && !reviewing ? (
+              <button type="submit" disabled={!stepValid} className={`${BIZ.primary} h-11 px-6 disabled:cursor-not-allowed disabled:opacity-50`}>
                 {t('biz.form.next')}
               </button>
             ) : (
               <button type="submit" disabled={busy || (mode === 'edit' && !dirty)} className={`${BIZ.primary} h-11 px-6`}>
                 {busy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" />}
                 {mode === 'create'
-                  ? busy ? t('business.submitting') : t('business.submit')
+                  ? busy ? t('business.submitting') : reviewing ? t('biz.form.reviewSubmit') : t('business.submit')
                   : busy ? t('biz.form.saving') : t('biz.form.save')}
               </button>
             )}

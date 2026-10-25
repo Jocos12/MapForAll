@@ -91,6 +91,9 @@ interface Props {
   onEditMessage?: (id: string, text: string) => void
   /** Opens the in-app place details panel from the inline chat gallery. */
   onPlaceDetails?: (place: Place) => void
+  /** Focus a chat card on the in-app map. */
+  onFocusPlace?: (place: Place) => void
+  activePlaceId?: string | null
   onToggleMapPanel?: () => void
   selectedModel: ModelId
   onModelChange: (id: ModelId) => void
@@ -168,6 +171,8 @@ export function ChatPanel({
   onOpenMapFromMessage,
   onEditMessage,
   onPlaceDetails,
+  onFocusPlace,
+  activePlaceId,
   onToggleMapPanel,
   selectedModel,
   onModelChange,
@@ -470,16 +475,29 @@ export function ChatPanel({
               disabled={loading && voiceState === 'idle'}
               aria-label={voiceState === 'listening' ? 'Stop listening and send' : 'Start voice input'}
               title={voiceState === 'listening' ? 'Stop listening and send' : 'Start voice input'}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 max-md:h-11 max-md:w-11 ${
+              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 max-md:h-11 max-md:w-11 ${
                 voiceState === 'listening'
                   ? 'bg-red-500 text-white'
                   : 'text-gray-500 hover:bg-[#F56A00]/10 hover:text-[#F56A00] dark:hover:bg-[#F56A00]/15'
               }`}
             >
-              <Mic className="h-4 w-4" />
+              {voiceState === 'listening' && (
+                <>
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-[-4px] rounded-full border-2 border-red-400/70 animate-ping"
+                  />
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-[-7px] rounded-full border border-red-300/40"
+                    style={{ animation: 'voice-orb-pulse 1.4s ease-out infinite' }}
+                  />
+                </>
+              )}
+              <Mic className="relative z-10 h-4 w-4" />
             </button>
           )}
-          {voiceSupported && (
+          {voiceSupported && uiMode === 'voice' && (
             <button
               type="button"
               onClick={() => {
@@ -690,7 +708,7 @@ export function ChatPanel({
                       attribution={msg.gallery.attribution}
                     />
                   ) : msg.places?.length ? (
-                    <InlinePlaceGallery places={msg.places} onDetails={onPlaceDetails} />
+                    <InlinePlaceGallery places={msg.places} onDetails={onPlaceDetails} onFocusPlace={onFocusPlace} activePlaceId={activePlaceId} />
                   ) : null}
                   {msg.calendarEvents?.length ? (
                     <div className="mt-2.5 flex flex-wrap gap-2">

@@ -1,6 +1,7 @@
 import { findPlaceIndexInText } from './mapIntents'
 import type { Itinerary, Place } from './types'
 import { isValidCoord, type LatLng } from './geo'
+import { dedupePlaces } from './placeDedupe'
 
 export type { TravelMode } from './routing'
 import type { TravelMode } from './routing'
@@ -144,7 +145,7 @@ export function parseSessionPlaces(raw: unknown): Place[] {
       }
     }
     const list = unwrapPlaceList(parsed)
-    return list.map(normalizePlace).filter((p): p is Place => p !== null)
+    return dedupePlaces(list.map(normalizePlace).filter((p): p is Place => p !== null))
   } catch {
     return []
   }
@@ -165,6 +166,7 @@ export function parseSessionItinerary(raw: unknown): Itinerary | null {
     }
     const it = parsed as Itinerary
     if (!Array.isArray(it?.stops) || it.stops.length === 0) return null
+    it.stops = dedupePlaces(it.stops)
     return it
   } catch {
     return null
@@ -264,6 +266,62 @@ function visiblePlaces(ctx: MapActionContext): Place[] {
   }
 
   return []
+}
+
+export type ActivePlace = {
+  id: string
+  place_id: string
+  name: string
+  lat: number
+  lng: number
+}
+
+export function toActivePlace(place: Place | null | undefined): ActivePlace | null {
+  if (!place?.name || !isValidCoord(place.coordinates)) return null
+  const placeId = place.place_id || place.name
+  return {
+    id: placeId,
+    place_id: placeId,
+    name: place.name,
+    lat: place.coordinates.lat,
+    lng: place.coordinates.lng,
+  }
+}
+
+/** Last place a map action named, matched on the answer list or earlier places. */
+export function placeTargetedByActions(actions: MapAction[], list: Place[], memory: Place[]): Place | null {
+  let found: Place | null = null
+  for (const action of actions) {
+    let name: string | undefined
+    let index: number | undefined
+    if (
+      action.op === 'focus_place' ||
+      action.op === 'keep_only' ||
+      action.op === 'highlight_place' ||
+      action.op === 'circle_place'
+    ) {
+      name = action.place_name
+      index = action.place_index
+    } else if (action.op === 'route') {
+      name = action.to_place_name
+      index = action.to_place_index
+    } else {
+      continue
+    }
+    if (typeof index === 'number' && list[index]) {
+      found = list[index]
+      continue
+    }
+    if (!name) continue
+    const inList = findPlaceIndexInText(name, list)
+    if (inList !== null) {
+      found = list[inList]
+      continue
+    }
+    const inMemory = findPlaceIndexInText(name, memory)
+    if (inMemory !== null) found = memory[inMemory]
+  }
+  return found
 }
 
 function resolveIndex(

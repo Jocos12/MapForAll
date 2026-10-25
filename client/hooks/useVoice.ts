@@ -13,6 +13,7 @@ import {
   subscribeVoiceActivity,
   subscribeLiveTranscript,
   subscribeVoiceDiag,
+  subscribeVoiceAlert,
 } from '@/lib/voice'
 
 export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'paused'
@@ -54,6 +55,8 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
   const [recognitionLang, setRecognitionLang] = useState('')
   const recorderRef = useRef<Awaited<ReturnType<typeof startRecording>> | null>(null)
   const lastSpeechAtRef = useRef(0)
+  const listenStartedAtRef = useRef(0)
+  const heardSpeechRef = useRef(false)
   const rafRef = useRef(0)
   const levelRef = useRef(0)
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -76,6 +79,14 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
     setWarning('')
   }, [lang])
 
+  useEffect(() => subscribeVoiceAlert((key) => {
+    const msg =
+      key === 'ttsUnavailable' ? tRef.current('composer.ttsUnavailable')
+      : key === 'ttsBrowserFallback' ? tRef.current('composer.ttsBrowserFallback')
+      : key
+    setWarning(msg)
+  }), [])
+
   const stopListening = useCallback(async () => {
     const rec = recorderRef.current
     if (!rec) return
@@ -89,7 +100,7 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
         onTranscript(text)
         dispatch({ type: 'THINK' })
       } else {
-        setWarning('No speech detected. Try speaking clearly in Chrome or Edge.')
+        setWarning(tRef.current('composer.noSpeech'))
         dispatch({ type: 'IDLE' })
         emitActivity('idle', 0)
       }
@@ -121,7 +132,10 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
       const preferBrowser = Boolean(preferBrowserRef.current) && activeLang !== 'rw'
       if (activeLang === 'rw') setWarning(tRef.current('composer.voiceRwFallback'))
       recorderRef.current = await startRecording({ preferBrowser, lang: activeLang })
-      lastSpeechAtRef.current = performance.now()
+      const now = performance.now()
+      listenStartedAtRef.current = now
+      lastSpeechAtRef.current = now
+      heardSpeechRef.current = false
       dispatch({ type: 'LISTEN' })
       emitActivity('listening', 0)
     } catch {
@@ -208,10 +222,18 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
       cancelAnimationFrame(rafRef.current)
       return
     }
+    // Grace before "no speech": give 2.8s to start talking; after voice is heard, 1.8s silence ends turn.
+    const START_GRACE_MS = 2800
+    const POST_SPEECH_SILENCE_MS = 1800
     const tick = () => {
       const now = performance.now()
-      if (levelRef.current > 0.035) lastSpeechAtRef.current = now
-      if (now - lastSpeechAtRef.current > 1500) {
+      if (levelRef.current > 0.035) {
+        lastSpeechAtRef.current = now
+        heardSpeechRef.current = true
+      }
+      const silenceLimit = heardSpeechRef.current ? POST_SPEECH_SILENCE_MS : START_GRACE_MS
+      const anchor = heardSpeechRef.current ? lastSpeechAtRef.current : listenStartedAtRef.current
+      if (now - anchor > silenceLimit) {
         void stopListening()
         return
       }

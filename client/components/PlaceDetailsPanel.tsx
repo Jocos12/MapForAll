@@ -1,16 +1,56 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Clock, ExternalLink, HeartHandshake, MapPin, Share2, Star, Tag, Users } from 'lucide-react'
+import { Bookmark, Car, ChevronLeft, ChevronRight, Clock, Copy, Footprints, HeartHandshake, MapPin, Share2, Star, Tag, Users } from 'lucide-react'
+import { MapsChooser } from '@/components/MapsChooser'
 import { AccessConfirm } from '@/components/AccessConfirm'
 import { PlaceBadges } from '@/components/PlaceBadges'
 import { StillThere } from '@/components/StillThere'
-import { PlaceReviews } from '@/components/PlaceReviews'
+import { PlaceRatePopover, PlaceReviews } from '@/components/PlaceReviews'
 import { useI18n } from '@/components/I18nProvider'
 import type { Place } from '@/lib/types'
 import { WEEK_DAYS, type WeekHours } from '@/lib/hours'
+import { trackPlace } from '@/lib/trackPlace'
 
-const PLACES_NEW_ENABLED = process.env.NEXT_PUBLIC_PLACES_API_NEW === '1'
+const DETAILS_PREF = 'hodari_details_expanded'
+
+export function detailsExpandedPref(): boolean {
+  try { return sessionStorage.getItem(DETAILS_PREF) === '1' } catch { return false }
+}
+
+export function setDetailsExpandedPref(open: boolean) {
+  try { sessionStorage.setItem(DETAILS_PREF, open ? '1' : '0') } catch { /* private mode */ }
+}
+
+function notifyMapChrome() {
+  window.dispatchEvent(new Event('hodari:chrome'))
+}
+
+interface AccessFlags {
+  entrance: boolean | null
+  toilet: boolean | null
+  parking: boolean | null
+  seating: boolean | null
+}
+
+interface HourLine { label: string; hours: string; today: boolean }
+
+interface DetailsApi {
+  name?: string
+  address?: string
+  rating?: number | null
+  ratingCount?: number | null
+  photos?: string[]
+  openNow?: boolean | null
+  weekdayText?: string[]
+  todayIndex?: number
+  phone?: string
+  website?: string
+  price?: string | null
+  summary?: string
+  accessibility?: AccessFlags
+  error?: string
+}
 
 interface PlaceData {
   name: string
@@ -25,6 +65,8 @@ interface PlaceData {
   phone?: string
   mapsUri?: string
   isOpen?: boolean | null
+  weekday?: HourLine[]
+  access?: AccessFlags | null
 }
 
 interface Props {
@@ -37,8 +79,17 @@ interface Props {
   onClose: () => void
   /** Community share action — opens the host's share-a-pin picker. */
   onShare?: () => void
+  /** Center and open this place on the in-app map. */
+  onViewInApp?: (place: Place) => void
   /** Owner preview from the dashboard: no view is counted. */
   preview?: boolean
+  onWalk?: () => void
+  onDrive?: () => void
+  onSave?: () => void
+  onRate?: () => void
+  saved?: boolean
+  distance?: string
+  duration?: string
 }
 
 interface Recommended {
@@ -70,18 +121,14 @@ function priceLabel(level?: string | number): string | undefined {
   return PRICE_SYMBOL[String(level)] ?? undefined
 }
 
-function summaryText(value: unknown): string | undefined {
-  if (!value) return undefined
-  if (typeof value === 'string') return value
-  if (typeof value === 'object' && value !== null && 'text' in value) {
-    const t = (value as { text?: string }).text
-    return typeof t === 'string' ? t : undefined
-  }
-  return undefined
-}
-
 function isCommunityPlaceId(placeId: string): boolean {
-  return placeId.startsWith('user_') || placeId.startsWith('pin:') || placeId.startsWith('__')
+  return (
+    placeId.startsWith('user_') ||
+    placeId.startsWith('pin:') ||
+    placeId.startsWith('__') ||
+    placeId.startsWith('kgl_') ||
+    /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(placeId)
+  )
 }
 
 function photoList(place: Place): string[] {
@@ -128,6 +175,19 @@ function openFromWeek(week: WeekHours): boolean {
     : hhmm >= today.open || hhmm < today.close
 }
 
+function hourLines(text: string[] | undefined, todayIndex: number): HourLine[] {
+  if (!text?.length) return []
+  return text.map((line, index) => {
+    const split = line.indexOf(':')
+    if (split < 0) return { label: line.trim(), hours: '', today: index === todayIndex }
+    return {
+      label: line.slice(0, split).trim(),
+      hours: line.slice(split + 1).trim(),
+      today: index === todayIndex,
+    }
+  }).filter((row) => row.label || row.hours)
+}
+
 function buildFromFallback(place: Place, mapsUrl: string): PlaceData {
   return {
     name: place.name,
@@ -141,30 +201,6 @@ function buildFromFallback(place: Place, mapsUrl: string): PlaceData {
     phone: place.phone || undefined,
     mapsUri: place.maps_url || mapsUrl,
     isOpen: place.open_now ?? (place.hours_week ? openFromWeek(place.hours_week) : null),
-  }
-}
-
-async function fetchPlaceDetailsApi(placeId: string): Promise<Partial<PlaceData> | null> {
-  try {
-    const res = await fetch(`/api/place-photos?placeId=${encodeURIComponent(placeId)}`)
-    if (!res.ok) return null
-    const data = await res.json()
-    const hours = data.opening_hours?.weekday_text as string[] | undefined
-    const todayIdx = (new Date().getDay() + 6) % 7
-    return {
-      name: data.name,
-      rating: data.rating,
-      ratingCount: typeof data.ratingCount === 'number' ? data.ratingCount : undefined,
-      priceSymbol: priceLabel(data.priceLevel ?? data.price_level),
-      photoUrls: Array.isArray(data.photoUrls) ? data.photoUrls : [],
-      address: data.address ?? data.formatted_address,
-      todayHours: hours?.[todayIdx],
-      mapsUri: data.maps_url,
-      website: typeof data.website === 'string' ? data.website : undefined,
-      isOpen: data.isOpen ?? data.opening_hours?.open_now ?? null,
-    }
-  } catch {
-    return null
   }
 }
 
@@ -198,7 +234,15 @@ export function PlaceDetailsPanel({
   userLocation,
   onClose,
   onShare,
+  onViewInApp,
   preview = false,
+  onWalk,
+  onDrive,
+  onSave,
+  onRate,
+  saved = false,
+  distance,
+  duration,
 }: Props) {
   const { t, lang } = useI18n()
   const [lbOpen, setLbOpen] = useState(false)
@@ -208,16 +252,14 @@ export function PlaceDetailsPanel({
   const [listing, setListing] = useState<Place | null>(null)
 
   useEffect(() => {
+    if (preview || !/^[A-Za-z0-9][A-Za-z0-9_:-]{1,120}$/.test(placeId)) return
+    trackPlace(placeId, 'view', 'map')
+  }, [placeId, preview])
+
+  useEffect(() => {
     setListing(null)
     if (!placeId.startsWith('user_')) return
     let cancelled = false
-    if (!preview) {
-      void fetch('/api/places/view', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ placeId, source: 'app' }),
-      }).catch(() => {})
-    }
     void fetch(`/api/places/public?placeId=${encodeURIComponent(placeId)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { place?: Place | null; recommends?: Recommended[]; recommendedBy?: number } | null) => {
@@ -254,12 +296,13 @@ export function PlaceDetailsPanel({
     [listing, fallbackPlace],
   )
 
-  const initial = useMemo(
-    () => (place ? buildFromFallback(place, fallbackMapsUrl) : null),
-    [place, fallbackMapsUrl],
-  )
-  const [data, setData] = useState<PlaceData | null>(initial)
-  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>(initial ? 'ok' : 'loading')
+  const [data, setData] = useState<PlaceData | null>(null)
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [copied, setCopied] = useState(false)
+  const [gallery, setGallery] = useState(0)
+  const [rateOpen, setRateOpen] = useState(false)
 
   const lbPrev = useCallback(() => {
     setLbIndex((i) => (i === 0 ? (data?.photoUrls.length ?? 1) - 1 : i - 1))
@@ -274,7 +317,7 @@ export function PlaceDetailsPanel({
       if (e.key === 'Escape') {
         e.stopImmediatePropagation()
         if (lbOpen) closeLightbox()
-        else onClose()
+        else { setDetailsExpandedPref(false); onClose() }
         return
       }
       if (!lbOpen) return
@@ -285,100 +328,79 @@ export function PlaceDetailsPanel({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [lbOpen, closeLightbox, lbPrev, lbNext, onClose])
 
+  const hide = useCallback(() => {
+    setDetailsExpandedPref(false)
+    onClose()
+  }, [onClose])
+
+  useEffect(() => {
+    setDetailsExpandedPref(true)
+    const timer = window.setTimeout(() => notifyMapChrome(), 80)
+    return () => {
+      window.clearTimeout(timer)
+      notifyMapChrome()
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
+    const community = isCommunityPlaceId(placeId) || place?.source === 'community'
 
     async function load() {
       setStatus('loading')
+      setLoadError(null)
+      setGallery(0)
       const base: PlaceData = place
         ? buildFromFallback(place, fallbackMapsUrl)
         : { name: fallbackName, photoUrls: [], mapsUri: fallbackMapsUrl }
-      if (!place) setStatus('loading')
-
-      const community = isCommunityPlaceId(placeId) || place?.source === 'community'
-      const api = community ? null : await fetchPlaceDetailsApi(placeId)
-      if (cancelled) return
-
-      const merged: PlaceData = {
-        name: filled(api?.name) ?? base.name ?? fallbackName,
-        rating: api?.rating ?? base.rating,
-        ratingCount: api?.ratingCount ?? base.ratingCount,
-        priceSymbol: api?.priceSymbol ?? base.priceSymbol,
-        photoUrls: api?.photoUrls?.length ? api.photoUrls : base.photoUrls,
-        address: filled(api?.address) ?? base.address,
-        todayHours: filled(api?.todayHours) ?? base.todayHours,
-        summary: filled(base.summary) ?? filled(api?.summary),
-        website: filled(api?.website) ?? base.website,
-        phone: base.phone,
-        mapsUri: filled(api?.mapsUri) ?? base.mapsUri ?? fallbackMapsUrl,
-        isOpen: api?.isOpen ?? base.isOpen ?? null,
-      }
-
-      if (!community && PLACES_NEW_ENABLED && typeof google !== 'undefined' && google.maps?.importLibrary) {
-        try {
-          await google.maps.importLibrary('places')
-          const place = new google.maps.places.Place({ id: placeId })
-          await place.fetchFields({
-            fields: [
-              'displayName', 'rating', 'userRatingCount', 'priceLevel', 'photos',
-              'formattedAddress', 'regularOpeningHours', 'websiteURI',
-              'googleMapsURI', 'nationalPhoneNumber', 'editorialSummary',
-            ],
-          })
-          if (!cancelled) {
-            const hours = place.regularOpeningHours
-            const todayIdx = (new Date().getDay() + 6) % 7
-            merged.name = place.displayName ?? merged.name
-            merged.rating = place.rating ?? merged.rating
-            merged.ratingCount = place.userRatingCount ?? undefined
-            merged.priceSymbol = place.priceLevel ? priceLabel(place.priceLevel) : merged.priceSymbol
-            if (merged.photoUrls.length === 0 && place.photos?.length) {
-              merged.photoUrls = place.photos
-                .map((p) => {
-                  try {
-                    const uri = p.getURI({ maxWidth: 720, maxHeight: 420 })
-                    return `/api/place-photo?url=${encodeURIComponent(uri)}`
-                  } catch {
-                    return null
-                  }
-                })
-                .filter((u): u is string => !!u)
-            }
-            merged.address = place.formattedAddress ?? merged.address
-            merged.todayHours = hours?.weekdayDescriptions?.[todayIdx] ?? merged.todayHours
-            merged.summary = summaryText(place.editorialSummary) ?? merged.summary
-            merged.website = place.websiteURI ?? merged.website
-            merged.phone = place.nationalPhoneNumber ?? merged.phone
-            merged.mapsUri = place.googleMapsURI ?? merged.mapsUri
-          }
-        } catch {
-          /* keep merged API + fallback data */
+      if (community) {
+        if (!cancelled) {
+          setData(base)
+          setStatus('ok')
         }
+        return
       }
-
-      if (!community && merged.photoUrls.length === 0 && fallbackName.trim()) {
-        try {
-          const res = await fetch(`/api/place-photos?q=${encodeURIComponent(fallbackName)}`)
-          if (res.ok) {
-            const named = await res.json() as { photoUrls?: string[]; rating?: number; address?: string }
-            if (Array.isArray(named.photoUrls) && named.photoUrls.length) merged.photoUrls = named.photoUrls
-            if (merged.rating == null && typeof named.rating === 'number') merged.rating = named.rating
-            if (!filled(merged.address) && typeof named.address === 'string') merged.address = named.address
-          }
-        } catch {
-          /* keep the fields already on the place */
+      try {
+        const res = await fetch(`/api/places/details?placeId=${encodeURIComponent(placeId)}`)
+        const json = await res.json().catch(() => null) as DetailsApi | null
+        if (cancelled) return
+        if (!res.ok || !json) {
+          setLoadError(json?.error || t('placeCard.detailsError'))
+          setData(base)
+          setStatus('error')
+          return
         }
-      }
-
-      if (!cancelled) {
-        setData(merged)
+        const lines = hourLines(json.weekdayText, json.todayIndex ?? new Date().getDay())
+        const photos = (json.photos ?? []).slice(0, 5)
+        setData({
+          name: filled(json.name) ?? base.name,
+          rating: json.rating ?? base.rating ?? undefined,
+          ratingCount: json.ratingCount ?? base.ratingCount ?? undefined,
+          priceSymbol: json.price ?? base.priceSymbol ?? undefined,
+          photoUrls: photos.length ? photos : base.photoUrls.slice(0, 5),
+          address: filled(json.address) ?? base.address,
+          todayHours: lines.find((line) => line.today)?.hours || base.todayHours,
+          weekday: lines,
+          summary: filled(json.summary) ?? base.summary,
+          website: filled(json.website) ?? base.website,
+          phone: filled(json.phone) ?? base.phone,
+          mapsUri: base.mapsUri ?? fallbackMapsUrl,
+          isOpen: json.openNow ?? base.isOpen ?? null,
+          access: json.accessibility ?? null,
+        })
         setStatus('ok')
+      } catch {
+        if (!cancelled) {
+          setLoadError(t('placeCard.detailsError'))
+          setData(base)
+          setStatus('error')
+        }
       }
     }
 
     void load()
     return () => { cancelled = true }
-  }, [placeId, fallbackName, fallbackMapsUrl, place])
+  }, [placeId, fallbackName, fallbackMapsUrl, place, attempt, t])
 
   const displayName = data?.name ?? fallbackName
   const categoryRaw = place?.categories?.[0]
@@ -393,31 +415,49 @@ export function PlaceDetailsPanel({
     userLocation && place?.coordinates
       ? walkLine(userLocation, place.coordinates, lang)
       : null
-  const mapsLink =
-    data?.mapsUri ??
-    fallbackMapsUrl ??
-    (placeId && !placeId.startsWith('__')
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fallbackName)}&query_place_id=${encodeURIComponent(placeId)}`
-      : null)
+  const mapsLink = !isCommunityPlaceId(placeId)
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(displayName || fallbackName)}&query_place_id=${encodeURIComponent(placeId)}`
+    : (data?.mapsUri || fallbackMapsUrl || null)
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-end justify-center animate-fade-up p-0 md:items-center md:p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Phone: full-width bottom sheet; md+: centered modal card. */}
-      <div className="relative flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-[var(--border)] bg-[var(--bg-header)] shadow-2xl md:rounded-2xl">
-        <div className="relative h-44 shrink-0 overflow-hidden bg-gradient-to-br from-amber-50 to-[#ffffff] dark:from-amber-950/40 dark:to-slate-900">
+    <div className="pointer-events-none fixed inset-0 z-[250]" role="dialog" aria-modal="false" aria-label={displayName}>
+      <div
+        data-map-pad="details"
+        className="pointer-events-auto absolute inset-x-0 bottom-0 flex max-h-[min(78dvh,720px)] w-full animate-fade-up flex-col overflow-hidden rounded-t-2xl border border-[var(--border)] bg-[var(--bg-header)] shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:h-full md:max-h-none md:w-[min(400px,92vw)] md:animate-slide-right md:rounded-none md:rounded-l-2xl"
+      >
+        <div className="relative h-44 shrink-0 overflow-hidden bg-gray-100 dark:bg-white/5" style={{ aspectRatio: '16 / 9', maxHeight: 176 }}>
+          <div className="absolute inset-0 bg-gray-200 dark:bg-white/10" aria-hidden />
           {data?.photoUrls?.length ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={data.photoUrls[0]}
-              alt={displayName}
-              className="h-full w-full cursor-zoom-in object-cover"
-              loading="lazy"
-              onClick={() => openLightbox(0)}
-            />
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={data.photoUrls[Math.min(gallery, data.photoUrls.length - 1)]}
+                alt={displayName}
+                className="absolute inset-0 h-full w-full cursor-zoom-in object-cover"
+                loading="lazy"
+                onClick={() => openLightbox(Math.min(gallery, data.photoUrls.length - 1))}
+                onError={(event) => { event.currentTarget.style.display = 'none' }}
+                onTouchStart={(event) => { (event.currentTarget as HTMLImageElement).dataset.x = String(event.changedTouches[0]?.clientX ?? 0) }}
+                onTouchEnd={(event) => {
+                  const start = Number((event.currentTarget as HTMLImageElement).dataset.x || 0)
+                  const delta = (event.changedTouches[0]?.clientX ?? 0) - start
+                  if (Math.abs(delta) < 40 || data.photoUrls.length < 2) return
+                  setGallery((index) => (delta < 0 ? (index + 1) % data.photoUrls.length : (index + data.photoUrls.length - 1) % data.photoUrls.length))
+                }}
+              />
+              {data.photoUrls.length > 1 && (
+                <>
+                  <button type="button" aria-label={t('placeCard.photo')} onClick={() => setGallery((index) => (index + data.photoUrls.length - 1) % data.photoUrls.length)} className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white">
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button type="button" aria-label={t('placeCard.photo')} onClick={() => setGallery((index) => (index + 1) % data.photoUrls.length)} className="absolute right-12 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </>
           ) : (
-            <div className="flex h-full w-full items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center">
               <span className="font-display text-4xl font-semibold text-amber-600/60">
                 {displayName.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}
               </span>
@@ -425,8 +465,9 @@ export function PlaceDetailsPanel({
           )}
           <button
             type="button"
-            onClick={onClose}
-            title="Close"
+            onClick={hide}
+            title={t('placeCard.hideDetails')}
+            aria-label={t('placeCard.close')}
             className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg>
@@ -449,19 +490,32 @@ export function PlaceDetailsPanel({
           </div>
         )}
 
-        <div className="scrollbar-hide overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
+        <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
           <h2 className="font-display text-xl font-semibold leading-tight text-[var(--text-primary)]">
             {displayName}
           </h2>
 
+          <button type="button" onClick={hide} className="mt-2 text-[12px] font-medium text-[#E8672A]">
+            {t('placeCard.hideDetails')}
+          </button>
           {status === 'loading' && (
-            <div className="mt-4 flex items-center gap-2.5">
-              <div className="thinking-ring" />
-              <span className="text-[11px] tracking-wide text-[var(--text-secondary)]">Loading details…</span>
+            <div className="mt-4 space-y-2" aria-busy="true">
+              <p className="text-[12px] text-[var(--text-secondary)]">{t('placeCard.loading')}</p>
+              <div className="h-3 w-2/3 animate-pulse rounded bg-black/10 motion-reduce:animate-none dark:bg-white/10" />
+              <div className="h-3 w-full animate-pulse rounded bg-black/10 motion-reduce:animate-none dark:bg-white/10" />
+              <div className="h-3 w-5/6 animate-pulse rounded bg-black/10 motion-reduce:animate-none dark:bg-white/10" />
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+              <p className="text-[13px] text-[var(--text-primary)]">{loadError || t('placeCard.detailsError')}</p>
+              <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-2 rounded-full bg-[#F56A00] px-3 py-1 text-[12px] font-medium text-white">
+                {t('placeCard.retry')}
+              </button>
             </div>
           )}
 
-          {data && (status === 'ok' || place) && (
+          {data && status !== 'loading' && (
             <>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {categoryText && (
@@ -482,7 +536,7 @@ export function PlaceDetailsPanel({
                   </span>
                 )}
                 {data.priceSymbol && (
-                  <span className="text-[13px] font-medium text-green-600">{data.priceSymbol}</span>
+                  <span className="text-[13px] font-medium text-green-600">{t('placeCard.price')} {data.priceSymbol}</span>
                 )}
                 {data.isOpen != null && (
                   <span
@@ -503,23 +557,67 @@ export function PlaceDetailsPanel({
 
               {place?.hours_week ? (
                 <WeekSchedule week={place.hours_week} />
-              ) : data.todayHours && (
+              ) : data.weekday && data.weekday.length > 0 ? (
+                <div className="mt-3">
+                  <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
+                    <Clock className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+                    {t('placeCard.hours')}
+                  </p>
+                  <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px] text-[var(--text-secondary)]">
+                    {data.weekday.map((row) => (
+                      <div key={row.label} className={`contents ${row.today ? 'font-semibold text-[var(--text-primary)]' : ''}`}>
+                        <dt>{row.label}</dt>
+                        <dd>{row.hours}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : data.todayHours ? (
                 <p className="mt-3 flex items-start gap-1.5 text-[12.5px] text-[var(--text-secondary)]">
                   <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
                   {data.todayHours}
                 </p>
+              ) : null}
+
+              {data.access && (
+                <ul className="mt-3 space-y-1 text-[12.5px] text-[var(--text-secondary)]">
+                  {([
+                    ['entrance', t('placeCard.stepFree')],
+                    ['toilet', t('placeCard.accessibleToilet')],
+                    ['parking', t('placeCard.accessibleParking')],
+                    ['seating', t('placeCard.accessibleSeating')],
+                  ] as const).map(([key, label]) => {
+                    const value = data.access?.[key]
+                    const state = value === true ? t('placeCard.yes') : value === false ? t('placeCard.no') : t('placeCard.notConfirmed')
+                    return <li key={key}>{label}: {state}</li>
+                  })}
+                </ul>
               )}
 
               {data.address && (
                 <div className="mt-3 flex items-start gap-2 text-[var(--text-secondary)]">
                   <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                  <span className="text-[13px] leading-relaxed">{data.address}</span>
+                  <span className="flex-1 text-[13px] leading-relaxed">{data.address}</span>
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-[#E8672A]"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(data.address || '').then(() => {
+                        setCopied(true)
+                        window.setTimeout(() => setCopied(false), 1600)
+                      })
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" aria-hidden />
+                    {copied ? t('placeCard.copied') : t('placeCard.copyAddress')}
+                  </button>
                 </div>
               )}
 
-              {walking && (
+              {(distance || duration || walking) && (
                 <p className="mt-2 text-[12.5px] text-[var(--text-secondary)]">
-                  {walking} {t('placeCard.walk')}
+                  {t('placeCard.fromYou')}
+                  {distance || duration ? ` · ${[distance, duration].filter(Boolean).join(' · ')}` : walking ? ` · ${walking}` : ''}
                 </p>
               )}
 
@@ -575,17 +673,54 @@ export function PlaceDetailsPanel({
               )}
 
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-4">
+                {onWalk && (
+                  <button type="button" onClick={() => { trackPlace(placeId, 'route', 'map'); onWalk?.() }} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#F56A00] px-3 text-[12px] font-medium text-white">
+                    <Footprints className="h-3.5 w-3.5" aria-hidden />
+                    {t('placeCard.walkRoute')}
+                  </button>
+                )}
+                {onDrive && (
+                  <button type="button" onClick={() => { trackPlace(placeId, 'route', 'map'); onDrive?.() }} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-primary)]">
+                    <Car className="h-3.5 w-3.5" aria-hidden />
+                    {t('placeCard.driveRoute')}
+                  </button>
+                )}
                 {mapsLink && (
-                  <a
-                    href={mapsLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#F56A00] px-4 text-[12px] font-medium text-white transition-colors hover:bg-[#e05a1a]"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
+                  <a href={mapsLink} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center rounded-full border border-[var(--border)] px-3 text-[12px] text-[var(--text-secondary)]">
                     {t('placeCard.openMaps')}
                   </a>
                 )}
+                {onSave && (
+                  <button type="button" onClick={() => { trackPlace(placeId, 'save', 'map'); onSave?.() }} className={`inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[12px] ${saved ? 'text-[#F56A00]' : 'text-[var(--text-secondary)]'}`}>
+                    <Bookmark className={`h-3.5 w-3.5 ${saved ? 'fill-[#F56A00]' : ''}`} aria-hidden />
+                    {saved ? t('placeCard.saved') : t('placeCard.save')}
+                  </button>
+                )}
+                <button type="button" onClick={() => { onRate?.(); setRateOpen(true) }} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[12px] text-amber-700">
+                  <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" aria-hidden />
+                  {t('placeCard.rate')}
+                </button>
+                {rateOpen && (
+                  <PlaceRatePopover
+                    placeId={placeId}
+                    onSaved={() => setRateOpen(false)}
+                    onClose={() => setRateOpen(false)}
+                  />
+                )}
+                <MapsChooser
+                  place={{
+                    ...(place ?? fallbackPlace ?? {
+                      place_id: placeId,
+                      name: data?.name || fallbackName,
+                      address: '',
+                      coordinates: { lat: 0, lng: 0 },
+                      categories: [],
+                    }),
+                    maps_url: place?.maps_url || fallbackPlace?.maps_url || fallbackMapsUrl || mapsLink || undefined,
+                  }}
+                  onViewInApp={onViewInApp}
+                  buttonClassName="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#F56A00] px-4 text-[12px] font-medium text-white transition-colors hover:bg-[#e05a1a]"
+                />
                 {onShare && (
                   <button
                     type="button"
@@ -601,17 +736,19 @@ export function PlaceDetailsPanel({
                     href={data.website}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => trackPlace(placeId, 'website', 'map')}
                     className="rounded-full border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-amber-400 hover:text-amber-600"
                   >
-                    Website
+                    {t('placeCard.website')}
                   </a>
                 )}
                 {data.phone && (
                   <a
                     href={`tel:${data.phone}`}
+                    onClick={() => trackPlace(placeId, 'call', 'map')}
                     className="rounded-full border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-amber-400 hover:text-amber-600"
                   >
-                    {data.phone}
+                    {t('placeCard.phone')} {data.phone}
                   </a>
                 )}
               </div>
@@ -625,7 +762,7 @@ export function PlaceDetailsPanel({
           role="dialog"
           aria-modal="true"
           aria-label="Photo lightbox"
-          className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/90"
+          className="fixed inset-0 z-[280] flex flex-col items-center justify-center bg-black/90"
           onClick={closeLightbox}
         >
           {/* Main image — stop propagation so clicking image doesn't close */}

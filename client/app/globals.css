@@ -455,8 +455,6 @@ a:active,
   border-radius: 16px !important;
   padding: 0 !important;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38) !important;
-  animation: place-card-in 220ms ease-out;
-  transform-origin: center bottom;
 }
 .gm-style .gm-style-iw-d {
   overflow: hidden !important;
@@ -863,6 +861,64 @@ html.biz-theming #biz-scroll * {
   width: 34px;
   height: 34px;
   cursor: pointer;
+}
+.hodari-pin--result {
+  width: 42px;
+  height: 42px;
+}
+.hodari-pin--result .hodari-glow-marker__dot {
+  font-size: 15px;
+}
+.hodari-pin--dim {
+  transform: scale(0.82);
+  opacity: 0.72;
+}
+.hodari-pin__label {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  max-width: 9rem;
+  transform: translateX(-50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: #1a1a1a;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.hodari-cluster {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: #1c1917;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 750;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.map-control-stack {
+  position: absolute;
+  right: 12px;
+  bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 16px));
+  z-index: 60;
+  display: flex;
+  max-height: calc(100% - 88px);
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.map-control-stack > * {
+  pointer-events: auto;
 }
 .hodari-pin .hodari-glow-marker__ring,
 .hodari-pin .hodari-glow-marker__tip {

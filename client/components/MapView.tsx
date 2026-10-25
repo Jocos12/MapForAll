@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { APIProvider, Map, Map3D, Marker3D, MapMode, AltitudeMode, AdvancedMarker, InfoWindow, Pin, useMap, useMap3D, useMapsLibrary } from '@vis.gl/react-google-maps'
-import { Accessibility, AlertCircle, Bike, Bookmark, Car, ChevronLeft, Clock, Compass, Earth, ExternalLink, Footprints, Globe, Image as ImageIcon, Map as MapGlyph, MapPin, Maximize2, Minimize2, Navigation, Plus, Rotate3d, RotateCcw, RotateCw, Satellite, Share2, Star, Store, Users, X } from 'lucide-react'
+import { Accessibility, AlertCircle, Bike, Bookmark, Bus, Car, ChevronLeft, Clock, Compass, Earth, ExternalLink, Footprints, Globe, Image as ImageIcon, Map as MapGlyph, MapPin, Maximize2, Minimize2, Navigation, Plus, Rotate3d, RotateCcw, RotateCw, Satellite, Share2, Star, Store, Users, X } from 'lucide-react'
+import type { ActivePlace } from '@/lib/mapActions'
 import type { ItineraryStop, Place, Theme } from '@/lib/types'
 import type { CustomRouteConfig, MapAnnotations, TravelMode } from '@/lib/mapActions'
 import type { CommunityMapPin, CommunityFriend } from '@/components/community/useCommunityMapLayer'
@@ -21,6 +22,28 @@ import { cinematicMapKeys } from '@/lib/animationMemory'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useI18n } from '@/components/I18nProvider'
 import { focusRing } from '@/lib/design/tokens'
+import { dedupePlaces, placeKey } from '@/lib/placeDedupe'
+import {
+  commitHeldRoute,
+  endHeldRoute,
+  formatEtaClock,
+  getHeldRoute,
+  getNavFix,
+  getRouteProgress,
+  getRouteSnapshot,
+  markArrived,
+  offRouteAction,
+  parseDistanceMeters,
+  parseDurationSeconds,
+  pathLengthMeters,
+  projectOnPath,
+  remainingSeconds,
+  setRecalculating,
+  setRouteProgress,
+  subscribeNavFix,
+  subscribeRoute,
+  type NavFix,
+} from '@/lib/routeProgress'
 
 const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ''
 const ROUTE_ORANGE = '#F56A00'
@@ -33,8 +56,6 @@ const DEFAULT_ZOOM = 13
 const VECTOR_3D_TILT = 55
 const RASTER_3D_TILT = 45
 const DEFAULT_3D_HEADING = 20
-
-type FitPadding = number | { top: number; right: number; bottom: number; left: number }
 
 /**
  * Per-map cancel hooks so programmatic fits (PreciseMapFit / MapZoomFocus /
@@ -76,6 +97,21 @@ function routesTravelMode(mode: TravelMode): 'WALK' | 'DRIVE' | 'BICYCLE' | 'TRA
   return 'WALK'
 }
 
+/** Body travelMode the /api/directions route accepts. */
+function apiTravelMode(mode: TravelMode): 'walking' | 'driving' | 'transit' | 'bicycling' {
+  if (mode === 'DRIVE') return 'driving'
+  if (mode === 'TRANSIT') return 'transit'
+  if (mode === 'BICYCLE') return 'bicycling'
+  return 'walking'
+}
+
+function plainLatLng(point: LatLng): { lat: number; lng: number } {
+  const raw = point as unknown as { lat?: number | (() => number); lng?: number | (() => number) }
+  const lat = typeof raw.lat === 'function' ? raw.lat() : raw.lat
+  const lng = typeof raw.lng === 'function' ? raw.lng() : raw.lng
+  return { lat: Number(lat), lng: Number(lng) }
+}
+
 function latLngPath(path: unknown): google.maps.LatLngLiteral[] {
   if (!Array.isArray(path)) return []
   const out: google.maps.LatLngLiteral[] = []
@@ -89,13 +125,114 @@ function latLngPath(path: unknown): google.maps.LatLngLiteral[] {
   return out
 }
 
-/** Routes API (Route.computeRoutes). Falls back to the server key if the browser key is refused. */
-async function computeDrawnRoute(
+const SELECT_RADIUS_M = 70
+
+function decodeEncodedPath(encoded: string): google.maps.LatLngLiteral[] {
+  if (!encoded || !google.maps.geometry?.encoding) return []
+  return google.maps.geometry.encoding
+    .decodePath(encoded)
+    .map((point) => ({ lat: point.lat(), lng: point.lng() }))
+}
+
+/** Step polylines are the full road path. The overview polyline is the fallback. */
+function pathFromRoutePayload(data: { polyline?: string; encodedPolyline?: string; stepPolylines?: string[] }): google.maps.LatLngLiteral[] {
+  const steps = (data.stepPolylines ?? []).filter((encoded) => encoded.length > 0)
+  if (steps.length) {
+    const joined: google.maps.LatLngLiteral[] = []
+    for (const encoded of steps) joined.push(...decodeEncodedPath(encoded))
+    if (joined.length >= 2) return joined
+  }
+  const overview = data.encodedPolyline || data.polyline || ''
+  return overview ? decodeEncodedPath(overview) : []
+}
+
+type DirectionsPayload = {
+  status?: string
+  message?: string
+  error?: string
+  distance?: string
+  duration?: string
+  distanceMeters?: number
+  durationSeconds?: number
+  polyline?: string
+  encodedPolyline?: string
+  stepPolylines?: string[]
+  steps?: RouteStep[]
+}
+
+async function directionsFailure(res: Response): Promise<string> {
+  const data = await res.json().catch(() => null) as DirectionsPayload | null
+  const message = (data?.message || data?.error || '').replace(/\s+/g, ' ').slice(0, 240)
+  return message ? `${res.status} ${message}` : `HTTP ${res.status}`
+}
+
+type RouteDraw =
+  | {
+      ok: true
+      path: google.maps.LatLngLiteral[]
+      distance: string
+      duration: string
+      distanceMeters?: number
+      durationSeconds?: number
+      steps?: RouteStep[]
+      warning?: string
+      mode?: TravelMode
+      origin?: LatLng
+    }
+  | { ok: false; code: 'aborted' | 'invalid' | 'no-route' | 'denied' | 'failed'; message: string }
+
+const routeInflight = new globalThis.Map<string, Promise<RouteDraw>>()
+let routeFetchGen = 0
+let routeFetchAbort: AbortController | null = null
+let permissionLogged = false
+
+function isPointsMessage(message: string): boolean {
+  return /30 m|finite lat\/lng|not \(0,\s*0\)/i.test(message)
+}
+
+function isUnavailableMode(mode: TravelMode, drawn: RouteDraw): boolean {
+  if (drawn.ok || (mode !== 'TRANSIT' && mode !== 'BICYCLE')) return false
+  if (drawn.code === 'no-route') return true
+  return drawn.code !== 'denied' && /not supported|not available/i.test(drawn.message)
+}
+
+/** One GPS fix. Falls back to the position the map is already watching. */
+function browserOrigin(fallback: LatLng): Promise<LatLng> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(fallback)
+      return
+    }
+    let settled = false
+    const finish = (point: LatLng) => {
+      if (settled) return
+      settled = true
+      resolve(point)
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const live = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        finish(isValidCoord(live) ? live : fallback)
+      },
+      () => finish(fallback),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 15_000 },
+    )
+  })
+}
+
+function routeFailure(status: number, message: string): RouteDraw {
+  if (status === 422) return { ok: false, code: 'no-route', message }
+  if (status === 403) return { ok: false, code: 'denied', message }
+  if (status === 400 || isPointsMessage(message)) return { ok: false, code: 'invalid', message }
+  return { ok: false, code: 'failed', message }
+}
+
+/** Browser Routes library. Used only after a 5xx or a network failure. */
+async function fallbackDrawnRoute(
   origin: LatLng,
   destination: LatLng,
   mode: TravelMode,
-): Promise<{ path: google.maps.LatLngLiteral[]; distance: string; duration: string; steps?: RouteStep[] } | null> {
-  const travelMode = routesTravelMode(mode)
+): Promise<RouteDraw> {
   try {
     const lib = (await google.maps.importLibrary('routes')) as unknown as {
       Route: {
@@ -107,72 +244,166 @@ async function computeDrawnRoute(
     const { routes } = await lib.Route.computeRoutes({
       origin,
       destination,
-      travelMode,
+      travelMode: routesTravelMode(mode),
+      polylineQuality: 'HIGH_QUALITY',
       fields: ['path', 'distanceMeters', 'durationMillis'],
     })
     const route = routes?.[0]
     const path = latLngPath(route?.path)
     if (path.length >= 2) {
       return {
+        ok: true,
         path,
         distance: route?.distanceMeters != null ? formatMeters(route.distanceMeters) : '',
         duration: route?.durationMillis != null ? formatMillis(route.durationMillis) : '',
+        warning: 'retry',
+        origin,
       }
     }
-  } catch {
-    /* The browser key may not be allowed to call Routes. The server route uses the server key. */
+    return { ok: false, code: 'failed', message: 'Maps Routes library returned no path.' }
+  } catch (err) {
+    const raw = err as { code?: string; message?: string }
+    const detail = raw?.message || (err instanceof Error ? err.message : 'Maps Routes library failed')
+    const denied = raw?.code === 'PERMISSION_DENIED' || /PERMISSION_DENIED|\b403\b/i.test(detail)
+    if (denied) {
+      if (!permissionLogged) {
+        permissionLogged = true
+        console.warn('[directions] Maps Routes library permission denied.', detail)
+      }
+      return { ok: false, code: 'denied', message: 'permission' }
+    }
+    return { ok: false, code: 'failed', message: detail }
   }
-
-  const res = await fetch('/api/directions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ origin, destination, travelMode }),
-  })
-  if (!res.ok) return null
-  const data = (await res.json()) as { distance?: string; duration?: string; polyline?: string; steps?: RouteStep[] }
-  if (!data.polyline) return null
-  if (!google.maps.geometry?.encoding) {
-    try { await google.maps.importLibrary('geometry') } catch { return null }
-  }
-  if (!google.maps.geometry?.encoding) return null
-  const path = google.maps.geometry.encoding
-    .decodePath(data.polyline)
-    .map((p) => ({ lat: p.lat(), lng: p.lng() }))
-  if (path.length < 2) return null
-  return { path, distance: data.distance ?? '', duration: data.duration ?? '', steps: data.steps }
 }
 
-type PaintedRoute = { setMap: (map: google.maps.Map | null) => void }
+async function runDrawnRoute(origin: LatLng, destination: LatLng, mode: TravelMode, liveOrigin: boolean, signal?: AbortSignal): Promise<RouteDraw> {
+  const from = liveOrigin ? await browserOrigin(origin) : origin
+  const to = destination
+  if (process.env.NODE_ENV !== 'production') {
+    console.info('[directions] origin', { lat: from.lat, lng: from.lng }, 'destination', { lat: to.lat, lng: to.lng })
+  }
+  if (!isValidCoord(from) || !isValidCoord(to)) {
+    return { ok: false, code: 'invalid', message: 'origin and destination must be finite lat/lng, not (0, 0)' }
+  }
+  const apartM = distanceKm(from, to) * 1000
+  if (!(apartM > 30)) {
+    return {
+      ok: false,
+      code: 'invalid',
+      message: `Origin and destination are ${Math.round(apartM)} m apart. They must be more than 30 m apart.`,
+    }
+  }
 
-function paintRoute(map: google.maps.Map, path: google.maps.LatLngLiteral[], mode: TravelMode = 'WALK'): PaintedRoute {
+  const travelMode = apiTravelMode(mode)
+  try {
+    const res = await fetch('/api/directions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin: from, destination: to, travelMode }),
+      signal,
+    })
+    if (res.ok) {
+      const data = (await res.json()) as DirectionsPayload
+      if (!google.maps.geometry?.encoding) {
+        try { await google.maps.importLibrary('geometry') } catch { /* decoded below */ }
+      }
+      const path = pathFromRoutePayload(data)
+      if (path.length >= 2) {
+        const distance = data.distance
+          || (typeof data.distanceMeters === 'number' ? formatMeters(data.distanceMeters) : '')
+        const duration = data.duration
+          || (typeof data.durationSeconds === 'number' ? formatMillis(data.durationSeconds * 1000) : '')
+        return {
+          ok: true,
+          path,
+          distance,
+          duration,
+          distanceMeters: data.distanceMeters,
+          durationSeconds: data.durationSeconds,
+          steps: data.steps,
+          origin: from,
+        }
+      }
+      return { ok: false, code: 'failed', message: '200 response had no drawable polyline' }
+    }
+    const data = await res.json().catch(() => null) as DirectionsPayload | null
+    const message = (data?.message || data?.error || `HTTP ${res.status}`).replace(/\s+/g, ' ').slice(0, 300)
+    // 400 and 422 already answered the question. The browser key must not retry them.
+    if (res.status < 500) return routeFailure(res.status, message)
+    return fallbackDrawnRoute(from, to, mode)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return { ok: false, code: 'aborted', message: '' }
+    return fallbackDrawnRoute(from, to, mode)
+  }
+}
+
+/**
+ * Origin for a "from me" route is a fresh browser geolocation fix.
+ * Destination is the selected place. Several map panes share one request.
+ */
+async function computeDrawnRoute(
+  origin: LatLng,
+  destination: LatLng,
+  mode: TravelMode,
+  signal?: AbortSignal,
+  liveOrigin = false,
+): Promise<RouteDraw> {
+  if (signal?.aborted) return { ok: false, code: 'aborted', message: '' }
+  const from = plainLatLng(origin)
+  const to = plainLatLng(destination)
+  const key = liveOrigin
+    ? `live>${to.lat.toFixed(5)},${to.lng.toFixed(5)}:${mode}`
+    : `${from.lat.toFixed(5)},${from.lng.toFixed(5)}>${to.lat.toFixed(5)},${to.lng.toFixed(5)}:${mode}`
+  let pending = routeInflight.get(key)
+  if (!pending) {
+    pending = runDrawnRoute(from, to, mode, liveOrigin, signal).finally(() => {
+      routeInflight.delete(key)
+    })
+    routeInflight.set(key, pending)
+  }
+  const result = await pending
+  if (signal?.aborted) return { ok: false, code: 'aborted', message: '' }
+  return result
+}
+
+type PaintedRoute = {
+  setMap: (map: google.maps.Map | null) => void
+  setPaths: (full: google.maps.LatLngLiteral[], traveled: google.maps.LatLngLiteral[], remaining: google.maps.LatLngLiteral[]) => void
+}
+
+function paintRoute(map: google.maps.Map, path: google.maps.LatLngLiteral[], _mode: TravelMode = 'WALK'): PaintedRoute {
   // geodesic stays off: the Routes path already follows the roads. Extra
   // interpolation bows the line off the street at high zoom.
-  const weight = mode === 'DRIVE' ? 7 : 6
-  const dashed = mode === 'BICYCLE'
-  const casing = new google.maps.Polyline({
+  // zIndex stays under place markers (400+) and above the basemap.
+  const shared = {
     map,
     path,
     geodesic: false,
-    strokeColor: '#ffffff',
+    clickable: false,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  } as google.maps.PolylineOptions
+  const casing = new google.maps.Polyline({
+    ...shared,
+    strokeColor: '#1B2838',
+    strokeOpacity: 0.92,
+    strokeWeight: 8,
+    zIndex: 2,
+  })
+  const traveledLine = new google.maps.Polyline({
+    ...shared,
+    path: [],
+    strokeColor: '#B7CFF5',
     strokeOpacity: 0.95,
-    strokeWeight: weight + 4,
-    zIndex: 8,
+    strokeWeight: 5,
+    zIndex: 3,
   })
   const line = new google.maps.Polyline({
-    map,
-    path,
-    geodesic: false,
+    ...shared,
     strokeColor: ROUTE_BLUE,
-    strokeOpacity: dashed ? 0 : 1,
-    strokeWeight: weight,
-    zIndex: 9,
-    icons: dashed
-      ? [{
-          icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: ROUTE_BLUE, scale: 3 },
-          offset: '0',
-          repeat: '14px',
-        }]
-      : undefined,
+    strokeOpacity: 1,
+    strokeWeight: 5,
+    zIndex: 4,
   })
   // Vector maps drop ground polylines when tilt or the basemap type changes
   // (3D restore after fitBounds, satellite hybrid). Re-attach on that change.
@@ -182,15 +413,23 @@ function paintRoute(map: google.maps.Map, path: google.maps.LatLngLiteral[], mod
     if (next === sig) return
     sig = next
     casing.setMap(null)
+    traveledLine.setMap(null)
     line.setMap(null)
     casing.setMap(map)
+    traveledLine.setMap(map)
     line.setMap(map)
   })
   return {
     setMap(next) {
       idle.remove()
       casing.setMap(next)
+      traveledLine.setMap(next)
       line.setMap(next)
+    },
+    setPaths(full, traveled, remaining) {
+      casing.setPath(full)
+      traveledLine.setPath(traveled.length >= 2 ? traveled : [])
+      line.setPath(remaining.length >= 2 ? remaining : full)
     },
   }
 }
@@ -201,6 +440,8 @@ type DrawnPath = {
   path: google.maps.LatLngLiteral[]
   distance: string
   duration: string
+  distanceMeters: number
+  durationSeconds: number
   destinationName: string
   originLabel?: string
   origin?: LatLng
@@ -254,22 +495,41 @@ function routeJobKey(job: RouteJob | null): string {
     return `${job.mode ?? 'WALK'}:${job.stops.map((s) => `${s.coordinates.lat.toFixed(5)},${s.coordinates.lng.toFixed(5)}`).join('|')}`
   }
   const origin = job.kind === 'points'
-    ? `${job.origin.lat.toFixed(5)},${job.origin.lng.toFixed(5)}`
+    ? (job.originLabel === 'you' ? 'you' : `${job.origin.lat.toFixed(4)},${job.origin.lng.toFixed(4)}`)
     : job.query
   return `${job.kind}:${origin}:${job.destination.lat.toFixed(5)},${job.destination.lng.toFixed(5)}:${job.mode}`
 }
 
-async function drawLeg(origin: LatLng, destination: LatLng, mode: TravelMode, allowAlt = true) {
+function withMeasures(drawn: Omit<DrawnPath, 'distanceMeters' | 'durationSeconds'> & { distanceMeters?: number; durationSeconds?: number }): DrawnPath {
+  const distanceMeters = drawn.distanceMeters && drawn.distanceMeters > 0
+    ? drawn.distanceMeters
+    : pathLengthMeters(drawn.path) || parseDistanceMeters(drawn.distance)
+  const durationSeconds = drawn.durationSeconds && drawn.durationSeconds > 0
+    ? drawn.durationSeconds
+    : parseDurationSeconds(drawn.duration) || Math.max(1, Math.round(distanceMeters / 1.3))
+  return { ...drawn, distanceMeters, durationSeconds }
+}
+
+async function drawLeg(
+  origin: LatLng,
+  destination: LatLng,
+  mode: TravelMode,
+  allowAlt = false,
+  signal?: AbortSignal,
+  liveOrigin = false,
+): Promise<RouteDraw> {
   const modes: TravelMode[] = [mode]
-  if (allowAlt && mode !== 'BICYCLE') modes.push(mode === 'DRIVE' ? 'WALK' : 'DRIVE')
+  if (allowAlt && mode !== 'BICYCLE' && mode !== 'TRANSIT') modes.push(mode === 'DRIVE' ? 'WALK' : 'DRIVE')
+  let last: RouteDraw = { ok: false, code: 'failed', message: 'Could not draw that route.' }
   for (const travel of modes) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 700))
-      const drawn = await computeDrawnRoute(origin, destination, travel)
-      if (drawn) return { ...drawn, mode: travel }
-    }
+    if (signal?.aborted) return { ok: false, code: 'aborted', message: '' }
+    const drawn = await computeDrawnRoute(origin, destination, travel, signal, liveOrigin && travel === mode)
+    if (!drawn.ok && drawn.code === 'aborted') return drawn
+    if (drawn.ok) return { ...drawn, mode: travel }
+    last = drawn
+    if (drawn.code === 'invalid' || drawn.code === 'denied' || drawn.code === 'no-route') return drawn
   }
-  return null
+  return last
 }
 
 function pathCenter(path: google.maps.LatLngLiteral[]): LatLng {
@@ -310,8 +570,9 @@ function routeActionLabel(mode: TravelMode, t: (key: string) => string): string 
 
 const TRAVEL_MODES: { id: TravelMode; labelKey: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: 'WALK', labelKey: 'map.modeWalk', icon: Footprints },
-  { id: 'BICYCLE', labelKey: 'map.modeBike', icon: Bike },
   { id: 'DRIVE', labelKey: 'map.modeDrive', icon: Car },
+  { id: 'TRANSIT', labelKey: 'map.modeTransit', icon: Bus },
+  { id: 'BICYCLE', labelKey: 'map.modeBike', icon: Bike },
 ]
 
 /** Computes the road path once, for every view mode. Does not need a Map instance. */
@@ -320,20 +581,33 @@ function RouteComputer({
   onDrawn,
   onRouteInfo,
   onRouteError,
+  onRouteNotice,
 }: {
   job: RouteJob | null
   onDrawn: (drawn: DrawnPath | null) => void
   onRouteInfo?: (info: RouteInfo | null) => void
   onRouteError?: (message: string | null) => void
+  onRouteNotice?: (message: string | null) => void
 }) {
   const key = routeJobKey(job)
 
   useEffect(() => {
-    if (!job) {
-      onDrawn(null)
+    if (!job) return
+    const held = getHeldRoute()
+    if (
+      held?.destination &&
+      job.kind !== 'stops' &&
+      held.mode === job.mode &&
+      Math.abs(held.destination.lat - job.destination.lat) < 1e-4 &&
+      Math.abs(held.destination.lng - job.destination.lng) < 1e-4
+    ) {
       return
     }
+    routeFetchAbort?.abort()
+    const gen = ++routeFetchGen
     let cancelled = false
+    const abort = new AbortController()
+    routeFetchAbort = abort
 
     void (async () => {
       if (job.kind === 'stops') {
@@ -344,6 +618,7 @@ function RouteComputer({
         const steps: RouteStep[] = []
         let distance = ''
         let duration = ''
+        let warning: string | null = null
         for (let i = 1; i < stops.length; i++) {
           if (cancelled) return
           const prev = stops[i - 1]
@@ -362,9 +637,17 @@ function RouteComputer({
               }
             }
           }
-          const drawn = await drawLeg(prev.coordinates, next.coordinates, mode, mode !== 'BICYCLE')
-          if (cancelled) return
-          if (!drawn) continue
+          const drawn = await drawLeg(prev.coordinates, next.coordinates, mode, false, abort.signal)
+          if (cancelled || !drawn.ok && drawn.code === 'aborted') return
+          if (!drawn.ok) {
+            if (isUnavailableMode(mode, drawn)) {
+              onRouteNotice?.(null)
+              onRouteError?.('mode-unsupported')
+              return
+            }
+            continue
+          }
+          if (drawn.warning) warning = drawn.warning
           path.push(...drawn.path)
           if (drawn.steps?.length) steps.push(...drawn.steps)
           distance = drawn.distance || next.distance || distance
@@ -372,18 +655,20 @@ function RouteComputer({
         }
         if (cancelled) return
         if (path.length < 2) {
-          onRouteError?.(mode === 'BICYCLE' ? 'mode-unsupported' : 'Could not draw that route.')
-          if (mode === 'WALK') onDrawn(null)
+          onRouteNotice?.(null)
+          onRouteError?.(mode === 'BICYCLE' || mode === 'TRANSIT' ? 'mode-unsupported' : 'Could not draw that route.')
           return
         }
-        const drawn: DrawnPath = {
+        if (gen !== routeFetchGen) return
+        onRouteNotice?.(warning)
+        const drawn: DrawnPath = withMeasures({
           path,
           distance,
           duration,
           destinationName: stops[stops.length - 1].name,
           mode,
           steps,
-        }
+        })
         onDrawn(drawn)
         onRouteInfo?.({ distance, duration, destinationName: drawn.destinationName })
         return
@@ -407,27 +692,52 @@ function RouteComputer({
       }
       if (cancelled) return
       if (!origin || !isValidCoord(origin) || !isValidCoord(job.destination)) {
-        onRouteError?.(job.kind === 'place' ? `Could not find "${job.query}" on the map.` : 'Invalid map coordinates for this route.')
-        onDrawn(null)
+        if (job.kind === 'place' && !origin) {
+          onRouteError?.(`Could not find "${job.query}" on the map.`)
+        } else {
+          onRouteNotice?.('move')
+          onRouteError?.('move-apart')
+        }
         return
       }
-      const drawn = await drawLeg(origin, job.destination, job.mode, job.mode !== 'BICYCLE')
-      if (cancelled) return
-      if (!drawn) {
-        onRouteError?.(job.mode === 'BICYCLE' ? 'mode-unsupported' : 'Could not draw that route. Routes API may not be enabled for this Maps key.')
+      const liveOrigin = job.kind === 'points' && job.originLabel === 'you'
+      const drawn = await drawLeg(origin, job.destination, job.mode, false, abort.signal, liveOrigin)
+      if (cancelled || !drawn.ok && drawn.code === 'aborted') return
+      if (!drawn.ok) {
+        if (isUnavailableMode(job.mode, drawn)) {
+          onRouteNotice?.(null)
+          onRouteError?.('mode-unsupported')
+          return
+        }
+        if (drawn.code === 'invalid' && isPointsMessage(drawn.message)) {
+          onRouteNotice?.('move')
+          onRouteError?.('move-apart')
+          return
+        }
+        if (drawn.code === 'denied') {
+          onRouteNotice?.(drawn.message || 'permission')
+          onRouteError?.(drawn.message === 'permission' ? 'permission' : drawn.message)
+          return
+        }
+        onRouteNotice?.(null)
+        onRouteError?.(drawn.message || 'Could not draw that route.')
         return
       }
-      const result: DrawnPath = {
+      if (gen !== routeFetchGen) return
+      onRouteNotice?.(drawn.warning ?? null)
+      const result: DrawnPath = withMeasures({
         path: drawn.path,
         distance: drawn.distance,
         duration: drawn.duration,
+        distanceMeters: drawn.distanceMeters,
+        durationSeconds: drawn.durationSeconds,
         destinationName: job.destinationName,
         originLabel: job.originLabel,
-        origin,
+        origin: drawn.origin ?? origin,
         destination: job.destination,
         mode: drawn.mode,
         steps: drawn.steps,
-      }
+      })
       onDrawn(result)
       onRouteInfo?.({
         distance: result.distance,
@@ -438,7 +748,8 @@ function RouteComputer({
     })()
 
     return () => {
-      cancelled = true
+      // Keep the request alive if the job was only cleared. A newer fetch aborts it.
+      cancelled = false
     }
     // key captures the job contents; callbacks are stable setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -447,21 +758,241 @@ function RouteComputer({
   return null
 }
 
+let autoFrame = true
+let fittingCamera = false
+let followOwnsCamera = false
+
+const cameraLog: number[] = []
+
+function noteCamera(reason: string) {
+  if (process.env.NODE_ENV === 'production') return
+  const now = Date.now()
+  cameraLog.push(now)
+  while (cameraLog.length && now - cameraLog[0] > 2000) cameraLog.shift()
+  if (cameraLog.length > 2) {
+    console.warn(`[map] fitBounds/panTo called ${cameraLog.length} times in 2s (${reason})`)
+  }
+}
+
+export function requestRouteRefit(force = false) {
+  if (typeof window === 'undefined') return
+  if (force) autoFrame = true
+  window.dispatchEvent(new CustomEvent('hodari:refit-route', { detail: { force } }))
+}
+
+function releaseCamera() {
+  if (fittingCamera) return
+  autoFrame = false
+  window.dispatchEvent(new Event('hodari:camera-free'))
+}
+
+type MapPadding = { top: number; right: number; bottom: number; left: number }
+
+function boundsAround(point: LatLng, meters: number) {
+  const dLat = meters / 111_320
+  const dLng = meters / (111_320 * Math.max(0.2, Math.cos((point.lat * Math.PI) / 180)))
+  const bounds = new google.maps.LatLngBounds()
+  bounds.extend({ lat: point.lat - dLat, lng: point.lng - dLng })
+  bounds.extend({ lat: point.lat + dLat, lng: point.lng + dLng })
+  return bounds
+}
+
+function isLatLngBounds(value: google.maps.LatLngBounds | LatLng): value is google.maps.LatLngBounds {
+  return typeof (value as google.maps.LatLngBounds).getNorthEast === 'function'
+}
+
+let frameOverlay: google.maps.OverlayView | null = null
+let frameOverlayMap: google.maps.Map | null = null
+
+function ensureFrameOverlay(map: google.maps.Map) {
+  if (frameOverlay && frameOverlayMap === map) return frameOverlay
+  frameOverlay?.setMap(null)
+  const overlay = new google.maps.OverlayView()
+  overlay.onAdd = () => {}
+  overlay.draw = () => {}
+  overlay.onRemove = () => {}
+  overlay.setMap(map)
+  frameOverlay = overlay
+  frameOverlayMap = map
+  return overlay
+}
+
+function warnIfOffscreen(map: google.maps.Map, bounds: google.maps.LatLngBounds, pad: MapPadding, reason: string) {
+  if (process.env.NODE_ENV === 'production') return
+  const projection = ensureFrameOverlay(map).getProjection()
+  if (!projection) return
+  const div = map.getDiv()
+  const width = div.clientWidth
+  const height = div.clientHeight
+  const ne = bounds.getNorthEast()
+  const sw = bounds.getSouthWest()
+  const corners = [
+    { lat: ne.lat(), lng: ne.lng() },
+    { lat: ne.lat(), lng: sw.lng() },
+    { lat: sw.lat(), lng: ne.lng() },
+    { lat: sw.lat(), lng: sw.lng() },
+  ]
+  const outside = corners.some((corner) => {
+    const pixel = projection.fromLatLngToContainerPixel(new google.maps.LatLng(corner.lat, corner.lng))
+    if (!pixel) return false
+    return pixel.x < pad.left - 12 || pixel.x > width - pad.right + 12 || pixel.y < pad.top - 12 || pixel.y > height - pad.bottom + 12
+  })
+  if (outside) console.warn(`[map] route still outside the visible area after fit (${reason})`)
+}
+
+/** The only framing call. Padding is the free area left by the real overlay rectangles. */
+function fitToVisibleArea(
+  map: google.maps.Map,
+  area: google.maps.LatLngBounds | LatLng,
+  reason: string,
+  aroundMeters = 480,
+) {
+  if (typeof google === 'undefined') return
+  const bounds = isLatLngBounds(area) ? area : boundsAround(area, aroundMeters)
+  if (bounds.isEmpty()) return
+  const pad = paddingFromChrome(map.getDiv())
+  noteCamera(reason)
+  cancelCameraMotion(map)
+  fittingCamera = true
+  ensureFrameOverlay(map)
+  map.fitBounds(bounds, pad)
+  window.setTimeout(() => { fittingCamera = false }, 700)
+  google.maps.event.addListenerOnce(map, 'idle', () => {
+    warnIfOffscreen(map, bounds, pad, reason)
+  })
+}
+
+function routeBounds(route: { path: google.maps.LatLngLiteral[]; origin?: LatLng | null; destination?: LatLng | null }) {
+  const bounds = new google.maps.LatLngBounds()
+  route.path.forEach((point) => bounds.extend(point))
+  if (route.origin && isValidCoord(route.origin)) bounds.extend(route.origin)
+  if (route.destination && isValidCoord(route.destination)) bounds.extend(route.destination)
+  return bounds
+}
+
+/** Padding from the chrome that actually overlaps the map, measured at fit time. */
+function paddingFromChrome(mapDiv: HTMLElement): { top: number; right: number; bottom: number; left: number } {
+  const mapRect = mapDiv.getBoundingClientRect()
+  let top = 16
+  let right = 16
+  let bottom = 16
+  let left = 16
+  document.querySelectorAll<HTMLElement>('[data-map-pad]').forEach((node) => {
+    const rect = node.getBoundingClientRect()
+    const overlapX = Math.min(rect.right, mapRect.right) - Math.max(rect.left, mapRect.left)
+    const overlapY = Math.min(rect.bottom, mapRect.bottom) - Math.max(rect.top, mapRect.top)
+    if (overlapX < 8 || overlapY < 8 || rect.width < 2 || rect.height < 2) return
+    const kind = node.dataset.mapPad
+    if (kind === 'popup') return
+    const fromLeft = Math.max(0, rect.left - mapRect.left)
+    const fromRight = Math.max(0, mapRect.right - rect.right)
+    const fromTop = Math.max(0, rect.top - mapRect.top)
+    const fromBottom = Math.max(0, mapRect.bottom - rect.bottom)
+    const near = 48
+    const touchLeft = fromLeft < near
+    const touchRight = fromRight < near
+    const touchTop = fromTop < near
+    const touchBottom = fromBottom < near
+    if (touchLeft) left = Math.max(left, rect.right - mapRect.left + 16)
+    if (touchRight) right = Math.max(right, mapRect.right - rect.left + 16)
+    if (touchTop) top = Math.max(top, rect.bottom - mapRect.top + 16)
+    if (touchBottom) bottom = Math.max(bottom, mapRect.bottom - rect.top + 16)
+  })
+  const maxW = Math.max(48, mapRect.width - 96)
+  const maxH = Math.max(48, mapRect.height - 96)
+  if (left + right > maxW) {
+    if (right >= left) left = Math.max(16, maxW - right)
+    else right = Math.max(16, maxW - left)
+    if (left + right > maxW) {
+      const scale = maxW / (left + right)
+      left *= scale
+      right *= scale
+    }
+  }
+  if (top + bottom > maxH) {
+    if (bottom >= top) top = Math.max(16, maxH - bottom)
+    else bottom = Math.max(16, maxH - top)
+    if (top + bottom > maxH) {
+      const scale = maxH / (top + bottom)
+      top *= scale
+      bottom *= scale
+    }
+  }
+  return { top: Math.round(top), right: Math.round(right), bottom: Math.round(bottom), left: Math.round(left) }
+}
+
 /** Classic polyline on the vector map: Map, 3D tilt, and Satellite share this layer. */
-function VectorRouteLine({ path, mode = 'WALK' }: { path: google.maps.LatLngLiteral[]; mode?: TravelMode }) {
+function VectorRouteLine({
+  path,
+  mode = 'WALK',
+  size = 'full',
+  origin,
+  destination,
+}: {
+  path: google.maps.LatLngLiteral[]
+  mode?: TravelMode
+  size?: 'full' | 'compact'
+  origin?: LatLng | null
+  destination?: LatLng | null
+}) {
   const map = useMap()
-  const sig = `${mode}:${path.length}:${path[0]?.lat.toFixed(5)}:${path[path.length - 1]?.lng.toFixed(5)}`
+  const sig = `${size}:${mode}:${path.length}:${path[0]?.lat.toFixed(5)},${path[0]?.lng.toFixed(5)}:${path[path.length - 1]?.lat.toFixed(5)},${path[path.length - 1]?.lng.toFixed(5)}`
+  const paintedRef = useRef<PaintedRoute | null>(null)
+  const originRef = useRef(origin)
+  const destRef = useRef(destination)
+  originRef.current = origin
+  destRef.current = destination
 
   useEffect(() => {
-    if (!map || path.length < 2) return
-    const painted = paintRoute(map, path, mode)
-    const bounds = new google.maps.LatLngBounds()
-    path.forEach((p) => bounds.extend(p))
-    cancelCameraMotion(map)
-    map.fitBounds(bounds, { top: 150, right: 80, bottom: 230, left: 56 })
-    return () => painted.setMap(null)
+    if (!map) return
+    const onDrag = map.addListener('dragstart', () => releaseCamera())
+    const div = map.getDiv()
+    const onWheel = () => releaseCamera()
+    div.addEventListener('wheel', onWheel, { passive: true })
+    const onRefit = (event: Event) => {
+      const force = event instanceof CustomEvent && !!event.detail?.force
+      if (!force && !autoFrame) return
+      const current = getHeldRoute()
+      if (!current || current.path.length < 2) return
+      fitToVisibleArea(map, routeBounds(current), force ? 'recenter' : 'route')
+    }
+    window.addEventListener('hodari:refit-route', onRefit)
+    return () => {
+      onDrag.remove()
+      div.removeEventListener('wheel', onWheel)
+      window.removeEventListener('hodari:refit-route', onRefit)
+      paintedRef.current?.setMap(null)
+      paintedRef.current = null
+    }
+  }, [map])
+
+  const pathRef = useRef(path)
+  pathRef.current = path
+
+  useEffect(() => {
+    const drawn = pathRef.current
+    if (!map || drawn.length < 2) return
+    if (paintedRef.current) paintedRef.current.setPaths(drawn, [], drawn)
+    else paintedRef.current = paintRoute(map, drawn, mode)
+    autoFrame = true
+    const current = getHeldRoute()
+    const bounds = current && current.path.length >= 2
+      ? routeBounds(current)
+      : routeBounds({ path: drawn, origin: originRef.current, destination: destRef.current })
+    fitToVisibleArea(map, bounds, 'route')
+    const apply = () => {
+      const painted = paintedRef.current
+      const current = getHeldRoute()
+      if (!painted || !current) return
+      const walked = getRouteProgress()
+      if (!walked) painted.setPaths(current.path, [], current.path)
+      else painted.setPaths(current.path, walked.traveled, walked.remaining)
+    }
+    const unsub = subscribeRoute(apply)
+    return () => { unsub() }
+    // sig captures endpoints and mode; path identity must not refit the camera.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, sig])
+  }, [map, mode, sig])
 
   return null
 }
@@ -526,23 +1057,10 @@ function boundsSpanKm(bounds: google.maps.LatLngBounds): number {
   return distanceKm({ lat: sw.lat(), lng: sw.lng() }, { lat: ne.lat(), lng: ne.lng() })
 }
 
-function clampZoomAfterFit(map: google.maps.Map, minZoom: number, maxZoom: number) {
-  const listener = google.maps.event.addListenerOnce(map, 'idle', () => {
-    const z = map.getZoom()
-    if (z == null) return
-    if (z < minZoom) map.setZoom(minZoom)
-    else if (z > maxZoom) map.setZoom(maxZoom)
-  })
-  return () => google.maps.event.removeListener(listener)
-}
-
 function fitMapPrecisely(
   map: google.maps.Map,
   markers: LatLng[],
   opts: {
-    padding?: FitPadding
-    minZoom?: number
-    maxZoom?: number
     maxSpanKm?: number
     focus?: LatLng | null
     userLocation?: LatLng | null
@@ -552,46 +1070,29 @@ function fitMapPrecisely(
   const valid = markers.filter(isValidCoord)
   if (valid.length === 0) return
 
-  const minZoom = opts.minZoom ?? 15
-  const maxZoom = opts.maxZoom ?? 17
   const maxSpanKm = opts.maxSpanKm ?? 32
-  const padding = opts.padding ?? 48
-
   const fitUser =
     opts.includeUser &&
     opts.userLocation &&
     isValidCoord(opts.userLocation) &&
     shouldIncludeUserInBounds(opts.userLocation, valid)
 
-  if (valid.length === 1 && !fitUser) {
-    map.setCenter(valid[0])
-    map.setZoom(maxZoom)
-    return
-  }
-
   const bounds = new google.maps.LatLngBounds()
   for (const m of valid) bounds.extend(m)
   if (fitUser && opts.userLocation) bounds.extend(opts.userLocation)
 
-  const span = boundsSpanKm(bounds)
-  if (span > maxSpanKm) {
+  if (boundsSpanKm(bounds) > maxSpanKm || (valid.length === 1 && !fitUser)) {
     const focus =
       opts.focus && isValidCoord(opts.focus)
         ? opts.focus
         : fitUser && opts.userLocation
           ? opts.userLocation
           : valid[0]
-    map.setCenter(focus)
-    map.setZoom(minZoom)
+    fitToVisibleArea(map, focus, 'places')
     return
   }
 
-  const pad =
-    typeof padding === 'number'
-      ? { top: padding, right: padding, bottom: padding, left: padding }
-      : padding
-  map.fitBounds(bounds, pad)
-  clampZoomAfterFit(map, minZoom, maxZoom)
+  fitToVisibleArea(map, bounds, 'places')
 }
 
 export type MapViewSize = 'compact' | 'full'
@@ -618,6 +1119,7 @@ interface Props {
   routeMode?: TravelMode
   onRouteInfo?: (info: RouteInfo | null) => void
   onRouteError?: (message: string | null) => void
+  onEndRoute?: () => void
   zoomFocusOnActive?: boolean
   size?: MapViewSize
   /** True while the AI is still generating — suppresses the cinematic camera
@@ -663,6 +1165,12 @@ interface Props {
   onPlaceCardClose?: () => void
   /** Floating “add a place” control. */
   onAddPlace?: () => void
+  /** Place the chat and the map agree is current. */
+  activePlace?: ActivePlace | null
+  /** Places attached to the latest assistant answer. */
+  chatPlaces?: Place[]
+  /** Start directions to a place resolved from the chat, not only a pin index. */
+  onNavigatePlace?: (place: Place) => void
 }
 
 
@@ -680,11 +1188,14 @@ function PlacesMapCenter({ places }: { places: LatLng[] }) {
   const map = useMap()
   const placesKey = places.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join('|')
   const lastCenterKey = useRef('')
+  const placesRef = useRef(places)
+  placesRef.current = places
 
   useEffect(() => {
-    if (!map || places.length === 0) return
+    const list = placesRef.current
+    if (!map || list.length === 0) return
 
-    const valid = places.filter(isValidCoord)
+    const valid = list.filter(isValidCoord)
     if (valid.length === 0) return
 
     // Only re-center when the place set actually changes — not on unrelated
@@ -692,17 +1203,14 @@ function PlacesMapCenter({ places }: { places: LatLng[] }) {
     if (lastCenterKey.current === placesKey) return
     lastCenterKey.current = placesKey
 
-    cancelCameraMotion(map)
-    const first = valid[0]
-    map.setCenter(first)
-    map.setZoom(15)
-
-    if (valid.length > 1) {
-      const bounds = new google.maps.LatLngBounds()
-      valid.forEach((c) => bounds.extend(c))
-      map.fitBounds(bounds, { top: 60, right: 40, bottom: 40, left: 40 })
+    if (valid.length === 1) {
+      fitToVisibleArea(map, valid[0], 'places')
+      return
     }
-  }, [map, placesKey, places])
+    const bounds = new google.maps.LatLngBounds()
+    valid.forEach((point) => bounds.extend(point))
+    fitToVisibleArea(map, bounds, 'places')
+  }, [map, placesKey])
 
   return null
 }
@@ -722,30 +1230,29 @@ function PreciseMapFit({
 }) {
   const map = useMap()
   const lastFitKey = useRef('')
+  const markersRef = useRef(markers)
+  const userRef = useRef(userLocation)
+  const focusRef = useRef(focus)
+  markersRef.current = markers
+  userRef.current = userLocation
+  focusRef.current = focus
+  const fitKey = `${markerSetKey(markers.filter(isValidCoord), null, false)}|${size}|${includeUser ? 'u' : ''}|${focus && isValidCoord(focus) ? `${focus.lat.toFixed(5)},${focus.lng.toFixed(5)}` : ''}`
 
   useEffect(() => {
-    if (!map || markers.length === 0) return
-    const valid = markers.filter(isValidCoord)
+    if (!map) return
+    const valid = markersRef.current.filter(isValidCoord)
     if (valid.length === 0) return
-
-    const fitKey = `${markerSetKey(valid, userLocation, includeUser)}|${size}`
     if (lastFitKey.current === fitKey) return
     lastFitKey.current = fitKey
 
-    cancelCameraMotion(map)
     const isFull = size === 'full'
     fitMapPrecisely(map, valid, {
-      padding: isFull
-        ? { top: 96, right: 44, bottom: 220, left: 44 }
-        : 36,
-      minZoom: 15,
-      maxZoom: isFull ? 17 : 18,
       maxSpanKm: isFull ? 28 : 32,
-      focus,
-      userLocation,
+      focus: focusRef.current,
+      userLocation: userRef.current,
       includeUser,
     })
-  }, [map, markers, userLocation, includeUser, focus?.lat, focus?.lng, size])
+  }, [map, fitKey, includeUser, size])
 
   return null
 }
@@ -770,11 +1277,75 @@ function MapZoomFocus({
     const focusKey = `${position.lat.toFixed(5)},${position.lng.toFixed(5)}@${targetZoom}`
     if (lastFocusKey.current === focusKey) return
     lastFocusKey.current = focusKey
-    cancelCameraMotion(map)
-    map.setCenter(position)
-    map.setZoom(targetZoom)
+    fitToVisibleArea(map, position, 'select', Math.max(200, 500 * 2 ** (16 - targetZoom)))
+    // Lat/lng are the stable identity. `position` is a fresh object each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, position?.lat, position?.lng, enabled, targetZoom])
 
+  return null
+}
+
+/** Reframe the held route when the free area changes. Ignores the popup and GPS. */
+function VisibleAreaWatcher() {
+  const map = useMap()
+  useEffect(() => {
+    if (!map) return
+    const div = map.getDiv()
+    let width = div.clientWidth
+    let height = div.clientHeight
+    let timer = 0
+    const schedule = (reason: string) => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        if (followOwnsCamera) return
+        const route = getHeldRoute()
+        if (!route || route.path.length < 2) return
+        google.maps.event.trigger(map, 'resize')
+        fitToVisibleArea(map, routeBounds(route), reason)
+      }, 300)
+    }
+    const onResize = () => {
+      const nextWidth = div.clientWidth
+      const nextHeight = div.clientHeight
+      const changed = nextWidth !== width || nextHeight !== height
+      width = nextWidth
+      height = nextHeight
+      if (!changed) return
+      schedule('resize')
+    }
+    const observer = new ResizeObserver(onResize)
+    observer.observe(div)
+    const onChrome = () => schedule('chrome')
+    window.addEventListener('resize', onResize)
+    window.addEventListener('hodari:chrome', onChrome)
+    return () => {
+      window.clearTimeout(timer)
+      observer.disconnect()
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('hodari:chrome', onChrome)
+    }
+  }, [map])
+  return null
+}
+
+/** Pan a newly opened popup into the free area once. Photo load must not call this again. */
+function PopupOnce({ placeId, position }: { placeId: string; position: LatLng }) {
+  const map = useMap()
+  const didPanForPlaceId = useRef<string | null>(null)
+  const positionRef = useRef(position)
+  positionRef.current = position
+  useEffect(() => {
+    if (!map) return
+    if (didPanForPlaceId.current === placeId) return
+    const point = positionRef.current
+    if (!isValidCoord(point)) return
+    didPanForPlaceId.current = placeId
+    if (getHeldRoute()) return
+    const timer = window.setTimeout(() => {
+      fitToVisibleArea(map, positionRef.current, 'popup-open')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [map, placeId])
   return null
 }
 
@@ -806,8 +1377,8 @@ function MapUiOptions({ fullControls }: { fullControls: boolean }) {
         zoomControl: false,
         scrollwheel: true,
         gestureHandling: 'auto',
-        streetViewControl: !isMobile,
-        fullscreenControl: !isMobile,
+        streetViewControl: false,
+        fullscreenControl: false,
         mapTypeControl: false,
         // Custom rotate cluster replaces the native compass widget; vector
         // maps then rotate/tilt freely via Ctrl+drag (two fingers on touch).
@@ -884,7 +1455,7 @@ function MapModeControl({
  * user gesture. Hidden in satellite mode — raster imagery snaps heading to
  * 90° steps and free rotation reads as broken there.
  */
-function MapRotateControls() {
+function MapRotateControls({ collapsed = false }: { collapsed?: boolean }) {
   const map = useMap()
   const rafRef = useRef<number | null>(null)
 
@@ -926,27 +1497,122 @@ function MapRotateControls() {
     'flex h-10 w-10 items-center justify-center rounded-full text-gray-700 transition-colors hover:bg-gray-100 motion-reduce:transition-none dark:text-gray-200 dark:hover:bg-white/10'
 
   return (
-    <div className="pointer-events-none absolute right-4 top-1/2 z-[58] -translate-y-1/2">
-      <div
-        role="group"
-        aria-label="Rotate map"
-        className="pointer-events-auto flex flex-col items-center gap-0.5 rounded-full border border-gray-200 bg-white/95 p-1 shadow-[0_2px_12px_rgba(0,0,0,0.06)] backdrop-blur dark:border-white/10 dark:bg-[#15151a]/95 dark:shadow-[0_2px_12px_rgba(0,0,0,0.5)]"
-      >
+    <div
+      role="group"
+      aria-label="Rotate map"
+      className="flex flex-col items-center gap-0.5 rounded-full border border-gray-200 bg-white/95 p-1 shadow-[0_2px_12px_rgba(0,0,0,0.06)] backdrop-blur dark:border-white/10 dark:bg-[#15151a]/95 dark:shadow-[0_2px_12px_rgba(0,0,0,0.5)]"
+    >
+      {!collapsed && (
         <button type="button" aria-label="Rotate left" title="Rotate left 45°" onClick={() => handleRotate(-45)} className={buttonClass}>
           <RotateCcw className="h-4 w-4" />
         </button>
-        <button type="button" aria-label="Face north" title="Reset to north" onClick={() => handleRotate('north')} className={buttonClass}>
-          <Compass className="h-4 w-4" />
-        </button>
+      )}
+      <button type="button" aria-label="Face north" title="Reset to north" onClick={() => handleRotate('north')} className={buttonClass}>
+        <Compass className="h-4 w-4" />
+      </button>
+      {!collapsed && (
         <button type="button" aria-label="Rotate right" title="Rotate right 45°" onClick={() => handleRotate(45)} className={buttonClass}>
           <RotateCw className="h-4 w-4" />
         </button>
-      </div>
+      )}
     </div>
   )
 }
 
-function MapZoomControls({ compact }: { compact: boolean }) {
+function useControlColumnShort(): { short: boolean; map: google.maps.Map | null } {
+  const map = useMap()
+  const [short, setShort] = useState(false)
+  useEffect(() => {
+    const div = map?.getDiv()
+    if (!div) return
+    const measure = () => setShort(div.clientHeight < 560)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(div)
+    return () => observer.disconnect()
+  }, [map])
+  return { short, map }
+}
+
+function MapControlColumn({
+  showRotate,
+  showZoom,
+  onAddPlace,
+  onArrow,
+  routeHint,
+  chooserPlaces,
+  onChoosePlace,
+  userLocation,
+}: {
+  showRotate: boolean
+  showZoom: boolean
+  onAddPlace?: () => void
+  onArrow: () => boolean
+  routeHint: string | null
+  chooserPlaces: Place[]
+  onChoosePlace: (place: Place) => void
+  userLocation?: LatLng | null
+}) {
+  const { t } = useI18n()
+  const { short, map } = useControlColumnShort()
+  const roundButton = 'flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-[#1A73E8] shadow-md backdrop-blur hover:bg-gray-100 dark:border-white/10 dark:bg-[#15151a]/95 dark:text-[#8ab4f8] dark:hover:bg-white/10'
+
+  return (
+    <div className="map-control-stack" data-map-pad="controls">
+      {routeHint && (
+        <div className="max-w-[14rem] rounded-xl border border-gray-200 bg-white/95 px-3 py-1.5 text-[12px] text-gray-800 shadow-md dark:border-white/10 dark:bg-[#15151a]/95 dark:text-gray-100">
+          {routeHint}
+        </div>
+      )}
+      {chooserPlaces.length > 1 && (
+        <div role="listbox" aria-label={t('map.routeChooser')} className="max-h-48 w-52 overflow-y-auto rounded-xl border border-gray-200 bg-white/95 p-1 shadow-lg dark:border-white/10 dark:bg-[#15151a]/95">
+          <p className="px-2 py-1 text-[11px] font-medium text-gray-500">{t('map.routeChooser')}</p>
+          {chooserPlaces.map((place) => (
+            <button
+              key={place.place_id || place.name}
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-[13px] text-gray-900 hover:bg-black/5 dark:text-gray-100 dark:hover:bg-white/10"
+              onClick={() => onChoosePlace(place)}
+            >
+              {place.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {showRotate && <MapRotateControls collapsed={short} />}
+      <button
+        type="button"
+        aria-label={t('map.route')}
+        title={t('map.route')}
+        onClick={() => {
+          const handled = onArrow()
+          if (handled || !map) return
+          if (userLocation && isValidCoord(userLocation)) {
+            fitToVisibleArea(map, userLocation, 'my-location')
+          }
+        }}
+        className={roundButton}
+      >
+        <Navigation className="h-4 w-4" />
+      </button>
+      {showZoom && <MapZoomControls />}
+      {onAddPlace && (
+        <button
+          type="button"
+          onClick={onAddPlace}
+          aria-label={t('add.open')}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F56A00] text-white shadow-[0_10px_24px_-8px_rgba(245,106,0,0.8)] hover:bg-[#e05a1a]"
+        >
+          <Plus className="h-5 w-5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function MapZoomControls() {
   const map = useMap()
   const zoomBy = (delta: number) => {
     if (!map) return
@@ -959,20 +1625,18 @@ function MapZoomControls({ compact }: { compact: boolean }) {
     'flex h-10 w-10 items-center justify-center text-[18px] font-medium leading-none text-gray-800 transition-colors hover:bg-gray-100 motion-reduce:transition-none dark:text-gray-100 dark:hover:bg-white/10'
 
   return (
-    <div className={`pointer-events-none absolute z-[58] ${compact ? 'bottom-20 right-3' : 'bottom-24 right-4 max-md:bottom-28'}`}>
-      <div
-        role="group"
-        aria-label="Zoom"
-        className="pointer-events-auto flex flex-col overflow-hidden rounded-full border border-gray-200 bg-white/95 shadow-[0_2px_12px_rgba(0,0,0,0.08)] dark:border-white/10 dark:bg-[#15151a]/95"
-      >
-        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => zoomBy(1)} className={buttonClass}>
-          +
-        </button>
-        <div className="mx-2 h-px bg-gray-200 dark:bg-white/10" />
-        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => zoomBy(-1)} className={buttonClass}>
-          −
-        </button>
-      </div>
+    <div
+      role="group"
+      aria-label="Zoom"
+      className="flex flex-col overflow-hidden rounded-full border border-gray-200 bg-white/95 shadow-[0_2px_12px_rgba(0,0,0,0.08)] dark:border-white/10 dark:bg-[#15151a]/95"
+    >
+      <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => zoomBy(1)} className={buttonClass}>
+        +
+      </button>
+      <div className="mx-2 h-px bg-gray-200 dark:bg-white/10" />
+      <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => zoomBy(-1)} className={buttonClass}>
+        −
+      </button>
     </div>
   )
 }
@@ -1041,9 +1705,14 @@ function MapModeController({ mode, size, routeHold = false }: { mode: MapDisplay
   // fitBounds / setZoom reset tilt to 0 — restore 3D perspective once the fit settles.
   useEffect(() => {
     if (!map || typeof google === 'undefined' || mode !== '3d' || size !== 'full') return
+    let restoring = false
     const listener = map.addListener('idle', () => {
+      if (restoring) return
       const tilt = map.getTilt() ?? 0
-      if (tilt < 10) applyDisplayMode(map, mode, size, isVector, routeHold)
+      if (tilt >= 10) return
+      restoring = true
+      applyDisplayMode(map, mode, size, isVector, routeHold)
+      window.setTimeout(() => { restoring = false }, 700)
     })
     return () => listener.remove()
   }, [map, mode, size, isVector, routeHold])
@@ -1324,13 +1993,14 @@ function PlaceDetailBox({ place }: { place: PlaceDetail }) {
 
 function UserAccuracyHalo({ location }: { location: LatLng }) {
   const map = useMap()
+  const circleRef = useRef<google.maps.Circle | null>(null)
   const radius = Math.min(250, Math.max(28, location.accuracy && location.accuracy > 0 ? location.accuracy : 48))
   useEffect(() => {
     if (!map || typeof google === 'undefined') return
     const circle = new google.maps.Circle({
       map,
-      center: { lat: location.lat, lng: location.lng },
-      radius,
+      center: { lat: 0, lng: 0 },
+      radius: 48,
       fillColor: '#4285F4',
       fillOpacity: 0.16,
       strokeColor: '#4285F4',
@@ -1339,88 +2009,248 @@ function UserAccuracyHalo({ location }: { location: LatLng }) {
       clickable: false,
       zIndex: 40,
     })
-    return () => circle.setMap(null)
-  }, [map, location.lat, location.lng, radius])
+    circleRef.current = circle
+    return () => {
+      circle.setMap(null)
+      circleRef.current = null
+    }
+  }, [map])
+  useEffect(() => {
+    const circle = circleRef.current
+    if (!circle) return
+    circle.setCenter({ lat: location.lat, lng: location.lng })
+    circle.setRadius(radius)
+  }, [location.lat, location.lng, radius])
+  return null
+}
+
+function SmoothUserMarker({ fallback, show }: { fallback: LatLng | null; show: boolean }) {
+  const routeId = useSyncExternalStore(subscribeRoute, () => getRouteSnapshot().route?.id ?? 0, () => 0)
+  const [target, setTarget] = useState<NavFix | null>(null)
+  const [shown, setShown] = useState<LatLng | null>(fallback)
+  const fromRef = useRef<LatLng | null>(fallback)
+
+  useEffect(() => {
+    if (!routeId) {
+      setTarget(null)
+      return
+    }
+    const lastUi = { current: null as LatLng | null }
+    return subscribeNavFix((fix) => {
+      const prev = lastUi.current
+      if (prev && distanceKm(prev, fix) * 1000 < 5) return
+      lastUi.current = { lat: fix.lat, lng: fix.lng }
+      setTarget(fix)
+    })
+  }, [routeId])
+
+  useEffect(() => {
+    const next = target ?? fallback
+    if (!next) return
+    const start = fromRef.current ?? next
+    const t0 = performance.now()
+    let frame = 0
+    const step = (now: number) => {
+      const u = Math.min(1, (now - t0) / 450)
+      const ease = u * u * (3 - 2 * u)
+      const point = {
+        lat: start.lat + (next.lat - start.lat) * ease,
+        lng: start.lng + (next.lng - start.lng) * ease,
+        accuracy: next.accuracy,
+      }
+      fromRef.current = point
+      setShown(point)
+      if (u < 1) frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [target, fallback])
+
+  if (!show || !shown || !isValidCoord(shown)) return null
+  const heading = target?.heading
+  return (
+    <>
+      <UserAccuracyHalo location={shown} />
+      <AdvancedMarker position={shown} title="Your location" zIndex={1000}>
+        <span className="user-loc" aria-hidden>
+          <span className="user-loc__pulse" />
+          <span className="user-loc__dot" />
+          {heading != null && (
+            <span
+              style={{
+                position: 'absolute',
+                top: -14,
+                left: '50%',
+                width: 0,
+                height: 0,
+                marginLeft: -5,
+                borderLeft: '5px solid transparent',
+                borderRight: '5px solid transparent',
+                borderBottom: '9px solid #1A73E8',
+                transform: `rotate(${heading}deg)`,
+                transformOrigin: '50% 20px',
+              }}
+            />
+          )}
+        </span>
+      </AdvancedMarker>
+    </>
+  )
+}
+
+function FollowCamera({ enabled, tilted, fallback }: { enabled: boolean; tilted: boolean; fallback: LatLng | null }) {
+  const map = useMap()
+  const fallbackRef = useRef(fallback)
+  fallbackRef.current = fallback
+  useEffect(() => {
+    if (!enabled || !map) {
+      followOwnsCamera = false
+      return
+    }
+    followOwnsCamera = true
+    const last = { lat: Number.NaN, lng: Number.NaN }
+    const pan = (point: { lat: number; lng: number; heading?: number | null }) => {
+      if (!autoFrame) return
+      const moved = Number.isFinite(last.lat) ? distanceKm(last, point) * 1000 : Infinity
+      if (moved < 5 && (map.getZoom() ?? 0) >= 16.5) return
+      last.lat = point.lat
+      last.lng = point.lng
+      noteCamera('follow')
+      map.panTo({ lat: point.lat, lng: point.lng })
+      if ((map.getZoom() ?? 0) < 16.5) map.setZoom(17)
+      if (tilted && point.heading != null) map.setHeading(point.heading)
+    }
+    const fix = getNavFix()
+    const start = fallbackRef.current
+    if (fix) pan(fix)
+    else if (start && isValidCoord(start)) pan(start)
+    const unsub = subscribeNavFix(pan)
+    return () => {
+      followOwnsCamera = false
+      unsub()
+    }
+  }, [enabled, map, tilted])
   return null
 }
 
 function MapMarkers({
   markers,
   activeStopIndex,
+  activePlace = null,
   onMarkerClick,
   showUserLocation,
   userLocation,
-  colors = {},
 }: {
   markers: (Place | ItineraryStop)[]
   activeStopIndex: number | null
+  /** The only selected place. Its pin is a star at these coordinates. */
+  activePlace?: ActivePlace | null
   onMarkerClick: (index: number) => void
   showUserLocation: boolean
   userLocation: LatLng | null
   numberedStops?: boolean
-  /** place_id -> color, recolors the AI-highlighted pins. */
-  colors?: Record<string, string>
 }) {
-  // Track coordinates already drawn so a duplicate entry (same place returned
-  // twice, or a stop that repeats a place) doesn't stack a second static pin
-  // under the active/glowing one — the "two markers, one bouncing one not" bug.
-  const seenCoords = new Set<string>()
+  const map = useMap()
+  const unique = dedupePlaces(markers)
+  const [zoom, setZoom] = useState(() => map?.getZoom() ?? 14)
+  useEffect(() => {
+    if (!map) return
+    const read = () => setZoom(map.getZoom() ?? 14)
+    read()
+    const listener = map.addListener('zoom_changed', read)
+    return () => listener.remove()
+  }, [map])
+
+  const cell = zoom >= 15 ? 0 : 0.08 / Math.pow(2, Math.max(0, zoom - 8))
+  const singles: { item: (typeof unique)[number]; index: number }[] = []
+  const clusters: { item: (typeof unique)[number]; index: number }[][] = []
+  if (cell === 0) {
+    unique.forEach((item, index) => singles.push({ item, index }))
+  } else {
+    const buckets = new window.Map<string, { item: (typeof unique)[number]; index: number }[]>()
+    unique.forEach((item, index) => {
+      const coords = item.coordinates
+      if (!isValidCoord(coords)) return
+      const pid = 'place_id' in item ? item.place_id : ''
+      if ((activePlace && pid === activePlace.place_id) || (!activePlace && index === activeStopIndex)) {
+        singles.push({ item, index })
+        return
+      }
+      const key = `${Math.round(coords.lat / cell)}:${Math.round(coords.lng / cell)}`
+      const bucket = buckets.get(key) ?? []
+      bucket.push({ item, index })
+      buckets.set(key, bucket)
+    })
+    for (const bucket of buckets.values()) {
+      if (bucket.length === 1) singles.push(bucket[0])
+      else clusters.push(bucket)
+    }
+  }
+  const collision = (required: boolean) =>
+    typeof google === 'undefined'
+      ? undefined
+      : required
+        ? google.maps.CollisionBehavior.REQUIRED
+        : google.maps.CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY
 
   return (
     <>
-      {showUserLocation && userLocation && isValidCoord(userLocation) && (
-        <>
-          <UserAccuracyHalo location={userLocation} />
-          <AdvancedMarker
-            position={userLocation}
-            title="Your location"
-            zIndex={1000}
-            collisionBehavior={typeof google === 'undefined' ? undefined : google.maps.CollisionBehavior.REQUIRED}
-          >
-            <span className="user-loc" aria-hidden>
-              <span className="user-loc__pulse" />
-              <span className="user-loc__dot" />
-            </span>
-          </AdvancedMarker>
-        </>
-      )}
+      <SmoothUserMarker fallback={showUserLocation ? userLocation : null} show={showUserLocation} />
 
-      {markers.map((item, i) => {
-        const coords = 'coordinates' in item ? item.coordinates : (item as Place).coordinates
-        const name = 'name' in item ? item.name : (item as Place).name
-        const isActive = activeStopIndex === i
+      {clusters.map((bucket) => {
+        const lat = bucket.reduce((sum, entry) => sum + entry.item.coordinates.lat, 0) / bucket.length
+        const lng = bucket.reduce((sum, entry) => sum + entry.item.coordinates.lng, 0) / bucket.length
+        return (
+          <AdvancedMarker
+            key={`cluster-${lat.toFixed(4)}-${lng.toFixed(4)}`}
+            position={{ lat, lng }}
+            title={`${bucket.length}`}
+            zIndex={30}
+            collisionBehavior={collision(false)}
+            onClick={() => {
+              if (!map) return
+              noteCamera('cluster')
+              map.panTo({ lat, lng })
+              map.setZoom(Math.min(18, (map.getZoom() ?? zoom) + 2))
+            }}
+          >
+            <span className="hodari-cluster">{bucket.length}</span>
+          </AdvancedMarker>
+        )
+      })}
+
+      {singles.map(({ item, index }) => {
+        const name = item.name
         const pid = 'place_id' in item ? item.place_id : ''
-        const hl = pid ? colors[pid] : undefined
+        const selected = activePlace && pid === activePlace.place_id ? activePlace : null
+        const isActive = !!selected
+        const coords = selected
+          ? { lat: selected.lat, lng: selected.lng }
+          : item.coordinates
         const flags = item as Place
         const stepFree = hasStepFreeEntrance(flags)
         const pending = flags.status === 'pending'
         const border = categoryPinColor(flags)
-
-        // A plain (inactive, un-highlighted) pin that sits exactly on top of a
-        // marker we've already rendered is a visual duplicate — skip it.
-        const coordKey = isValidCoord(coords) ? `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}` : ''
-        const dup = coordKey !== '' && seenCoords.has(coordKey)
-        if (coordKey) seenCoords.add(coordKey)
-        if (dup && !isActive && !hl) return null
+        const showName = true
 
         return (
           <AdvancedMarker
-            key={`${pid ? pid : 'm'}-${i}`}
+            key={placeKey(item)}
             position={coords}
             title={name}
-            zIndex={hl ? 6 : isActive ? 5 : 1}
-            collisionBehavior={typeof google === 'undefined' ? undefined : google.maps.CollisionBehavior.REQUIRED}
-            onClick={() => onMarkerClick(i)}
+            zIndex={isActive ? 2000 : 400 - index}
+            collisionBehavior={collision(isActive)}
+            onClick={() => onMarkerClick(index)}
           >
             {/* Keep the same DOM when a pin becomes active. Swapping the Pin
                 for a glow badge makes Google Maps reparent the node, then React
                 crashes on removeChild. */}
             <span
-              className={`${isActive || hl ? 'hodari-glow-marker' : 'hodari-pin'}${pending ? ' hodari-pin--pending' : ''}`}
-              style={{ '--mk': hl || border } as React.CSSProperties}
+              className={`${isActive ? 'hodari-glow-marker hodari-pin--result' : 'hodari-pin hodari-pin--result'}${pending ? ' hodari-pin--pending' : ''}`}
+              style={{ '--mk': border } as React.CSSProperties}
             >
               <span className="hodari-glow-marker__ring" aria-hidden />
-              <span className="hodari-glow-marker__dot">{i + 1}</span>
+              <span className="hodari-glow-marker__dot">{isActive ? '★' : index + 1}</span>
               <span className="hodari-glow-marker__tip" aria-hidden />
               <span className={`hodari-pin__badge ${flags.local_business || stepFree || pending ? '' : 'invisible'}`}>
                 {pending ? (
@@ -1432,10 +2262,27 @@ function MapMarkers({
                   </>
                 )}
               </span>
+              {showName && <span className="hodari-pin__label">{name}</span>}
             </span>
           </AdvancedMarker>
         )
       })}
+      {activePlace && isValidCoord({ lat: activePlace.lat, lng: activePlace.lng }) && !unique.some((item) => 'place_id' in item && item.place_id === activePlace.place_id) && (
+        <AdvancedMarker
+          position={{ lat: activePlace.lat, lng: activePlace.lng }}
+          title={activePlace.name}
+          zIndex={2000}
+          collisionBehavior={collision(true)}
+          onClick={() => onMarkerClick(-1)}
+        >
+          <span className="hodari-glow-marker hodari-pin--result" style={{ '--mk': '#F56A00' } as React.CSSProperties}>
+            <span className="hodari-glow-marker__ring" aria-hidden />
+            <span className="hodari-glow-marker__dot">★</span>
+            <span className="hodari-glow-marker__tip" aria-hidden />
+            <span className="hodari-pin__label">{activePlace.name}</span>
+          </span>
+        </AdvancedMarker>
+      )}
     </>
   )
 }
@@ -1515,7 +2362,7 @@ function CommunityPinMarkers({
             onClick={() => onSelect(pin.pin_id)}
           >
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-[15px] leading-none shadow-md"
+              className="hodari-pin--dim flex h-7 w-7 items-center justify-center rounded-full border-2 bg-white text-[14px] leading-none shadow-md"
               style={{ borderColor: COMMUNITY_BLUE }}
             >
               <span aria-hidden>{pin.owner?.avatar_emoji ?? '📍'}</span>
@@ -1631,19 +2478,13 @@ function CommunityLayerToggle({
   )
 }
 
-function categoryLabel(raw: string | undefined, t: (key: string) => string): string | null {
-  if (!raw) return null
-  const key = raw.toLowerCase().replace(/\s+/g, '_')
-  const translated = t(`categories.${key}`)
-  return translated !== `categories.${key}` ? translated : raw.replace(/_/g, ' ')
-}
-
-/** Name, photo, rating and a route button. Desktop anchors it to the pin; mobile uses a bottom sheet. */
-export function PlaceInfoCard({
+/** Compact pin popup. No hours, phone, website, or accessibility — those open on demand. */
+export const PlaceInfoCard = memo(function PlaceInfoCard({
   place,
   index,
   onClose,
   onRoute,
+  onDetails,
   onRate,
   onSave,
   saved = false,
@@ -1655,6 +2496,7 @@ export function PlaceInfoCard({
   index: number
   onClose: () => void
   onRoute?: (index: number) => void
+  onDetails?: (place: Place) => void
   onRate?: (place: Place) => void
   onSave?: (place: Place) => void
   saved?: boolean
@@ -1662,93 +2504,103 @@ export function PlaceInfoCard({
   reviewSummary?: ReviewSummary | null
   className?: string
 }) {
-  const { t, lang } = useI18n()
-  const scored = reviewSummary && reviewSummary.count > 0 && reviewSummary.average != null
-    ? reviewLabel(reviewSummary.count, reviewSummary.average, lang)
-    : null
-  // A later setState inside the InfoWindow makes Google Maps reparent the node
-  // and React then crashes with removeChild. Use the photo already on the place.
-  const photoUrl = place.photo_url ?? place.photos?.[0] ?? null
-  const category = categoryLabel(place.categories?.[0], t)
+  const { t } = useI18n()
+  const photoUrl = place.photo_url ?? place.photos?.[0] ?? (place.photo_reference ? `/api/place-photo?ref=${encodeURIComponent(place.photo_reference)}` : null)
+  const rating = reviewSummary?.average ?? place.rating
+  const ratingCount = reviewSummary?.count || place.user_ratings_total || 0
 
   return (
-    <div className={`relative min-w-[220px] max-w-[280px] text-gray-900 ${className}`}>
-      {photoUrl ? (
-        <PlaceImage
-          place={{ ...place, photo_url: photoUrl, photos: [photoUrl] }}
-          className="mb-2 h-24 w-full rounded-lg object-cover shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
-          width={560}
-          height={240}
-        />
-      ) : null}
+    <div data-map-pad="popup" className={`place-card-in relative w-[min(280px,calc(100vw-2rem))] text-gray-900 ${className}`}>
+      <div className="relative mb-2 w-full shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-white/10" style={{ aspectRatio: '16 / 9', maxHeight: 158 }}>
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-200 text-[11px] text-gray-400 dark:bg-white/10">{t('placeCard.photo')}</div>
+        {photoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={photoUrl}
+            alt=""
+            width={560}
+            height={315}
+            loading="lazy"
+            decoding="async"
+            className="absolute inset-0 h-full w-full object-cover"
+            onError={(event) => { event.currentTarget.style.display = 'none' }}
+          />
+        ) : null}
+      </div>
       <button
         type="button"
         onClick={onClose}
         aria-label={t('placeCard.close')}
-        className="absolute right-1 top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-gray-600 shadow-sm transition-colors duration-150 hover:bg-gray-200 hover:text-gray-900"
+        className="absolute right-1 top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-gray-600 shadow-sm hover:bg-gray-200 hover:text-gray-900"
       >
         <X className="h-4 w-4" />
       </button>
-      <div className="min-w-0 pr-8">
-        <p className="text-[14px] font-semibold leading-snug">{place.name}</p>
-        {category && <p className="mt-0.5 text-[12px] text-gray-500">{category}</p>}
-        <PlaceBadges place={place} className="mt-1" />
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-gray-600">
-        {place.rating != null && (
-          <span className="inline-flex items-center gap-0.5 text-amber-700">
-            <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-            {place.rating}
-          </span>
+      <p className="line-clamp-2 min-h-10 pr-8 text-[14px] font-semibold leading-snug">{place.name}</p>
+      <p className="mt-1 flex h-4 items-center gap-1 text-[12px] text-amber-700">
+        {rating != null && (
+          <>
+            <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" aria-hidden />
+            {Number(rating).toFixed(1)}
+            {ratingCount > 0 && <span className="text-gray-500">({ratingCount.toLocaleString()})</span>}
+          </>
         )}
-        {place.open_now != null && (
-          <span className={place.open_now ? 'text-[#0F6E56]' : 'text-red-600'}>
-            {place.open_now ? t('placeCard.open') : t('placeCard.closed')}
-          </span>
+      </p>
+      <p className="mt-1 line-clamp-2 h-8 text-[11px] leading-snug text-gray-500">{place.address || '\u00a0'}</p>
+      <div className="mt-2.5 flex gap-1.5">
+        {onRoute && (
+          <button
+            type="button"
+            title={routeActionLabel(routeMode, t)}
+            aria-label={routeActionLabel(routeMode, t)}
+            onClick={() => onRoute(index)}
+            className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full bg-[#F56A00] px-3 text-[13px] font-medium text-white hover:bg-[#d45500]"
+          >
+            <Navigation className="h-3.5 w-3.5" />
+            {t('placeCard.route')}
+          </button>
         )}
-        {place.price_level && <span>{place.price_level}</span>}
+        {onDetails && (
+          <button
+            type="button"
+            onClick={() => onDetails(place)}
+            className="flex h-9 flex-1 items-center justify-center rounded-full border border-gray-200 px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-50"
+          >
+            {t('placeCard.seeDetails')}
+          </button>
+        )}
       </div>
-      {place.address && <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-gray-500">{place.address}</p>}
-      {onSave && (
-        <button
-          type="button"
-          onClick={() => onSave(place)}
-          title={saved ? t('placeCard.saved') : t('placeCard.save')}
-          aria-label={saved ? t('placeCard.saved') : t('placeCard.save')}
-          aria-pressed={saved}
-          className={`mt-2 inline-flex items-center gap-1 text-[12px] font-medium ${saved ? 'text-[#F56A00]' : 'text-gray-600'}`}
-        >
-          <Bookmark className={`h-3.5 w-3.5 ${saved ? 'fill-[#F56A00]' : ''}`} />
-          {saved ? t('placeCard.saved') : t('placeCard.save')}
-        </button>
-      )}
-      {onRate && (
-        <button
-          type="button"
-          onClick={() => onRate(place)}
-          className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-amber-700"
-          title={t('placeCard.rate')}
-          aria-label={scored ?? t('placeCard.rate')}
-        >
-          <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-          {scored ?? t('placeCard.rate')}
-        </button>
-      )}
-      {onRoute && (
-        <button
-          type="button"
-          title={routeActionLabel(routeMode, t)}
-          aria-label={routeActionLabel(routeMode, t)}
-          onClick={() => onRoute(index)}
-          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-full bg-[#F56A00] px-3 py-2 text-[13px] font-medium text-white transition-colors duration-150 hover:bg-[#d45500]"
-        >
-          <Navigation className="h-3.5 w-3.5" />
-          {routeActionLabel(routeMode, t)}
-        </button>
+      {(onSave || onRate) && (
+        <div className="mt-1.5 flex gap-1.5">
+          {onSave && (
+            <button
+              type="button"
+              onClick={() => onSave(place)}
+              title={saved ? t('placeCard.saved') : t('placeCard.save')}
+              aria-label={saved ? t('placeCard.saved') : t('placeCard.save')}
+              aria-pressed={saved}
+              className={`inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-full text-[12px] font-medium ${saved ? 'text-[#F56A00]' : 'text-gray-600'}`}
+            >
+              <Bookmark className={`h-3.5 w-3.5 ${saved ? 'fill-[#F56A00]' : ''}`} />
+              {saved ? t('placeCard.saved') : t('placeCard.save')}
+            </button>
+          )}
+          {onRate && (
+            <button
+              type="button"
+              onClick={() => onRate(place)}
+              className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-full text-[12px] font-medium text-amber-700"
+              title={t('placeCard.rate')}
+              aria-label={t('placeCard.rate')}
+            >
+              <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+              {t('placeCard.rate')}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
-}
+})
 
 /** Compact action bubble shown on the selected marker (full map). */
 function PlaceBubble({
@@ -1850,6 +2702,7 @@ function MapCircles({ circles }: { circles: MapAnnotations['circles'] }) {
   const map = useMap()
   const ref = useRef<google.maps.Circle[]>([])
   const rafRef = useRef<number | null>(null)
+  const circleKey = circles.map((c) => `${c.id}:${c.center.lat.toFixed(6)},${c.center.lng.toFixed(6)}:${c.radiusM}`).join('|')
 
   useEffect(() => {
     if (!map || typeof google === 'undefined') return
@@ -1910,7 +2763,9 @@ function MapCircles({ circles }: { circles: MapAnnotations['circles'] }) {
       ref.current.forEach((c) => c.setMap(null))
       ref.current = []
     }
-  }, [map, circles])
+    // circleKey is the center, radius, and id. A new array identity must not redraw the ring.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, circleKey])
 
   return null
 }
@@ -2032,8 +2887,8 @@ function UserLocation3D({ location }: { location: LatLng }) {
 function Map3DView({
   markers,
   activeStopIndex,
+  activePlace = null,
   onMarkerClick,
-  annotations,
   aiBusy = false,
   routePath = null,
   routeMode = 'WALK',
@@ -2044,8 +2899,8 @@ function Map3DView({
 }: {
   markers: (Place | ItineraryStop)[]
   activeStopIndex: number | null
+  activePlace?: ActivePlace | null
   onMarkerClick: (index: number) => void
-  annotations?: MapAnnotations
   aiBusy?: boolean
   routePath?: google.maps.LatLngLiteral[] | null
   routeMode?: TravelMode
@@ -2054,7 +2909,8 @@ function Map3DView({
   showUserLocation?: boolean
   onTilesUnavailable?: () => void
 }) {
-  const first = markers.find((m) => isValidCoord(m.coordinates))?.coordinates
+  const unique = dedupePlaces(markers)
+  const first = unique.find((m) => isValidCoord(m.coordinates))?.coordinates
   const center: google.maps.LatLngAltitudeLiteral = first
     ? { lat: first.lat, lng: first.lng, altitude: 0 }
     : { lat: 40.8135, lng: -74.0745, altitude: 0 } // MetLife Stadium — US default
@@ -2067,34 +2923,27 @@ function Map3DView({
       defaultTilt={48}
       mode={MapMode.SATELLITE}
     >
-      {markers.map((p, i) =>
-        isValidCoord(p.coordinates) ? (
+      {unique.map((p, i) => {
+        if (!isValidCoord(p.coordinates)) return null
+        const selected = activePlace && p.place_id === activePlace.place_id ? activePlace : null
+        const lat = selected ? selected.lat : p.coordinates.lat
+        const lng = selected ? selected.lng : p.coordinates.lng
+        return (
           <Marker3D
-            key={`m3d-${p.place_id || p.name}-${i}`}
-            position={{ lat: p.coordinates.lat, lng: p.coordinates.lng, altitude: 45 }}
+            key={placeKey(p)}
+            position={{ lat, lng, altitude: 45 }}
             altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
             extruded
-            label={String(i + 1)}
+            label={selected ? '★' : String(i + 1)}
             onClick={() => onMarkerClick(i)}
           />
-        ) : null,
-      )}
-      {/* AI-placed highlight markers (★) that aren't in the result list. */}
-      {(annotations?.markers ?? []).filter((m) => isValidCoord(m.coordinates)).map((m) => (
-        <Marker3D
-          key={`anno3d-${m.id}`}
-          position={{ lat: m.coordinates.lat, lng: m.coordinates.lng, altitude: 50 }}
-          altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
-          extruded
-          label="★"
-        />
-      ))}
-      {/* AI-drawn circles — rendered as ground polygons so they show in 3D too. */}
-      <Circles3D circles={annotations?.circles ?? []} />
+        )
+      })}
+      <Circles3D circles={activePlace ? [{ id: activePlace.place_id, center: { lat: activePlace.lat, lng: activePlace.lng }, radiusM: SELECT_RADIUS_M, color: '#F56A00' }] : []} />
       {showUserLocation && userLocation && isValidCoord(userLocation) && <UserLocation3D location={userLocation} />}
       {onTilesUnavailable && <RealisticTileWatch onUnavailable={onTilesUnavailable} />}
       {routePath && routePath.length >= 2 && <RouteLine3D path={routePath} mode={routeMode} />}
-      <Fly3DToActive markers={markers} activeStopIndex={activeStopIndex} enabled={!aiBusy && !holdCamera && !(routePath && routePath.length >= 2)} />
+      <Fly3DToActive markers={unique} activeStopIndex={activeStopIndex} enabled={!aiBusy && !holdCamera && !(routePath && routePath.length >= 2)} />
     </Map3D>
   )
 }
@@ -2130,116 +2979,22 @@ function RealisticPlaceCard({
   onRoute?: (index: number) => void
   onShare?: (place: Place) => void
 }) {
-  const { t, lang } = useI18n()
-  const scored = reviewSummary && reviewSummary.count > 0 && reviewSummary.average != null
-    ? reviewLabel(reviewSummary.count, reviewSummary.average, lang)
-    : null
-  const photos = place.photos && place.photos.length > 0
-    ? place.photos
-    : place.photo_url
-      ? [place.photo_url]
-      : []
-  const btn =
-    'flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:border-[#F56A00]/50 hover:text-[#F56A00] max-md:h-10 max-md:w-10 dark:border-white/15 dark:text-gray-300'
-
+  void onShare
   return (
-    // Mobile: bottom-44 lifts the card above the chat bottom sheet's peek.
     <div className="pointer-events-none absolute bottom-44 left-1/2 z-[58] w-[min(320px,calc(100%-2rem))] -translate-x-1/2 md:bottom-24">
       <div className="pointer-events-auto rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-[0_8px_30px_rgba(0,0,0,0.18)] backdrop-blur dark:border-white/10 dark:bg-[#15151a]/95">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white transition-colors hover:bg-black/60 max-md:h-9 max-md:w-9"
-        >
-          <span aria-hidden className="text-[13px] leading-none">×</span>
-        </button>
-        {photos.length > 0 && (
-          <div className="mb-2 flex gap-2 overflow-x-auto">
-            {photos.map((photo, i) => (
-              <PlaceImage
-                key={`${photo}-${i}`}
-                place={{ ...place, photos: [photo], photo_url: undefined }}
-                className="h-20 w-28 shrink-0 rounded-lg object-cover"
-                width={224}
-                height={160}
-              />
-            ))}
-          </div>
-        )}
-        <p className="pr-6 text-[13px] font-semibold leading-snug text-gray-900 dark:text-white">{place.name}</p>
-        <PlaceBadges place={place} className="mt-1" />
-        {place.address && (
-          <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{place.address}</p>
-        )}
-        <div className="mt-1 flex items-center gap-2">
-          {place.rating != null && (
-            <span className="flex items-center gap-0.5 text-[11px] text-amber-600">
-              <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
-              {place.rating}
-            </span>
-          )}
-          {(place.price ?? place.price_level) && (
-            <span className="text-[11px] text-gray-400">{place.price ?? place.price_level}</span>
-          )}
-        </div>
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {onFullDetails && (
-            <button type="button" title="Full details & photos" className={btn} onClick={() => onFullDetails(place)}>
-              <ImageIcon className="h-4 w-4" />
-            </button>
-          )}
-          {onSave && (
-            <button
-              type="button"
-              title={saved ? t('placeCard.saved') : t('placeCard.save')}
-              aria-label={saved ? t('placeCard.saved') : t('placeCard.save')}
-              aria-pressed={saved}
-              className={`${btn} ${saved ? 'border-[#F56A00]/60 text-[#F56A00]' : ''}`}
-              onClick={() => onSave(place)}
-            >
-              <Bookmark className={`h-4 w-4 ${saved ? 'fill-[#F56A00]' : ''}`} />
-            </button>
-          )}
-          {onRate && (
-            <button
-              type="button"
-              title={t('placeCard.rate')}
-              aria-label={scored ?? t('placeCard.rate')}
-              className={`${btn} ${scored ? 'w-auto gap-1 px-2 text-[11px] font-medium text-amber-600' : ''}`}
-              onClick={() => onRate(place)}
-            >
-              <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
-              {scored ? <span>{scored.replace('★ ', '')}</span> : null}
-            </button>
-          )}
-          {onRoute && (
-            <button
-              type="button"
-              title={routeActionLabel(routeMode, t)}
-              aria-label={routeActionLabel(routeMode, t)}
-              className={btn}
-              onClick={() => onRoute(index)}
-            >
-              <Navigation className="h-4 w-4" />
-            </button>
-          )}
-          {onShare && (
-            <button type="button" title="Share with connections" className={btn} onClick={() => onShare(place)}>
-              <Share2 className="h-4 w-4" />
-            </button>
-          )}
-          {place.website && (
-            <a href={place.website} target="_blank" rel="noopener noreferrer" title="Website" className={btn}>
-              <Globe className="h-4 w-4" />
-            </a>
-          )}
-          {place.maps_url && (
-            <a href={place.maps_url} target="_blank" rel="noopener noreferrer" title="Open in Google Maps" className={btn}>
-              <ExternalLink className="h-4 w-4" />
-            </a>
-          )}
-        </div>
+        <PlaceInfoCard
+          place={place}
+          index={index}
+          saved={saved}
+          reviewSummary={reviewSummary}
+          routeMode={routeMode}
+          onClose={onClose}
+          onSave={onSave}
+          onRate={onRate}
+          onRoute={onRoute}
+          onDetails={onFullDetails}
+        />
       </div>
     </div>
   )
@@ -2255,6 +3010,7 @@ function Circles3D({ circles }: { circles: MapAnnotations['circles'] }) {
   const map3d = useMap3D()
   const polysRef = useRef<HTMLElement[]>([])
 
+  const circleKey = circles.map((c) => `${c.id}:${c.center.lat.toFixed(6)},${c.center.lng.toFixed(6)}:${c.radiusM}`).join('|')
   useEffect(() => {
     if (!maps3d || !map3d) return
     const lib = maps3d as unknown as {
@@ -2280,7 +3036,8 @@ function Circles3D({ circles }: { circles: MapAnnotations['circles'] }) {
       polysRef.current.forEach((p) => { try { p.remove() } catch { /* gone */ } })
       polysRef.current = []
     }
-  }, [maps3d, map3d, circles])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maps3d, map3d, circleKey])
 
   return null
 }
@@ -2327,6 +3084,7 @@ function MapCanvas({
   theme,
   onRouteInfo,
   onRouteError,
+  onEndRoute,
   zoomFocusOnActive = false,
   size = 'full',
   aiBusy = false,
@@ -2348,11 +3106,15 @@ function MapCanvas({
   placeCardOpen = false,
   onPlaceCardClose,
   routeInfo = null,
-}: Omit<Props, 'onExpand' | 'onCollapse' | 'selectedPlace' | 'loading' | 'error' | 'onRetry' | 'bottomSlot' | 'onAddPlace'>) {
+  onAddPlace,
+  activePlace: activePlaceProp = null,
+  chatPlaces = [],
+  onNavigatePlace,
+}: Omit<Props, 'onExpand' | 'onCollapse' | 'selectedPlace' | 'loading' | 'error' | 'onRetry' | 'bottomSlot'>) {
   const { t, lang } = useI18n()
   const isMobile = useIsMobile()
   const skipMapClose = useRef(false)
-  const markers = itinerary ?? places
+  const markers = itinerary ? dedupePlaces(itinerary) : dedupePlaces(places)
   const placeCoords = markers
     .map((m) => m.coordinates)
     .filter(isValidCoord)
@@ -2386,15 +3148,26 @@ function MapCanvas({
   const focusZoom = isCompact ? 17 : 16
 
   const routeDestIndex = customRoute?.destinationIndex ?? activeStopIndex
-  const routeDestination =
+  const indexedDestination =
     routeDestIndex !== null && markers[routeDestIndex]
       ? markers[routeDestIndex]
       : null
+  const routeDestination = routeFromUser && activePlaceProp
+    ? {
+        name: activePlaceProp.name,
+        place_id: activePlaceProp.place_id,
+        coordinates: { lat: activePlaceProp.lat, lng: activePlaceProp.lng },
+      }
+    : indexedDestination
 
   // 3D vector perspective by default in full mode; compact stays flat.
   const [mapMode, setMapMode] = useState<MapDisplayMode>('3d')
   const [realisticNotice, setRealisticNotice] = useState(false)
   const [modeNotice, setModeNotice] = useState(false)
+  const [unavailableModes, setUnavailableModes] = useState<Partial<Record<'TRANSIT' | 'BICYCLE', true>>>({})
+  const [routeToast, setRouteToast] = useState<string | null>(null)
+  const routeToastTimer = useRef<number | null>(null)
+  const roadModeRef = useRef<TravelMode>('WALK')
   const is3D = !isCompact && mapMode === '3d'
   const realistic = !isCompact && mapMode === 'realistic'
   const handleRealisticDown = useCallback(() => {
@@ -2406,13 +3179,16 @@ function MapCanvas({
     const timer = window.setTimeout(() => setRealisticNotice(false), 7000)
     return () => window.clearTimeout(timer)
   }, [realisticNotice])
-  const [routeDraw, setRouteDraw] = useState<DrawnPath | null>(null)
+  const routeSnap = useSyncExternalStore(subscribeRoute, getRouteSnapshot, getRouteSnapshot)
+  const shownRoute = routeSnap.route
+  const [follow, setFollow] = useState(false)
   useEffect(() => {
     if (!modeNotice) return
     const timer = window.setTimeout(() => setModeNotice(false), 5000)
     return () => window.clearTimeout(timer)
   }, [modeNotice])
   const [routeHint, setRouteHint] = useState(false)
+  const [chooserOpen, setChooserOpen] = useState(false)
   const [routeDetailOpen, setRouteDetailOpen] = useState(false)
   const [routeSteps, setRouteSteps] = useState<RouteStep[] | null>(null)
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
@@ -2441,10 +3217,21 @@ function MapCanvas({
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [ratePlace])
+  const routeId = shownRoute?.id ?? 0
   useEffect(() => {
     setRouteDetailOpen(false)
     setRouteSteps(null)
-  }, [routeDraw?.destinationName, routeDraw?.distance, routeDraw?.path.length])
+    if (!getHeldRoute()) setFollow(false)
+  }, [routeId])
+  useEffect(() => {
+    const onFree = () => { setFollow(false) }
+    window.addEventListener('hodari:camera-free', onFree)
+    return () => window.removeEventListener('hodari:camera-free', onFree)
+  }, [])
+  const acceptRoute = useCallback((drawn: DrawnPath | null) => {
+    if (!drawn || drawn.path.length < 2) return
+    commitHeldRoute(drawn)
+  }, [])
 
   const routeJob: RouteJob | null = (() => {
     if (
@@ -2500,6 +3287,20 @@ function MapCanvas({
     return null
   })()
 
+  const routeDestKey = routeJob && routeJob.kind !== 'stops'
+    ? `${routeJob.destination.lat.toFixed(5)},${routeJob.destination.lng.toFixed(5)}`
+    : ''
+  useEffect(() => {
+    setUnavailableModes({})
+  }, [routeDestKey])
+
+  if (shownRoute?.mode === 'WALK' || shownRoute?.mode === 'DRIVE') roadModeRef.current = shownRoute.mode
+
+  const unavailableLabel = (['TRANSIT', 'BICYCLE'] as const)
+    .filter((id) => unavailableModes[id])
+    .map((id) => t(id === 'TRANSIT' ? 'map.modeTransit' : 'map.modeBike'))
+    .join(', ')
+
   const routePlaceIndex =
     activeStopIndex !== null && markers[activeStopIndex] && isValidCoord(markers[activeStopIndex].coordinates)
       ? activeStopIndex
@@ -2517,15 +3318,31 @@ function MapCanvas({
     selectedCommunityPinId != null
       ? (communityPins ?? []).find((p) => p.pin_id === selectedCommunityPinId) ?? null
       : null
-  const activePlace = activeStopIndex !== null ? markers[activeStopIndex] : null
+  const activePlace = activePlaceProp
+    ? markers.find((marker) => 'place_id' in marker && marker.place_id === activePlaceProp.place_id) ?? null
+    : null
   const showBubble =
     !isMobile &&
     !isCompact &&
     placeCardOpen &&
     bubbleOpen &&
-    activeStopIndex !== null &&
-    !!activePlace &&
-    isValidCoord(activePlace.coordinates)
+    !!activePlaceProp &&
+    isValidCoord({ lat: activePlaceProp.lat, lng: activePlaceProp.lng })
+  const popupPlace = useMemo(() => {
+    if (!activePlaceProp) return null
+    if (activePlace && 'coordinates' in activePlace) return activePlace as Place
+    return {
+      place_id: activePlaceProp.place_id,
+      name: activePlaceProp.name,
+      address: '',
+      coordinates: { lat: activePlaceProp.lat, lng: activePlaceProp.lng },
+      categories: [],
+    } as Place
+  }, [activePlace, activePlaceProp])
+  const closeBubble = useCallback(() => {
+    setBubbleOpen(false)
+    onPlaceCardClose?.()
+  }, [onPlaceCardClose])
   // Only an explicit active selection triggers the cinematic glide — never
   // the initial fallback focus, so PreciseMapFit owns the first framing.
   const activePos =
@@ -2538,15 +3355,129 @@ function MapCanvas({
     .map((c) => `${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)
     .join(';')
 
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production' || !activePlaceProp) return
+    const center = { lat: activePlaceProp.lat, lng: activePlaceProp.lng }
+    const pin = center
+    const dest = shownRoute?.destination
+    const pairs: Array<[string, LatLng | undefined]> = [
+      ['circle', center],
+      ['pin', pin],
+      ['route', dest],
+    ]
+    for (let i = 0; i < pairs.length; i++) {
+      for (let j = i + 1; j < pairs.length; j++) {
+        const a = pairs[i][1]
+        const b = pairs[j][1]
+        if (!a || !b || !isValidCoord(a) || !isValidCoord(b)) continue
+        const meters = distanceKm(a, b) * 1000
+        if (meters > 10) {
+          console.warn(
+            `[map] ${pairs[i][0]} and ${pairs[j][0]} differ by ${meters.toFixed(0)} m`,
+            { activePlace: activePlaceProp.name, [pairs[i][0]]: a, [pairs[j][0]]: b },
+          )
+        }
+      }
+    }
+  }, [activePlaceProp, shownRoute])
+
+  useEffect(() => {
+    const current = getHeldRoute()
+    if (!current?.destination || !current.mode) return
+    let abort: AbortController | null = null
+    const stop = subscribeNavFix((fix) => {
+      const live = getHeldRoute()
+      if (!live?.destination || !live.mode || getRouteSnapshot().arrived) return
+      const projected = projectOnPath(fix, live.path)
+      if (!projected) return
+      setRouteProgress(projected)
+      if (projected.remainingM < 30) {
+        markArrived()
+        return
+      }
+      if (offRouteAction(projected.distanceFromPathM, fix.accuracy, fix.at) !== 'reroute') return
+      abort?.abort()
+      abort = new AbortController()
+      const signal = abort.signal
+      setRecalculating(true)
+      void computeDrawnRoute(fix, live.destination, live.mode, signal, false).then((drawn) => {
+        if (signal.aborted) return
+        setRecalculating(false)
+        if (!drawn.ok) return
+        commitHeldRoute(withMeasures({
+          path: drawn.path,
+          distance: drawn.distance,
+          duration: drawn.duration,
+          distanceMeters: drawn.distanceMeters,
+          durationSeconds: drawn.durationSeconds,
+          destinationName: live.destinationName,
+          originLabel: live.originLabel,
+          origin: drawn.origin ?? fix,
+          destination: live.destination,
+          mode: drawn.mode ?? live.mode,
+          steps: drawn.steps ?? live.steps,
+        }))
+      }).catch(() => {
+        if (!signal.aborted) setRecalculating(false)
+      })
+    })
+    return () => {
+      stop()
+      abort?.abort()
+    }
+  }, [routeId])
+
+  const handleRouteNotice = (reason: string | null) => {
+    if (routeToastTimer.current != null) window.clearTimeout(routeToastTimer.current)
+    if (!reason) {
+      setRouteToast(null)
+      return
+    }
+    const text = reason === 'move'
+      ? t('map.routeMove')
+      : reason === 'retry'
+        ? t('map.routeRetry')
+        : reason === 'permission'
+          ? t('map.routePermission')
+          : reason
+    setRouteToast(text)
+    routeToastTimer.current = window.setTimeout(() => setRouteToast(null), 6000)
+  }
+
   const handleRouteError = (message: string | null) => {
     if (message === 'mode-unsupported') {
+      if (routeMode === 'TRANSIT' || routeMode === 'BICYCLE') {
+        setUnavailableModes((prev) => ({ ...prev, [routeMode]: true }))
+      }
       setModeNotice(true)
-      const previous = routeDraw?.mode ?? 'WALK'
-      if (previous !== routeMode) onRouteModeChange?.(previous)
+      const keep = roadModeRef.current
+      if (keep !== routeMode) onRouteModeChange?.(keep)
+      return
+    }
+    if (message === 'move-apart') {
+      onRouteError?.(t('map.routeMove'))
+      return
+    }
+    if (message === 'permission') {
+      onRouteError?.(t('map.routePermission'))
       return
     }
     onRouteError?.(message)
   }
+
+  const routeMarkers = shownRoute?.destination && !markers.some((item) => distanceKm(item.coordinates, shownRoute.destination!) * 1000 < 40)
+    ? [
+        ...markers,
+        {
+          place_id: `route:${shownRoute.destinationName}`,
+          name: shownRoute.destinationName,
+          address: '',
+          coordinates: shownRoute.destination,
+          categories: [] as string[],
+          personalization_score: 0,
+        } as Place,
+      ]
+    : markers
 
   return (
     <APIProvider
@@ -2555,26 +3486,32 @@ function MapCanvas({
       version="beta"
       onError={(err) => console.error('[map] Google Maps API failed to load', err)}
     >
-      <RouteComputer job={routeJob} onDrawn={setRouteDraw} onRouteInfo={onRouteInfo} onRouteError={handleRouteError} />
+      <RouteComputer job={routeJob} onDrawn={acceptRoute} onRouteInfo={onRouteInfo} onRouteError={handleRouteError} onRouteNotice={handleRouteNotice} />
       {realistic ? (
         <>
           <Map3DView
             markers={markers}
             activeStopIndex={activeStopIndex}
+            activePlace={activePlaceProp}
             onMarkerClick={onMarkerClick}
-            annotations={annotations}
             aiBusy={aiBusy}
-            routePath={routeDraw?.path ?? null}
-            routeMode={routeDraw?.mode ?? routeMode}
-            holdCamera={routeFromUser || !!routeDraw}
+            routePath={shownRoute?.path ?? null}
+            routeMode={shownRoute?.mode ?? routeMode}
+            holdCamera={!!routeJob || !!shownRoute}
             userLocation={userLocation}
             showUserLocation={showUserLocation}
             onTilesUnavailable={handleRealisticDown}
           />
-          {showBubble && activePlace && (
+          {showBubble && (activePlace || activePlaceProp) && (
             <RealisticPlaceCard
-              place={activePlace as PlaceDetail}
-              index={activeStopIndex as number}
+              place={(activePlace ?? {
+                place_id: activePlaceProp!.place_id,
+                name: activePlaceProp!.name,
+                address: '',
+                coordinates: { lat: activePlaceProp!.lat, lng: activePlaceProp!.lng },
+                categories: [],
+              }) as PlaceDetail}
+              index={activeStopIndex ?? 0}
               saved={!!savedPlaceIds?.has((activePlace as Place).place_id)}
               reviewSummary={reviewSummary}
               routeMode={routeMode}
@@ -2607,20 +3544,19 @@ function MapCanvas({
         fullscreenControl={false}
         clickableIcons={false}
         onClick={(event) => {
-          if (skipMapClose.current) {
-            skipMapClose.current = false
-            return
-          }
+          if (skipMapClose.current) return
+          setBubbleOpen(false)
           onPlaceCardClose?.()
           const latLng = event.detail.latLng
           if (!onMapClick || !latLng) return
           onMapClick({ lat: latLng.lat, lng: latLng.lng })
         }}
       >
+        <VisibleAreaWatcher />
         <MapUiOptions fullControls={size === 'full'} />
-        <MapModeController mode={mapMode} size={size} routeHold={!!routeDraw} />
-        {markerCoords.length > 0 && !routeDraw && <PlacesMapCenter places={markerCoords} />}
-        {usePreciseFit && !useFocus && !routeDraw && (
+        <MapModeController mode={mapMode} size={size} routeHold={!!routeJob || !!shownRoute} />
+        {markerCoords.length > 0 && !routeJob && !shownRoute && <PlacesMapCenter places={markerCoords} />}
+        {usePreciseFit && !useFocus && !routeJob && !shownRoute && (
           <PreciseMapFit
             markers={markerCoords}
             userLocation={userLocation}
@@ -2629,31 +3565,43 @@ function MapCanvas({
             size={size}
           />
         )}
-        <MapZoomFocus position={focusPos ?? null} enabled={useFocus && !routeDraw} targetZoom={focusZoom} />
+        <MapZoomFocus position={focusPos ?? null} enabled={useFocus && !routeJob && !shownRoute} targetZoom={focusZoom} />
         <CinematicCamera
           focus={activePos}
-          enabled={is3D && markerCoords.length > 0 && !aiBusy && !routeDraw}
+          enabled={is3D && markerCoords.length > 0 && !aiBusy && !routeJob && !shownRoute}
           glideCenter={!useFocus}
           resetKey={cameraResetKey}
         />
 
+        <FollowCamera enabled={follow && !routeSnap.arrived} tilted={is3D} fallback={userLocation} />
         <MapMarkers
-          markers={markers}
+          markers={routeMarkers}
           activeStopIndex={activeStopIndex}
+          activePlace={activePlaceProp}
           onMarkerClick={(index) => {
             skipMapClose.current = true
+            window.setTimeout(() => { skipMapClose.current = false }, 300)
             setBubbleOpen(true)
             onMarkerClick(index)
           }}
           showUserLocation={showUserLocation}
           userLocation={userLocation}
-          colors={annotations?.colors}
         />
 
-        {annotations && annotations.markers.length > 0 && (
-          <AnnotationMarkers markers={annotations.markers} placeCoords={markerCoords} />
-        )}
-        {annotations && annotations.circles.length > 0 && <MapCircles circles={annotations.circles} />}
+        {(() => {
+          const circleAt = activePlaceProp
+            ? { lat: activePlaceProp.lat, lng: activePlaceProp.lng }
+            : shownRoute?.destination
+          if (!circleAt) return null
+          return (
+            <MapCircles circles={[{
+              id: activePlaceProp?.place_id || 'route-destination',
+              center: circleAt,
+              radiusM: SELECT_RADIUS_M,
+              color: '#F56A00',
+            }]} />
+          )
+        })()}
 
         {/* Community layer: shared pins + connections' live positions. */}
         {communityPins && communityPins.length > 0 && (
@@ -2680,28 +3628,45 @@ function MapCanvas({
           <MapZoomFocus position={communityFocus} enabled targetZoom={16} />
         )}
 
-        {showBubble && activePlace && (
-          <InfoWindow
-            position={activePlace.coordinates}
-            pixelOffset={[0, -46]}
-            headerDisabled
-            onCloseClick={() => { setBubbleOpen(false); onPlaceCardClose?.() }}
-          >
-            <PlaceInfoCard
-              place={activePlace as Place}
-              index={activeStopIndex as number}
-              saved={!!savedPlaceIds?.has((activePlace as Place).place_id)}
-              reviewSummary={reviewSummary}
-              routeMode={routeMode}
-              onClose={() => { setBubbleOpen(false); onPlaceCardClose?.() }}
-              onSave={onPlaceSave}
-              onRate={setRatePlace}
-              onRoute={onPlaceRoute}
+        {showBubble && activePlaceProp && popupPlace && (
+          <>
+            <PopupOnce
+              placeId={activePlaceProp.place_id}
+              position={{ lat: activePlaceProp.lat, lng: activePlaceProp.lng }}
             />
-          </InfoWindow>
+            <InfoWindow
+              key={activePlaceProp.place_id}
+              position={{ lat: activePlaceProp.lat, lng: activePlaceProp.lng }}
+              pixelOffset={[0, -46]}
+              headerDisabled
+              disableAutoPan
+              onCloseClick={() => { if (!skipMapClose.current) closeBubble() }}
+            >
+              <PlaceInfoCard
+                place={popupPlace}
+                index={activeStopIndex ?? 0}
+                saved={!!savedPlaceIds?.has(popupPlace.place_id)}
+                reviewSummary={reviewSummary}
+                routeMode={routeMode}
+                onClose={closeBubble}
+                onSave={onPlaceSave}
+                onRate={setRatePlace}
+                onRoute={onPlaceRoute}
+                onDetails={onPlaceFullDetails}
+              />
+            </InfoWindow>
+          </>
         )}
 
-        {routeDraw && routeDraw.path.length >= 2 && <VectorRouteLine path={routeDraw.path} mode={routeDraw.mode} />}
+        {shownRoute && shownRoute.path.length >= 2 && (
+          <VectorRouteLine
+            path={shownRoute.path}
+            mode={shownRoute.mode}
+            size={size}
+            origin={shownRoute.origin ?? userLocation}
+            destination={shownRoute.destination ?? (activePlaceProp ? { lat: activePlaceProp.lat, lng: activePlaceProp.lng } : null)}
+          />
+        )}
       </Map>
       )}
       {size === 'full' && (
@@ -2718,6 +3683,16 @@ function MapCanvas({
           {t('map.realisticFallback')}
         </div>
       )}
+      {(routeToast || modeNotice) && !shownRoute && (
+        <div className={`pointer-events-none absolute left-1/2 z-[60] flex w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 flex-col items-center gap-1 ${realisticNotice ? 'top-28' : 'top-16'}`}>
+          {routeToast && (
+            <p className="max-w-sm rounded-full bg-black/75 px-3 py-1 text-center text-[12px] text-white">{routeToast}</p>
+          )}
+          {modeNotice && (
+            <p className="rounded-full bg-black/70 px-3 py-1 text-[12px] text-white">{t('map.modeUnavailable')}</p>
+          )}
+        </div>
+      )}
       {showUserLocation && !userLocation && onRequestLocation && (
         <button
           type="button"
@@ -2728,9 +3703,9 @@ function MapCanvas({
           {locationPending ? t('map.locating') : t('map.enableLocation')}
         </button>
       )}
-      {routeDraw && routeDraw.path.length >= 2 && (
-        <div className={`absolute left-1/2 z-[58] flex w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 flex-col items-center ${realisticNotice ? 'top-28' : 'top-16'}`}>
-          <div className="flex items-center gap-1">
+      {shownRoute && shownRoute.path.length >= 2 && (
+        <div data-map-pad="route" className={`absolute left-1/2 z-[58] flex w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 flex-col items-center ${realisticNotice ? 'top-28' : 'top-16'}`}>
+          <div className="flex flex-wrap items-center justify-center gap-1">
             <div
               role="group"
               aria-label={t('map.travelMode')}
@@ -2738,17 +3713,30 @@ function MapCanvas({
             >
               {TRAVEL_MODES.map((opt) => {
                 const active = routeMode === opt.id
+                const unavailable = (opt.id === 'TRANSIT' || opt.id === 'BICYCLE') && !!unavailableModes[opt.id]
                 const Icon = opt.icon
+                const label = unavailable ? `${t(opt.labelKey)} — ${t('map.modeUnavailable')}` : t(opt.labelKey)
                 return (
                   <button
                     key={opt.id}
                     type="button"
                     aria-pressed={active}
-                    title={t(opt.labelKey)}
-                    aria-label={t(opt.labelKey)}
-                    onClick={() => onRouteModeChange?.(opt.id)}
+                    aria-disabled={unavailable}
+                    title={label}
+                    aria-label={label}
+                    onClick={() => {
+                      if (unavailable) {
+                        setModeNotice(true)
+                        return
+                      }
+                      onRouteModeChange?.(opt.id)
+                    }}
                     className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-                      active ? 'bg-[#F56A00] text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/10'
+                      unavailable
+                        ? 'text-gray-400 opacity-45 dark:text-gray-500'
+                        : active
+                          ? 'bg-[#F56A00] text-white'
+                          : 'text-gray-600 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/10'
                     }`}
                   >
                     <Icon className="h-4 w-4" />
@@ -2762,40 +3750,99 @@ function MapCanvas({
             onClick={() => {
               const next = !routeDetailOpen
               setRouteDetailOpen(next)
-              if (!next || routeSteps || !routeDraw.origin || !routeDraw.destination) return
-              const origin = routeDraw.origin
-              const destination = routeDraw.destination
-              const mode = routeDraw.mode ?? routeMode
+              if (!next || routeSteps || !shownRoute.origin || !shownRoute.destination) return
+              const origin = shownRoute.origin
+              const destination = shownRoute.destination
+              const mode = shownRoute.mode ?? routeMode
               void fetch('/api/directions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ origin, destination, travelMode: routesTravelMode(mode) }),
+                body: JSON.stringify({
+                  origin: plainLatLng(origin),
+                  destination: plainLatLng(destination),
+                  travelMode: apiTravelMode(mode),
+                }),
               })
-                .then((res) => (res.ok ? res.json() : null))
-                .then((data: { steps?: RouteStep[] } | null) => {
+                .then(async (res) => {
+                  if (!res.ok) {
+                    console.warn('[directions] Step list request failed.', await directionsFailure(res))
+                    return null
+                  }
+                  return res.json() as Promise<DirectionsPayload>
+                })
+                .then((data) => {
                   setRouteSteps(Array.isArray(data?.steps) ? data.steps : [])
                 })
-                .catch(() => setRouteSteps([]))
+                .catch((err) => {
+                  console.warn('[directions] Step list request failed.', err instanceof Error ? err.message : '')
+                  setRouteSteps([])
+                })
             }}
             className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white/95 px-3.5 py-1.5 text-[13px] font-medium text-gray-900 shadow-[0_2px_12px_rgba(0,0,0,0.08)] backdrop-blur dark:border-white/10 dark:bg-[#15151a]/95 dark:text-gray-100"
           >
-            {routeMode === 'DRIVE' ? <Car className="h-3.5 w-3.5" aria-hidden /> : routeMode === 'BICYCLE' ? <Bike className="h-3.5 w-3.5" aria-hidden /> : <Footprints className="h-3.5 w-3.5" aria-hidden />}
-            {routeChipText({
-              ...routeDraw,
-              distance: routeInfo?.distance || routeDraw.distance,
-              duration: routeInfo?.duration || routeDraw.duration,
-            }, lang)}
+            {routeMode === 'DRIVE' ? <Car className="h-3.5 w-3.5" aria-hidden /> : routeMode === 'BICYCLE' ? <Bike className="h-3.5 w-3.5" aria-hidden /> : routeMode === 'TRANSIT' ? <Bus className="h-3.5 w-3.5" aria-hidden /> : <Footprints className="h-3.5 w-3.5" aria-hidden />}
+            {(() => {
+              const remainM = routeSnap.progress?.remainingM ?? shownRoute.distanceMeters
+              const remainS = routeSnap.progress
+                ? remainingSeconds(routeSnap.progress.remainingM, shownRoute.distanceMeters, shownRoute.durationSeconds, getNavFix()?.speed)
+                : shownRoute.durationSeconds
+              const pretty = (value: string) => (lang === 'fr' ? value.replace(/\./g, ',') : value)
+              const name = shownRoute.destinationName
+                ? `${t('map.routeTo').replace('{name}', shownRoute.destinationName)} · `
+                : ''
+              return `${name}${pretty(formatMeters(remainM))} · ${pretty(formatMillis(remainS * 1000))} · ${t('map.eta')} ${formatEtaClock(remainS, lang)}`
+            })()}
+          </button>
+          <button
+            type="button"
+            onClick={() => requestRouteRefit(true)}
+            className="inline-flex h-8 items-center rounded-full border border-gray-200 bg-white/95 px-3 text-[12px] font-medium text-gray-800 shadow-[0_2px_12px_rgba(0,0,0,0.08)] backdrop-blur dark:border-white/10 dark:bg-[#15151a]/95 dark:text-gray-100"
+          >
+            {t('map.recenter')}
           </button>
           </div>
-          {modeNotice && (
+          <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
+            {!routeSnap.arrived && (
+              <button type="button" onClick={() => { autoFrame = true; setFollow(true) }} className="inline-flex h-8 items-center rounded-full bg-[#1A73E8] px-3 text-[12px] font-medium text-white">
+                {t('map.startNav')}
+              </button>
+            )}
+            <button type="button" aria-pressed={follow} onClick={() => { autoFrame = true; setFollow((on) => !on) }} className={`inline-flex h-8 items-center rounded-full border px-3 text-[12px] font-medium ${follow ? 'border-[#1A73E8] bg-[#1A73E8]/10 text-[#1A73E8]' : 'border-gray-200 bg-white/95 text-gray-800 dark:border-white/10 dark:bg-[#15151a]/95 dark:text-gray-100'}`}>
+              {t('map.followMe')}
+            </button>
+            <button type="button" onClick={() => { endHeldRoute(); setFollow(false); onEndRoute?.() }} className="inline-flex h-8 items-center gap-1 rounded-full border border-gray-200 bg-white/95 px-3 text-[12px] font-medium text-gray-800 dark:border-white/10 dark:bg-[#15151a]/95 dark:text-gray-100">
+              <X className="h-3.5 w-3.5" aria-hidden />
+              {t('map.endRoute')}
+            </button>
+          </div>
+          {routeSnap.recalculating && (
+            <p className="mt-1 rounded-full bg-black/75 px-3 py-1 text-[12px] text-white">{t('map.recalculating')}</p>
+          )}
+          {routeSnap.arrived && (
+            <div className="mt-1 flex items-center gap-2 rounded-full bg-[#0F6E56] px-3 py-1.5 text-[12px] font-medium text-white">
+              <span>{t('map.arrived').replace('{name}', shownRoute.destinationName)}</span>
+              <button type="button" onClick={() => { endHeldRoute(); setFollow(false); onEndRoute?.() }} className="rounded-full bg-white/20 px-2 py-0.5">
+                {t('map.navDone')}
+              </button>
+            </div>
+          )}
+          {routeToast && (
+            <p className="mt-1 max-w-sm rounded-full bg-black/75 px-3 py-1 text-center text-[12px] text-white">{routeToast}</p>
+          )}
+          {modeNotice && !unavailableLabel && (
             <p className="mt-1 rounded-full bg-black/70 px-3 py-1 text-[12px] text-white">{t('map.modeUnavailable')}</p>
+          )}
+          {unavailableLabel && (
+            <p className="mt-1 rounded-full bg-black/70 px-3 py-1 text-[12px] text-white">
+              {unavailableLabel} — {t('map.modeUnavailable')}
+            </p>
           )}
           {routeDetailOpen && (
             <div className="mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-gray-200 bg-white/95 p-3 text-left shadow-[0_8px_24px_rgba(0,0,0,0.12)] backdrop-blur dark:border-white/10 dark:bg-[#15151a]/95">
               <p className="text-[12px] font-medium text-gray-900 dark:text-gray-100">{t('map.routeDetail')}</p>
-              {(routeDraw.steps?.length ? routeDraw.steps : routeSteps)?.length ? (
+              {(shownRoute.steps?.length ? shownRoute.steps : routeSteps)?.length ? (
                 <ol className="mt-2 flex flex-col gap-1.5">
-                  {(routeDraw.steps?.length ? routeDraw.steps : routeSteps)!.map((step, index) => (
+                  {(shownRoute.steps?.length ? shownRoute.steps : routeSteps)!.map((step, index) => (
                     <li key={`${step.instruction}-${index}`} className="text-[12px] leading-snug text-gray-700 dark:text-gray-200">
                       <span className="text-gray-400">{index + 1}. </span>
                       {step.instruction}
@@ -2815,38 +3862,45 @@ function MapCanvas({
           )}
         </div>
       )}
-      {onPlaceRoute && (
-        <div className={`pointer-events-none absolute z-[58] flex flex-col items-end gap-2 ${isCompact ? 'bottom-36 right-3' : 'bottom-40 right-4 max-md:bottom-44'}`}>
-          {routeHint && (
-            <div className="pointer-events-none max-w-[14rem] rounded-xl border border-gray-200 bg-white/95 px-3 py-1.5 text-[12px] text-gray-800 shadow-md dark:border-white/10 dark:bg-[#15151a]/95 dark:text-gray-100">
-              {t('map.routeNeedPlace')}
-            </div>
-          )}
-          <button
-            type="button"
-            aria-label={routePlaceIndex == null ? t('map.routeNeedPlace') : t('map.route')}
-            title={routePlaceIndex == null ? t('map.routeNeedPlace') : t('map.route')}
-            aria-disabled={routePlaceIndex == null}
-            onClick={() => {
-              if (routePlaceIndex == null) {
-                setRouteHint(true)
-                window.setTimeout(() => setRouteHint(false), 2500)
-                return
+      <MapControlColumn
+        showRotate={size === 'full' && !realistic && mapMode !== 'satellite'}
+        showZoom={!realistic}
+        onAddPlace={onAddPlace}
+        routeHint={routeHint ? t('map.askForPlace') : null}
+        chooserPlaces={chooserOpen ? chatPlaces : []}
+        onChoosePlace={(place) => {
+          setChooserOpen(false)
+          if (onNavigatePlace) onNavigatePlace(place)
+          else if (routePlaceIndex != null) onPlaceRoute?.(routePlaceIndex)
+        }}
+        userLocation={userLocation}
+        onArrow={() => {
+          const single = chatPlaces.length === 1 ? chatPlaces[0] : null
+          const named = activePlaceProp
+            ? {
+                place_id: activePlaceProp.place_id,
+                name: activePlaceProp.name,
+                address: '',
+                coordinates: { lat: activePlaceProp.lat, lng: activePlaceProp.lng },
+                categories: [] as string[],
               }
-              onPlaceRoute(routePlaceIndex)
-            }}
-            className={`pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border shadow-md backdrop-blur transition-colors motion-reduce:transition-none ${
-              routePlaceIndex == null
-                ? 'border-gray-200 bg-white/80 text-gray-400 dark:border-white/10 dark:bg-[#15151a]/80 dark:text-gray-500'
-                : 'border-gray-200 bg-white/95 text-[#1A73E8] hover:bg-gray-100 dark:border-white/10 dark:bg-[#15151a]/95 dark:text-[#8ab4f8] dark:hover:bg-white/10'
-            }`}
-          >
-            <Navigation className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-      {size === 'full' && !realistic && mapMode !== 'satellite' && <MapRotateControls />}
-      {!realistic && <MapZoomControls compact={isCompact} />}
+            : single
+          if (named) {
+            setChooserOpen(false)
+            if (onNavigatePlace) onNavigatePlace(named)
+            else if (routePlaceIndex != null) onPlaceRoute?.(routePlaceIndex)
+            return true
+          }
+          if (chatPlaces.length > 1) {
+            setChooserOpen((open) => !open)
+            return true
+          }
+          setChooserOpen(false)
+          setRouteHint(true)
+          window.setTimeout(() => setRouteHint(false), 2800)
+          return false
+        }}
+      />
       {onToggleCommunityLayer && (
         <CommunityLayerToggle on={communityLayerOn} onToggle={onToggleCommunityLayer} compact={isCompact} />
       )}
@@ -2978,7 +4032,7 @@ export function MapView({
           document.body,
         )}
         <div className="absolute inset-0">
-          <MapCanvas {...canvasProps} size={size} routeInfo={routeInfo} />
+          <MapCanvas {...canvasProps} size={size} routeInfo={routeInfo} onAddPlace={onAddPlace} />
         </div>
         {size === 'compact' && !isMobile && canvasProps.placeCardOpen && canvasProps.activeStopIndex != null && places[canvasProps.activeStopIndex] && (
           <div className="place-card-in absolute left-3 top-14 z-[80] w-[min(280px,calc(100%-1.5rem))] rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_18px_48px_rgba(0,0,0,0.38)]">
@@ -2992,16 +4046,6 @@ export function MapView({
               onRoute={canvasProps.onPlaceRoute}
             />
           </div>
-        )}
-        {onAddPlace && (
-          <button
-            type="button"
-            onClick={onAddPlace}
-            aria-label={t('add.open')}
-            className="absolute bottom-4 right-4 z-[60] flex h-12 w-12 items-center justify-center rounded-full bg-[#F56A00] text-white shadow-[0_10px_24px_-8px_rgba(245,106,0,0.8)] transition-transform hover:scale-105 hover:bg-terracotta"
-          >
-            <Plus className="h-5 w-5" />
-          </button>
         )}
       </div>
       {size === 'compact' && selectedPlace && !hideInlinePlaceCard && <PlaceDetailBox place={selectedPlace} />}

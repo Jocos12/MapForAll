@@ -32,10 +32,14 @@ type LiveTranscriptListener = (text: string) => void
 const activityListeners = new Set<ActivityListener>()
 const captionListeners = new Set<CaptionListener>()
 const liveTranscriptListeners = new Set<LiveTranscriptListener>()
+type VoiceAlertListener = (message: string, kind: 'warning' | 'error') => void
+const voiceAlertListeners = new Set<VoiceAlertListener>()
 let activityState: VoiceActivity = 'idle'
 let activityLevel = 0
 let currentCaption = ''
 let outputMeterStop: (() => void) | null = null
+/** After Gemini TTS fails once, skip remote TTS for this page session. */
+let geminiTtsAvailable: boolean | null = null
 
 /** Subscribe to voice activity (state + 0..1 audio level). Returns unsubscribe. */
 export function subscribeVoiceActivity(cb: ActivityListener): () => void {
@@ -53,6 +57,16 @@ export function subscribeVoiceCaptions(cb: CaptionListener): () => void {
 export function subscribeLiveTranscript(cb: LiveTranscriptListener): () => void {
   liveTranscriptListeners.add(cb)
   return () => { liveTranscriptListeners.delete(cb) }
+}
+
+/** UI warnings for TTS fallback / total failure (never silent in Voice mode). */
+export function subscribeVoiceAlert(cb: VoiceAlertListener): () => void {
+  voiceAlertListeners.add(cb)
+  return () => { voiceAlertListeners.delete(cb) }
+}
+
+function emitVoiceAlert(message: string, kind: 'warning' | 'error'): void {
+  voiceAlertListeners.forEach((l) => l(message, kind))
 }
 
 function emitLiveTranscript(text: string): void {
@@ -343,26 +357,30 @@ async function startGeminiRecording(lang: AppLang = 'fr'): Promise<Recorder> {
   }
 }
 
-async function speakWithBrowser(text: string): Promise<void> {
-  if (!('speechSynthesis' in window)) return
-  await new Promise<void>((resolve) => {
+async function speakWithBrowser(text: string): Promise<boolean> {
+  if (!('speechSynthesis' in window)) return false
+  return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = speechLangTag
     utterance.rate = 1
-    utterance.onend = () => {
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
       emitCaption('')
       emitActivity('idle', 0)
-      resolve()
+      resolve(ok)
     }
-    utterance.onerror = () => {
-      emitCaption('')
-      emitActivity('idle', 0)
-      resolve()
-    }
+    utterance.onend = () => finish(true)
+    utterance.onerror = () => finish(false)
     animateCaptions(text, Math.max(2000, text.length * 48))
     emitActivity('speaking', 0.35)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(utterance)
+    try {
+      window.speechSynthesis.cancel()
+      window.speechSynthesis.speak(utterance)
+    } catch {
+      finish(false)
+    }
   })
 }
 
@@ -528,9 +546,52 @@ export async function speakReply(userText: string, assistantMarkdown: string): P
   return speak(formatSpokenReply(userText, assistantMarkdown))
 }
 
-/** Speak text aloud via Gemini TTS (browser SpeechSynthesis as fallback). */
+async function playGeminiChunks(text: string): Promise<boolean> {
+  if (geminiTtsAvailable === false) return false
+  const chunks = chunkSpeakableText(text)
+  let spoken = ''
+  let playedAny = false
+  for (const chunk of chunks) {
+    if (speechCancelled) break
+    const res = await fetch('/api/voice/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: chunk }),
+    })
+    if (!res.ok) {
+      geminiTtsAvailable = false
+      try {
+        const body = (await res.json()) as { hint?: string; fallback?: string }
+        console.warn(
+          '[voice] Vertex/Gemini TTS unavailable → browser fallback',
+          body.hint ?? res.status,
+        )
+      } catch {
+        console.warn('[voice] Vertex/Gemini TTS unavailable → browser fallback', res.status)
+      }
+      break
+    }
+    const buf = await res.arrayBuffer()
+    if (buf.byteLength < 128) continue
+    geminiTtsAvailable = true
+    const blob = new Blob([buf], { type: 'audio/wav' })
+    spoken = `${spoken} ${chunk}`.trim()
+    playedAny = true
+    await playAudioBlob(blob, spoken)
+    if (speechCancelled) break
+  }
+  return playedAny
+}
+
+/**
+ * Speak text aloud via Gemini TTS, with Web Speech API as a hard fallback.
+ * Never fails silently in Voice mode — emits a voice alert if nothing can play.
+ */
 export async function speak(markdown: string): Promise<void> {
-  if (!isSpeechOutputSupported()) return
+  if (!isSpeechOutputSupported()) {
+    emitVoiceAlert('ttsUnavailable', 'error')
+    return
+  }
   const text = toSpeakable(markdown)
   if (!text) return
   cancelSpeech()
@@ -538,39 +599,66 @@ export async function speak(markdown: string): Promise<void> {
   speechPaused = false
 
   try {
-    const chunks = chunkSpeakableText(text)
-    let spoken = ''
-    let playedAny = false
-    for (const chunk of chunks) {
-      if (speechCancelled) break
-      const res = await fetch('/api/voice/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: chunk }),
-      })
-      if (!res.ok) continue
-      const buf = await res.arrayBuffer()
-      if (buf.byteLength < 128) continue
-      const blob = new Blob([buf], { type: 'audio/wav' })
-      spoken = `${spoken} ${chunk}`.trim()
-      playedAny = true
-      await playAudioBlob(blob, spoken)
-      if (speechCancelled) break
-    }
-    if (!speechCancelled && !playedAny) {
-      console.warn(
-        '[voice] Vertex/Gemini TTS unavailable — set GOOGLE_GENAI_USE_VERTEXAI=TRUE, ' +
-          'GOOGLE_CLOUD_PROJECT, and run: gcloud auth application-default login',
-      )
+    const playedGemini = await playGeminiChunks(text)
+    if (speechCancelled) return
+    if (playedGemini) return
+
+    console.warn('[voice] using browser SpeechSynthesis fallback')
+    emitVoiceAlert('ttsBrowserFallback', 'warning')
+    const ok = await speakWithBrowser(text)
+    if (!ok && !speechCancelled) {
+      console.error('[voice] browser SpeechSynthesis also failed')
+      emitVoiceAlert('ttsUnavailable', 'error')
     }
   } catch (err) {
     console.warn('[voice] TTS request failed:', err)
+    if (speechCancelled) return
+    console.warn('[voice] using browser SpeechSynthesis fallback after error')
+    emitVoiceAlert('ttsBrowserFallback', 'warning')
+    const ok = await speakWithBrowser(text)
+    if (!ok && !speechCancelled) emitVoiceAlert('ttsUnavailable', 'error')
   } finally {
     if (!speechCancelled && !speechPaused) {
       emitCaption('')
       emitActivity('idle', 0)
     }
   }
+}
+
+/** Append spoken text after the current utterance finishes (progressive TTS). */
+let speakQueue: Promise<void> = Promise.resolve()
+
+export function enqueueSpeak(markdown: string): Promise<void> {
+  const text = toSpeakable(markdown)
+  if (!text) return speakQueue
+  speakQueue = speakQueue.then(async () => {
+    if (speechCancelled) return
+    speechCancelled = false
+    speechPaused = false
+    try {
+      const playedGemini = await playGeminiChunks(text)
+      if (speechCancelled || playedGemini) return
+      console.warn('[voice] enqueueSpeak → browser SpeechSynthesis fallback')
+      emitVoiceAlert('ttsBrowserFallback', 'warning')
+      const ok = await speakWithBrowser(text)
+      if (!ok && !speechCancelled) emitVoiceAlert('ttsUnavailable', 'error')
+    } catch (err) {
+      console.warn('[voice] enqueueSpeak failed:', err)
+      if (!speechCancelled) {
+        const ok = await speakWithBrowser(text)
+        if (!ok) emitVoiceAlert('ttsUnavailable', 'error')
+      }
+    }
+  })
+  return speakQueue
+}
+
+/** Reset the progressive speak queue (call when starting a new reply). */
+export function resetSpeakQueue(): void {
+  cancelSpeech()
+  speechCancelled = false
+  speechPaused = false
+  speakQueue = Promise.resolve()
 }
 
 /** Pause Hodari's speech without cancelling the session or losing context. */
@@ -620,6 +708,9 @@ export function cancelSpeech(): void {
   if (currentAudio) {
     try { currentAudio.pause() } catch { /* noop */ }
     currentAudio = null
+  }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel() } catch { /* noop */ }
   }
   playbackCancelResolve?.()
   playbackCancelResolve = null

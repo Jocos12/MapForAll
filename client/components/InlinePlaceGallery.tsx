@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { ExternalLink, Globe, Star, X } from 'lucide-react'
+import { Globe, Star, X } from 'lucide-react'
 import type { Place } from '@/lib/types'
+import { dedupePlaces, placeKey } from '@/lib/placeDedupe'
+import { MapsChooser } from './MapsChooser'
 import { PlaceBadges } from './PlaceBadges'
 import { PlaceImage } from './PlaceImage'
 
@@ -10,17 +12,9 @@ interface Props {
   places: Place[]
   /** Opens the in-app details panel (photos lightbox, hours, website, phone). */
   onDetails?: (place: Place) => void
-}
-
-function mapsLink(place: Place): string | null {
-  if (place.maps_url) return place.maps_url
-  if (place.place_id && !place.place_id.startsWith('__')) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}&query_place_id=${encodeURIComponent(place.place_id)}`
-  }
-  if (place.coordinates) {
-    return `https://www.google.com/maps/search/?api=1&query=${place.coordinates.lat},${place.coordinates.lng}`
-  }
-  return null
+  /** Center the in-app map on this place. */
+  onFocusPlace?: (place: Place) => void
+  activePlaceId?: string | null
 }
 
 /**
@@ -28,12 +22,13 @@ function mapsLink(place: Place): string | null {
  * Unlike the map's bottom strip these don't slide in or live on the right — they
  * stay attached to the message so the images are always there on scroll-back.
  */
-export function InlinePlaceGallery({ places, onDetails }: Props) {
-  if (!places?.length) return null
+export function InlinePlaceGallery({ places, onDetails, onFocusPlace, activePlaceId }: Props) {
+  const unique = dedupePlaces(places)
+  if (!unique.length) return null
 
   // Past ~4 cards (2 rows on desktop) cap the height and let it scroll
   // vertically (up/down) so the gallery doesn't push the chat down endlessly.
-  const scrolls = places.length > 4
+  const scrolls = unique.length > 4
 
   return (
     <div
@@ -41,12 +36,13 @@ export function InlinePlaceGallery({ places, onDetails }: Props) {
         scrolls ? 'chat-scroll max-h-[58vh] overflow-y-auto pr-1' : ''
       }`}
     >
-      {places.map((place, i) => {
-        const href = mapsLink(place)
+      {unique.map((place) => {
         return (
           <div
-            key={`${place.place_id || place.name}-${i}`}
-            className="group overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-header)] shadow-[0_1px_8px_rgba(0,0,0,0.05)] transition-colors hover:border-[#F56A00]/40 dark:shadow-[0_1px_8px_rgba(0,0,0,0.4)]"
+            key={placeKey(place)}
+            className={`group overflow-hidden rounded-xl border bg-[var(--bg-header)] shadow-[0_1px_8px_rgba(0,0,0,0.05)] transition-colors hover:border-[#F56A00]/40 dark:shadow-[0_1px_8px_rgba(0,0,0,0.4)] ${
+              activePlaceId && place.place_id === activePlaceId ? 'border-[#F56A00] ring-2 ring-[#F56A00]/50' : 'border-[var(--border)]'
+            }`}
           >
             <div className="block w-full text-left">
               <GalleryPhoto place={place} />
@@ -95,18 +91,11 @@ export function InlinePlaceGallery({ places, onDetails }: Props) {
                   Site
                 </a>
               )}
-              {href && (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Maps
-                </a>
-              )}
+              <MapsChooser
+                place={place}
+                onViewInApp={onFocusPlace}
+                buttonClassName="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
+              />
             </div>
           </div>
         )

@@ -12,25 +12,39 @@
  * that cannot use node:crypto — this project's middleware runs with
  * `runtime: 'nodejs'`.
  */
-import crypto from 'node:crypto'
 import type { NextRequest } from 'next/server'
-import { extractDocs, mcpCall, mcpConnected } from '@/lib/mcp'
+import { extractDocs, isMcpUnavailable, mcpCall, mcpConnected } from '@/lib/mcp'
+import {
+  classifyCookie,
+  encodeSession,
+  idleWindowMs,
+  verifySession,
+  SESSION_IDLE_SEC,
+  type CookieReason,
+  type SessionPayload,
+} from '@/lib/sessionRules'
 
-const SECRET = process.env.HODARI_SESSION_SECRET ?? ''
+export {
+  classifyCookie,
+  idleWindowMs,
+  sessionExpired,
+  signSession,
+  verifySession,
+  ADMIN_IDLE_MS,
+  OWNER_IDLE_MS,
+  SESSION_IDLE_SEC,
+  SESSION_MAX_AGE,
+} from '@/lib/sessionRules'
+export type { CookieReason, CookieVerdict, SessionPayload } from '@/lib/sessionRules'
+
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
 export const SESSION_COOKIE = 'hodari_session'
-/** Absolute lifetime: even an active session must sign in again after this. */
-export const SESSION_MAX_AGE = 60 * 60 * 24 * 30 // 30 days, seconds
-/** Inactivity window from last_active_at / cookie `last`. */
-export const SESSION_IDLE_SEC = 60 * 60 * 24 * (
-  Number(process.env.HODARI_SESSION_IDLE_DAYS) > 0
-    ? Number(process.env.HODARI_SESSION_IDLE_DAYS)
-    : (Number(process.env.SESSION_INACTIVITY_DAYS) > 0 ? Number(process.env.SESSION_INACTIVITY_DAYS) : 7)
-)
-/** Cookie `last` is re-signed at most this often after a DB-validated request. */
-const REFRESH_AFTER_MS = 5 * 60 * 1000
-/** Persist last_active_at at most once per minute per user. */
+/** Extend lastSeen at most once per minute. */
+const REFRESH_AFTER_MS = 60_000
 const TOUCH_THROTTLE_MS = 60_000
+/** Happy-path auth meta. A database outage may keep using it for five minutes. */
+const AUTH_FRESH_MS = 60_000
+const AUTH_STALE_MS = 5 * 60_000
 
 export function asId(value: unknown, field = 'id'): string {
   if (typeof value !== 'string') throw new Error(`Invalid ${field}`)
@@ -47,79 +61,6 @@ export function asIdOrNull(value: unknown): string | null {
   }
 }
 
-export interface SessionPayload {
-  uid: string
-  email?: string
-  /** token_version at issue time — must match the user document. */
-  tv: number
-  /** Only "session" tokens grant access; password step never issues one. */
-  scope: 'session'
-  iat: number
-  /** Last authenticated activity (ms). */
-  last?: number
-}
-
-function encode(payload: SessionPayload): string {
-  if (!SECRET) throw new Error('HODARI_SESSION_SECRET is not configured')
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  const sig = crypto.createHmac('sha256', SECRET).update(body).digest('base64url')
-  return `${body}.${sig}`
-}
-
-export function signSession(uid: string, email: string | undefined, tokenVersion: number): string {
-  const now = Date.now()
-  return encode({
-    uid,
-    email,
-    tv: Number.isFinite(tokenVersion) ? tokenVersion : 0,
-    scope: 'session',
-    iat: now,
-    last: now,
-  })
-}
-
-/**
- * Signature + shape + absolute/idle age from the cookie alone.
- * Does NOT check token_version in the database — use `resolveSession` for that.
- */
-export function verifySession(token: string | undefined | null): SessionPayload | null {
-  if (!token || !SECRET) return null
-  const dot = token.indexOf('.')
-  if (dot < 1) return null
-  const body = token.slice(0, dot)
-  const sig = token.slice(dot + 1)
-  const expected = crypto.createHmac('sha256', SECRET).update(body).digest('base64url')
-  const a = Buffer.from(sig)
-  const b = Buffer.from(expected)
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null
-  try {
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Partial<SessionPayload> & {
-      // Legacy cookies issued before tv/scope existed.
-      tv?: number
-      scope?: string
-    }
-    if (!payload.uid || typeof payload.uid !== 'string') return null
-    // Accept legacy tokens (no scope) as session with tv=0 so existing users
-    // are not locked out until their next sign-in; logout still bumps tv.
-    const scope = payload.scope === 'session' || payload.scope === undefined ? 'session' : null
-    if (scope !== 'session') return null
-    const now = Date.now()
-    if (typeof payload.iat !== 'number' || now - payload.iat > SESSION_MAX_AGE * 1000) return null
-    const last = typeof payload.last === 'number' ? payload.last : payload.iat
-    if (now - last > SESSION_IDLE_SEC * 1000) return null
-    return {
-      uid: payload.uid,
-      email: typeof payload.email === 'string' ? payload.email : undefined,
-      tv: typeof payload.tv === 'number' ? payload.tv : 0,
-      scope: 'session',
-      iat: payload.iat,
-      last,
-    }
-  } catch {
-    return null
-  }
-}
-
 /**
  * Re-sign with a fresher `last` only after the payload already passed
  * signature checks. Middleware must NOT call this for revoked tokens without
@@ -130,19 +71,55 @@ export function refreshSession(token: string | undefined | null): string | null 
   if (!payload) return null
   const now = Date.now()
   if (now - (payload.last ?? payload.iat) < REFRESH_AFTER_MS) return null
-  return encode({ ...payload, last: now })
+  return encodeSession({ ...payload, last: now, exp: now + idleWindowMs(payload.role) })
 }
 
 const lastTouched = new Map<string, number>()
 
-async function loadAuthMeta(userId: string): Promise<{ token_version: number; last_active_at: number | null } | null> {
+type AuthCacheEntry = {
+  uid: string
+  email?: string
+  tv: number
+  role: string | null
+  status: string
+  cachedAt: number
+}
+
+type AuthCache = Map<string, AuthCacheEntry>
+
+function authCache(): AuthCache {
+  const g = globalThis as typeof globalThis & { __hodariAuthCache?: AuthCache }
+  if (!g.__hodariAuthCache) g.__hodariAuthCache = new Map()
+  return g.__hodariAuthCache
+}
+
+function cacheKey(payload: SessionPayload): string {
+  return payload.sid ?? `${payload.uid}:${payload.tv}:${payload.iat}`
+}
+
+/** Drop cached auth for this user (logout, role change, suspension). */
+export function invalidateAuthCache(userId: string): void {
+  const cache = authCache()
+  for (const [key, entry] of cache) {
+    if (entry.uid === userId) cache.delete(key)
+  }
+}
+
+export class SessionUnavailableError extends Error {
+  constructor(reason: string) {
+    super(`MCP unavailable: ${reason}`)
+    this.name = 'SessionUnavailableError'
+  }
+}
+
+async function loadAuthMeta(userId: string): Promise<{ token_version: number; last_active_at: number | null; role: string | null; status: string } | null> {
   const sid = await mcpConnected()
   const docs = extractDocs(
     await mcpCall(sid, 'find', {
       database: DB,
       collection: 'users',
       filter: { user_id: userId },
-      projection: { token_version: 1, last_active_at: 1, user_id: 1 },
+      projection: { token_version: 1, last_active_at: 1, user_id: 1, role: 1, status: 1 },
       limit: 1,
     }),
   )
@@ -154,7 +131,12 @@ async function loadAuthMeta(userId: string): Promise<{ token_version: number; la
     const ms = Date.parse(doc.last_active_at)
     if (Number.isFinite(ms)) last = ms
   }
-  return { token_version: tv, last_active_at: last }
+  return {
+    token_version: tv,
+    last_active_at: last,
+    role: typeof doc.role === 'string' ? doc.role : null,
+    status: typeof doc.status === 'string' ? doc.status : 'active',
+  }
 }
 
 async function touchActive(userId: string, login = false): Promise<void> {
@@ -171,51 +153,147 @@ async function touchActive(userId: string, login = false): Promise<void> {
   })
 }
 
-export type ResolvedSession = { uid: string; email?: string; tv: number; refreshedCookie?: string }
+export type ResolvedSession = {
+  uid: string
+  email?: string
+  tv: number
+  role: string | null
+  refreshedCookie?: string
+}
+
+export type SessionVerdict =
+  | { ok: true; session: ResolvedSession }
+  | { ok: false; kind: 'auth'; reason: CookieReason }
+  | { ok: false; kind: 'infra'; reason: string }
+
+function refreshed(payload: SessionPayload, now: number): string | undefined {
+  if (now - (payload.last ?? payload.iat) < REFRESH_AFTER_MS) return undefined
+  return encodeSession({ ...payload, last: now, exp: now + idleWindowMs(payload.role) })
+}
+
+function fromCache(payload: SessionPayload, entry: AuthCacheEntry, now: number): SessionVerdict {
+  return {
+    ok: true,
+    session: {
+      uid: payload.uid,
+      email: payload.email ?? entry.email,
+      tv: payload.tv,
+      role: entry.role ?? payload.role ?? null,
+      refreshedCookie: refreshed(payload, now),
+    },
+  }
+}
 
 /**
- * Full session check for API routes and /api/auth/me:
- * signature + scope + token_version + inactivity (cookie and DB).
+ * Signature is checked first. A database failure never looks like expiry:
+ * a fresh cache is used, then a cache up to five minutes old, otherwise `infra`.
  */
-export async function resolveSessionToken(raw: string | undefined | null): Promise<ResolvedSession | null> {
-  const payload = verifySession(raw)
-  if (!payload) return null
-
-  let meta: { token_version: number; last_active_at: number | null } | null
-  try {
-    meta = await loadAuthMeta(payload.uid)
-  } catch (err) {
-    console.error('[session] loadAuthMeta failed', err)
-    return null
-  }
-  if (!meta) return null
-  if (payload.tv !== meta.token_version) return null
-
+export async function resolveSessionDetailed(raw: string | undefined | null): Promise<SessionVerdict> {
+  const cookie = classifyCookie(raw)
+  if (!cookie.ok) return { ok: false, kind: 'auth', reason: cookie.reason }
+  const payload = cookie.payload
   const now = Date.now()
-  if (meta.last_active_at != null && now - meta.last_active_at > SESSION_IDLE_SEC * 1000) return null
-
-  void touchActive(payload.uid).catch((err) => console.error('[session] touch', err))
-
-  let refreshedCookie: string | undefined
-  if (now - (payload.last ?? payload.iat) >= REFRESH_AFTER_MS) {
-    refreshedCookie = encode({ ...payload, last: now }) ?? undefined
+  const cached = authCache().get(cacheKey(payload))
+  if (cached && cached.tv === payload.tv && cached.uid === payload.uid && now - cached.cachedAt < AUTH_FRESH_MS) {
+    if (cached.status === 'suspended' || cached.status === 'deleted') {
+      return { ok: false, kind: 'auth', reason: 'revoked' }
+    }
+    void touchActive(payload.uid).catch((err) => console.error('[session] touch', err instanceof Error ? err.message : err))
+    return fromCache(payload, cached, now)
   }
 
-  return { uid: payload.uid, email: payload.email, tv: payload.tv, refreshedCookie }
+  try {
+    const meta = await loadAuthMeta(payload.uid)
+    if (!meta) return { ok: false, kind: 'auth', reason: 'revoked' }
+    if (payload.tv !== meta.token_version) {
+      invalidateAuthCache(payload.uid)
+      return { ok: false, kind: 'auth', reason: 'revoked' }
+    }
+    if (meta.status === 'suspended' || meta.status === 'deleted') {
+      invalidateAuthCache(payload.uid)
+      return { ok: false, kind: 'auth', reason: 'revoked' }
+    }
+    const role = meta.role ?? payload.role ?? null
+    const lastSeen = meta.last_active_at ?? payload.last ?? payload.iat
+    if (now - lastSeen > idleWindowMs(role)) return { ok: false, kind: 'auth', reason: 'expired' }
+    authCache().set(cacheKey(payload), {
+      uid: payload.uid,
+      email: payload.email,
+      tv: payload.tv,
+      role,
+      status: meta.status,
+      cachedAt: now,
+    })
+    void touchActive(payload.uid).catch((err) => console.error('[session] touch', err instanceof Error ? err.message : err))
+    return {
+      ok: true,
+      session: {
+        uid: payload.uid,
+        email: payload.email,
+        tv: payload.tv,
+        role,
+        refreshedCookie: refreshed({ ...payload, role: role ?? payload.role }, now),
+      },
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    console.error(`[session] infrastructure ${reason}`)
+    if (cached && cached.tv === payload.tv && cached.uid === payload.uid && now - cached.cachedAt < AUTH_STALE_MS) {
+      if (cached.status === 'suspended' || cached.status === 'deleted') {
+        return { ok: false, kind: 'auth', reason: 'revoked' }
+      }
+      return fromCache(payload, cached, now)
+    }
+    return { ok: false, kind: 'infra', reason }
+  }
+}
+
+export async function resolveSessionToken(raw: string | undefined | null): Promise<ResolvedSession | null> {
+  const verdict = await resolveSessionDetailed(raw)
+  if (verdict.ok) return verdict.session
+  if (verdict.kind === 'infra') throw new SessionUnavailableError(verdict.reason)
+  return null
 }
 
 export async function resolveSession(req: NextRequest): Promise<ResolvedSession | null> {
   return resolveSessionToken(req.cookies.get(SESSION_COOKIE)?.value)
 }
 
-/** Full auth check (signature + token_version + idle). Use on every protected API. */
-export async function getSession(req: NextRequest): Promise<{ uid: string; email?: string; refreshedCookie?: string } | null> {
-  const r = await resolveSession(req)
-  return r ? { uid: r.uid, email: r.email, refreshedCookie: r.refreshedCookie } : null
+/** Full auth check. Infrastructure failures throw {@link SessionUnavailableError} instead of looking logged out. */
+export async function getSession(req: NextRequest): Promise<{ uid: string; email?: string; role: string | null; refreshedCookie?: string } | null> {
+  const verdict = await resolveSessionDetailed(req.cookies.get(SESSION_COOKIE)?.value)
+  if (verdict.ok) return verdict.session
+  if (verdict.kind === 'infra') throw new SessionUnavailableError(verdict.reason)
+  if (verdict.reason !== 'missing') console.info(`[session] logout reason=${verdict.reason}`)
+  return null
 }
 
 export async function getSessionUser(req: NextRequest): Promise<string | null> {
-  return (await resolveSession(req))?.uid ?? null
+  return (await getSession(req))?.uid ?? null
+}
+
+/** Best-effort row so one browser's session can expire without touching another account. */
+export async function rememberSession(token: string): Promise<void> {
+  const verdict = classifyCookie(token)
+  if (!verdict.ok || !verdict.payload.sid) return
+  const payload = verdict.payload
+  try {
+    const sid = await mcpConnected()
+    await mcpCall(sid, 'insert-many', {
+      database: DB,
+      collection: 'sessions',
+      documents: [{
+        session_id: payload.sid,
+        user_id: payload.uid,
+        role: payload.role ?? 'client',
+        expires_at: new Date(payload.exp ?? Date.now() + idleWindowMs(payload.role)).toISOString(),
+        last_seen: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }],
+    })
+  } catch (err) {
+    if (!isMcpUnavailable(err)) console.error('[session] remember failed', err instanceof Error ? err.message : err)
+  }
 }
 
 export const SESSION_COOKIE_OPTS = {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { destinationFor, findUserById, getTokenVersion, touchUserActivity } from '@/lib/users'
 import { isMcpUnavailable } from '@/lib/mcp'
-import { SESSION_COOKIE, SESSION_COOKIE_OPTS, signSession } from '@/lib/session'
+import { rememberSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, signSession } from '@/lib/session'
 import { OTP_COOKIE, OTP_COOKIE_OPTS, verifyChallenge } from '@/lib/otp'
 
 export const runtime = 'nodejs'
@@ -52,7 +52,9 @@ export async function POST(req: NextRequest) {
       user: { user_id: user.user_id, name: user.name, email: user.email, role: user.role },
     })
     res.headers.set('Cache-Control', 'no-store')
-    res.cookies.set(SESSION_COOKIE, signSession(user.user_id, user.email, tv), SESSION_COOKIE_OPTS)
+    const token = signSession(user.user_id, user.email, tv, user.role)
+    void rememberSession(token)
+    res.cookies.set(SESSION_COOKIE, token, SESSION_COOKIE_OPTS)
     res.cookies.set(OTP_COOKIE, '', { ...OTP_COOKIE_OPTS, maxAge: 0 })
     return res
   } catch (err) {

@@ -74,10 +74,11 @@ from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps.app import App
 from .sub_agents.planner import planner_agent
-from .sub_agents.explorer import explorer_agent
+from .sub_agents.explorer import candidate_dedupe_agent, explorer_agent
 from .sub_agents.itinerary import itinerary_loop
 from .tools.map_control import map_control
 from .tools.maps_mcp import create_maps_toolset
+from .llm import on_model_error_callback, resolve_agent_model
 from .tools.community_mcp import community_mcp_enabled, create_community_toolset
 from .tools.fixtures import world_cup_venues
 from .tools.mongo_tools import load_user_profile, list_saved_places, plan_visit, save_place
@@ -104,12 +105,13 @@ def _context_cache_config() -> ContextCacheConfig | None:
 _pipeline = SequentialAgent(
     name="hodari_pipeline",
     description=(
-        "Find real places or build a routed itinerary. Auto-routes simple discovery "
-        "(e.g. 'find 4 restaurants near the stadium') vs full planning "
-        "('plan my afternoon', 'food tour with routes'). Call ONLY when the user wants "
-        "concrete recommendations right now. Do NOT call for greetings or casual chat."
+        "Find real places or build a routed itinerary. Call this immediately for a "
+        "category search, including 'the Hotel', 'a hotel', 'hotels', 'a university', "
+        "'a supermarket'. Those are categories around the user, not place names. "
+        "Also call it for follow-ups that only say 'near my location', 'closer', "
+        "'open now', 'cheaper', 'another one', or 'more'. Do NOT call for greetings."
     ),
-    sub_agents=[planner_agent, explorer_agent, itinerary_loop],
+    sub_agents=[planner_agent, explorer_agent, candidate_dedupe_agent, itinerary_loop],
 )
 
 ORCHESTRATOR_INSTRUCTION = """You are MapForAll (Ikarita ya Bose), a warm, knowledgeable companion for visitors in Kigali.
@@ -128,6 +130,16 @@ CRITICAL STYLE:
    Greetings, opinions, general knowledge, planning out loud, clarifying details, reacting to
    results, small talk. Answer directly from what you know and from this conversation.
    Do NOT call any tool here, not even load_user_profile. Tools are only for PLANNING.
+
+   EXCEPTION, always PLANNING, never a question:
+   A category word is a search even with "the", "a", or "an": hotel, restaurant, cafe,
+   supermarket, pharmacy, university, hospital, bank, market, burger ("the Hotel",
+   "a hotel", "hotels", "a university"). Call hodari_pipeline immediately. Do not ask
+   whether they mean a place named "The Hotel".
+   A follow-up that only changes the last search also calls hodari_pipeline again:
+   "near my location", "closer", "open now", "cheaper", "another one", "more".
+   Pass that follow-up through. Do not answer it from memory, and do not say nothing
+   was found before the tool returns.
 
 2) PLANNING.
    When the user wants real, grounded place recommendations or a routed plan right now.
@@ -149,21 +161,18 @@ CRITICAL STYLE:
 
 ═══ WHEN UNSURE, ASK ONE QUESTION (don't guess) ═══
 
-If a request is ambiguous, missing something important, or you are not confident what the user
-actually wants, ask ONE short, friendly clarifying question BEFORE acting — instead of guessing.
-Examples: an unclear or missing location ("near where?"), a vague "find me something" (food?
-sights? a hotel?), a place name that could match several spots, or any time two readings are
-plausible. A wrong full pipeline run wastes the user's time, tokens, and iterations, so one good
-question is far better than a confident wrong answer or piling on results they didn't ask for.
-Keep it to a single question, offer 2-3 concrete options when helpful, and don't interrogate — once
-the answer makes intent clear, proceed.
+Ask one short question only when the message has no category word, no specific place name,
+and no earlier search to continue. "the Hotel" and "a university" are categories, so search
+them. Do not ask "which hotel?" and do not ask "near where?" for a category search: the
+user's location is already used. A vague "find me something" with no category and no place
+name is the case for one question.
 
 ═══ PLANNING FLOW (only when you have decided to plan) ═══
 
 STEP 1 — Check you have the essentials.
-  A good plan needs at least a location (or "near me"), and ideally time available, budget, and any
-  food or accessibility needs. If the key ones are missing and the user hasn't implied them, ask ONE
-  brief question first instead of planning. Do not interrogate; one good question is enough.
+  A category search ("the Hotel", "a university") does not need a neighborhood. Call the pipeline.
+  A full itinerary still needs a rough area or "near me", plus time if they are planning a day.
+  If a plan is missing that and they have not implied it, ask ONE brief question. Do not interrogate.
 
 STEP 2 — Load profile:
   Call load_user_profile() (no arguments). Use it silently to shape the plan (do not read it back).
@@ -188,10 +197,13 @@ STEP 3 — Call the hodari_pipeline tool.
 
 STEP 4 — Present the result.
   If the tool result has intent_type LIST_DISCOVERY or a candidates array without stops/routes:
-    If candidates is empty and the result has a "say" field, answer with that sentence
-    in the user's language and stop. Do NOT fill the gap with another category
-    (no restaurants, markets, or supermarkets when they asked for hotels).
-    Present a numbered list of places with **bold** names, rating, price vibe, and one-line summary.
+    The `say` field IS the reply. Use it as your whole message (you may smooth grammar,
+    but stay in the user's language: English, French, or Kinyarwanda). It already names
+    only the ranked places. Do NOT add places, hotels, or a follow-up question.
+    If candidates is empty, use the say field, which offers to widen the radius. Do NOT
+    invent a neighborhood, and do NOT fill the gap with another category (no hotels when
+    they asked for tomatoes, no markets when they asked for hotels).
+    One sentence for the best match, then at most 3 bullets. No essay. No routes.
     Do NOT invent arrival times, walking legs, or a timed schedule unless the user asked to plan one.
     If a candidate has open_now set, mention whether it's open now; if the user wants somewhere
     right now, prefer open places and flag any that are currently closed. Never invent hours — only
@@ -501,14 +513,38 @@ if community_mcp_enabled():
         print(f"[hodari] community MCP disabled (toolset init failed): {exc}")
 
 root_agent = LlmAgent(
-    model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+    model=resolve_agent_model(),
     name="hodari",
     description="MapForAll (Ikarita ya Bose) — guide for accessible places and local businesses",
     instruction=_instruction,
     tools=_tools,
+    on_model_error_callback=on_model_error_callback,
 )
 
 _plugins = [create_profiling_plugin()] if profiling_enabled() else []
+
+
+def _warm_connections() -> None:
+    """Open the MongoDB MCP session once so the first search does not pay for it."""
+    import logging
+    import threading
+
+    def _run() -> None:
+        log = logging.getLogger("hodari.warmup")
+        try:
+            from .tools.mongo_tools import _init_session
+            _init_session()
+            log.info("warmup: MongoDB MCP session ready")
+        except Exception as exc:
+            log.info("warmup: skipped (%s)", exc)
+
+    if os.getenv("HODARI_WARMUP", "1") == "0" or "pytest" in sys.modules:
+        return
+    threading.Thread(target=_run, name="hodari-warmup", daemon=True).start()
+
+
+_warm_connections()
+
 app = App(
     name="hodari",
     root_agent=root_agent,

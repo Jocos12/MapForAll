@@ -1,14 +1,39 @@
 'use client'
 
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Camera, CheckCircle2, ChevronRight, KeyRound, Loader2, Lock, LogOut, Map as MapIcon, Plus, ShieldCheck, Store, Trash2, UserRound } from 'lucide-react'
+import { AvatarCropDialog, validateAvatarFile, type AvatarFileError } from '@/components/AvatarCropDialog'
 import { useI18n } from '@/components/I18nProvider'
 import { STATUS_DOT, statusKey } from '@/components/business/BusinessSection'
 import type { OwnedSummary, OwnerAccount } from '@/components/business/types'
 import { BIZ } from '@/components/business/ui'
-import { compressImage } from '@/lib/imageCompress'
+import { Avatar } from '@/components/ui/Avatar'
+import { publishAvatar } from '@/lib/avatarEvents'
 
 const AVATAR_CHARS = 90_000
+
+function AccountAvatar({ account, size }: { account: OwnerAccount | null; size: number }) {
+  const [src, setSrc] = useState(account?.avatar ?? null)
+  useEffect(() => setSrc(account?.avatar ?? null), [account?.avatar])
+  useEffect(() => {
+    const onLocal = (event: Event) => setSrc((event as CustomEvent<string | null>).detail)
+    window.addEventListener('hodari-avatar', onLocal)
+    let channel: BroadcastChannel | null = null
+    try {
+      channel = new BroadcastChannel('hodari-avatar')
+      channel.onmessage = (event) => setSrc(event.data?.url ?? null)
+    } catch { /* unsupported */ }
+    return () => {
+      window.removeEventListener('hodari-avatar', onLocal)
+      channel?.close()
+    }
+  }, [])
+  const name = account?.name || account?.email || '?'
+  const px = size >= 80 ? 'lg' : size >= 36 ? 'md' : 'sm'
+  return <Avatar src={src} name={name} seed={account?.userId || account?.email} size={px} className={size >= 80 ? '[&>span]:h-24 [&>span]:w-24' : undefined} />
+}
+
+export { AccountAvatar }
 
 function Notice({ ok, text }: { ok: boolean; text: string }) {
   if (!text) return null
@@ -20,27 +45,16 @@ function Notice({ ok, text }: { ok: boolean; text: string }) {
   )
 }
 
-function Avatar({ account, size }: { account: OwnerAccount | null; size: number }) {
-  const initial = (account?.name || account?.email || '?').slice(0, 1).toUpperCase()
-  return account?.avatar ? (
-    // eslint-disable-next-line @next/next/no-img-element -- data URL avatar
-    <img src={account.avatar} alt="" className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />
-  ) : (
-    <span className="flex shrink-0 items-center justify-center rounded-full bg-[#1A1614] font-display font-semibold text-white" style={{ width: size, height: size, fontSize: size * 0.4 }} aria-hidden>
-      {initial}
-    </span>
-  )
-}
-
-export { Avatar as AccountAvatar }
-
 function IdentityCard({ account, onSaved }: { account: OwnerAccount; onSaved: (next: OwnerAccount) => void }) {
   const { t } = useI18n()
   const [name, setName] = useState(account.name)
   const [phone, setPhone] = useState(account.phone)
   const [busy, setBusy] = useState<'save' | 'photo' | null>(null)
+  const [progress, setProgress] = useState(0)
+  const [cropFile, setCropFile] = useState<File | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string }>({ ok: true, text: '' })
   const fileRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
   const dirty = name.trim() !== account.name || phone.trim() !== account.phone
 
   async function send(body: Record<string, unknown>, kind: 'save' | 'photo') {
@@ -56,6 +70,7 @@ function IdentityCard({ account, onSaved }: { account: OwnerAccount; onSaved: (n
         return
       }
       onSaved(json.profile as OwnerAccount)
+      if ('avatar' in body) publishAvatar((json.profile as OwnerAccount).avatar)
       setName((json.profile as OwnerAccount).name)
       setPhone((json.profile as OwnerAccount).phone)
       setMessage({ ok: true, text: t(kind === 'photo' ? 'biz.profile.photoSaved' : 'biz.profile.saved') })
@@ -68,13 +83,25 @@ function IdentityCard({ account, onSaved }: { account: OwnerAccount; onSaved: (n
 
   async function onFile(file: File | undefined) {
     if (fileRef.current) fileRef.current.value = ''
+    if (cameraRef.current) cameraRef.current.value = ''
     if (!file) return
-    const url = await compressImage(file, AVATAR_CHARS)
-    if (!url) {
-      setMessage({ ok: false, text: t('biz.profile.errors.invalid_avatar') })
+    const problem = await validateAvatarFile(file)
+    if (problem) {
+      setMessage({ ok: false, text: t(`biz.profile.errors.${problem as AvatarFileError}`) })
       return
     }
-    await send({ avatar: url }, 'photo')
+    setCropFile(file)
+  }
+
+  async function saveCropped(dataUrl: string) {
+    setCropFile(null)
+    if (dataUrl.length > AVATAR_CHARS) {
+      setMessage({ ok: false, text: t('biz.profile.errors.too_large') })
+      return
+    }
+    setProgress(40)
+    await send({ avatar: dataUrl }, 'photo')
+    setProgress(100)
   }
 
   function submit(e: FormEvent) {
@@ -97,17 +124,29 @@ function IdentityCard({ account, onSaved }: { account: OwnerAccount; onSaved: (n
 
       <div className="mt-4 flex flex-col gap-5 sm:flex-row sm:items-start">
         <div className="flex shrink-0 flex-col items-center gap-3 sm:w-40">
-          <div className="relative">
-            <Avatar account={account} size={96} />
+          <div
+            className="relative"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              void onFile(e.dataTransfer.files?.[0])
+            }}
+          >
+            <AccountAvatar account={account} size={96} />
             {busy === 'photo' && (
-              <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-white"><Loader2 size={20} className="animate-spin" aria-hidden /></span>
+              <span className="absolute inset-0 flex flex-col items-center justify-center rounded-full bg-black/50 text-white">
+                <Loader2 size={20} className="animate-spin" aria-hidden />
+                <span className="mt-1 text-[11px]">{progress ? `${progress}%` : t('greet.uploading')}</span>
+              </span>
             )}
           </div>
-          <input ref={fileRef} type="file" accept="image/*" className="sr-only" id="profile-photo" onChange={(e) => void onFile(e.target.files?.[0])} />
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" id="profile-photo" onChange={(e) => void onFile(e.target.files?.[0])} />
+          <input ref={cameraRef} type="file" accept="image/*" capture="user" className="sr-only" id="profile-camera" onChange={(e) => void onFile(e.target.files?.[0])} />
           <div className="flex flex-wrap justify-center gap-1.5">
-            <label htmlFor="profile-photo" className={`${BIZ.secondary} h-9 cursor-pointer`}>
+            <label htmlFor="profile-photo" className={`${BIZ.secondary} h-11 cursor-pointer`}>
               <Camera size={14} aria-hidden />{t(account.avatar ? 'biz.profile.changePhoto' : 'biz.profile.addPhoto')}
             </label>
+            <label htmlFor="profile-camera" className={`${BIZ.secondary} h-11 cursor-pointer`}>{t('greet.camera')}</label>
             {account.avatar && (
               <button type="button" onClick={() => void send({ avatar: null }, 'photo')} disabled={!!busy} className={`${BIZ.secondary} h-9 w-9 px-0`} aria-label={t('biz.profile.removePhoto')} title={t('biz.profile.removePhoto')}>
                 <Trash2 size={14} aria-hidden />
@@ -151,6 +190,9 @@ function IdentityCard({ account, onSaved }: { account: OwnerAccount; onSaved: (n
         </form>
       </div>
       <Notice ok={message.ok} text={message.text} />
+      {cropFile && (
+        <AvatarCropDialog file={cropFile} onCancel={() => setCropFile(null)} onSave={(url) => void saveCropped(url)} />
+      )}
     </section>
   )
 }

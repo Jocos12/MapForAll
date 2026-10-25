@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { Greeting } from '@/components/Greeting'
 import { useI18n } from '@/components/I18nProvider'
 import { BizShell, isSection, type SectionId } from '@/components/business/BizShell'
 import type { BusinessFormValues } from '@/components/business/BusinessForm'
@@ -12,9 +13,11 @@ import { PromotionSection } from '@/components/business/PromotionSection'
 import { ReviewsSection } from '@/components/business/ReviewsSection'
 import { SettingsSection } from '@/components/business/SettingsSection'
 import { StatsSection } from '@/components/business/StatsSection'
+import { TeamSection } from '@/components/business/TeamSection'
 import { ProfileSection } from '@/components/business/ProfileSection'
 import { BizThemeProvider } from '@/components/business/theme'
 import { withPlace, type ListingTimeline, type OwnerAccount, type OwnerDashboard } from '@/components/business/types'
+import { clearLocalAuth } from '@/lib/authClient'
 import { BIZ, scrollBizTop } from '@/components/business/ui'
 
 const NO_TIMELINE: ListingTimeline = { createdAt: null, moderatedAt: null, resubmittedAt: null }
@@ -25,8 +28,8 @@ function anchorSection(anchor: string): SectionId {
 }
 
 /** After this long without an answer the skeleton gives way to a retry card. */
-const SLOW_MS = 5_000
-const ABORT_MS = 15_000
+const SLOW_MS = 8_000
+const ABORT_MS = 12_000
 
 function Skeleton() {
   const { t } = useI18n()
@@ -64,6 +67,7 @@ export default function BusinessDashboard() {
   const pendingAnchor = useRef<string | null>(null)
   const requested = useRef<string | null>(null)
   const loadSeq = useRef(0)
+  const dataRef = useRef<OwnerDashboard | null>(null)
 
   const load = useCallback(async (placeId: string | null) => {
     const seq = ++loadSeq.current
@@ -74,16 +78,19 @@ export default function BusinessDashboard() {
     const slowTimer = window.setTimeout(() => { if (current()) setSlow(true) }, SLOW_MS)
     const get = (url: string) => fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(ABORT_MS) })
     try {
-      let res = await get(withPlace('/api/business', placeId))
-      if (res.status === 403 && placeId) res = await get('/api/business')
+      const res = await get(withPlace('/api/business', placeId))
       const json = await res.json().catch(() => ({}))
       if (!current()) return
-      if (res.status === 401 || res.status === 403) {
-        router.replace('/login')
+      if (res.status === 401) {
+        router.replace('/login?expired=1')
+        return
+      }
+      if (res.status === 403) {
+        router.replace('/access-denied?area=business')
         return
       }
       if (!res.ok) {
-        setLoadError(res.status === 503 ? t('biz.load.unavailable') : json.error ?? t('auth.errors.generic'))
+        setLoadError(res.status === 503 || res.status >= 500 ? t('biz.load.reconnecting') : json.error ?? t('auth.errors.generic'))
         return
       }
       if (!json.place) {
@@ -101,6 +108,41 @@ export default function BusinessDashboard() {
       if (current()) setSlow(false)
     }
   }, [router, t])
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      const placeId = requested.current
+      void fetch(withPlace('/api/business?summary=1', placeId), { cache: 'no-store' })
+        .then((res) => res.ok ? res.json() : null)
+        .then((json) => {
+          const rows = Array.isArray(json?.places) ? json.places as Array<{ place_id: string; status: string; paused?: boolean }> : []
+          const current = dataRef.current?.place
+          if (!current) return
+          const row = rows.find((item) => item.place_id === current.place_id)
+          if (row && (row.status !== current.status || row.paused !== current.paused)) void load(placeId)
+        })
+        .catch(() => {})
+    }, 5000)
+    return () => window.clearInterval(id)
+  }, [load])
+
+  useEffect(() => {
+    void fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        const nextId = json?.user?.user_id
+        if (typeof nextId !== 'string') return
+        const prev = localStorage.getItem('hodari_uid')
+        if (prev && prev !== nextId) clearLocalAuth()
+        localStorage.setItem('hodari_uid', nextId)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -211,6 +253,7 @@ export default function BusinessDashboard() {
       section={section}
       onSection={go}
       places={data?.places ?? []}
+      placesLoading={!data && !loadError}
       activeId={activeId}
       onSwitch={switchPlace}
       status={place?.status ?? 'pending'}
@@ -221,8 +264,19 @@ export default function BusinessDashboard() {
       onLogout={() => void logout()}
     >
       <div className="mb-6">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-[#18181B] md:text-[30px]">{t(`biz.nav.${section}`)}</h1>
-        <p className="mt-1 text-[13.5px] text-[#52525B]">{t(`biz.sections.${section}`)}</p>
+        {section === 'overview' ? (
+          <Greeting
+            name={account?.name}
+            email={account?.email}
+            userId={account?.userId}
+            detail={data ? t('greet.views').replace('{n}', String(data.stats.views7)) : t(`biz.sections.${section}`)}
+          />
+        ) : (
+          <>
+            <h1 className="font-display text-[26px] font-semibold tracking-tight text-[#18181B] md:text-[30px]">{t(`biz.nav.${section}`)}</h1>
+            <p className="mt-1 text-[13.5px] text-[#52525B]">{t(`biz.sections.${section}`)}</p>
+          </>
+        )}
       </div>
 
       {!data && !loadError && !slow && needsData && (
@@ -289,6 +343,10 @@ export default function BusinessDashboard() {
             setData((prev) => prev && { ...prev, reviews: prev.reviews.map((row) => (row.key === key ? { ...row, reply } : row)) })
           }
         />
+      )}
+
+      {data && place && section === 'team' && (
+        <TeamSection placeId={place.place_id} placeName={place.name ?? ''} />
       )}
 
       {data && place && section === 'promotion' && (

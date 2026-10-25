@@ -393,6 +393,67 @@ export function placeRejectedEmail({
   }
 }
 
+const PLACE_CHANGES = {
+  fr: {
+    subject: 'Modifications demandées pour « {place} »',
+    preheader: 'Votre fiche a besoin d’une mise à jour avant publication.',
+    heading: 'Modifications demandées',
+    intro: 'Bonjour {name}, l’équipe a relu « {place} » et a besoin d’un changement avant de la publier.',
+    reasonTitle: 'Commentaire',
+    reasonEmpty: 'Merci de compléter la fiche.',
+    cta: 'Mettre à jour ma fiche',
+    footer: 'Vous recevez cet email car vous gérez ce lieu sur MapForAll.',
+  },
+  en: {
+    subject: 'Changes requested for “{place}”',
+    preheader: 'Your listing needs an update before it can be published.',
+    heading: 'Changes requested',
+    intro: 'Hello {name}, the team reviewed “{place}” and needs a change before publishing it.',
+    reasonTitle: 'Comment',
+    reasonEmpty: 'Please complete the listing.',
+    cta: 'Update my listing',
+    footer: 'You are receiving this email because you manage this place on MapForAll.',
+  },
+  rw: {
+    subject: 'Harasabwa impinduka kuri « {place} »',
+    preheader: 'Ifishi yawe isaba kuvugururwa mbere yo gutangazwa.',
+    heading: 'Harasabwa impinduka',
+    intro: 'Muraho {name}, itsinda ryasuzumye « {place} » kandi rikeneye impinduka mbere yo kuyitangaza.',
+    reasonTitle: 'Igitekerezo',
+    reasonEmpty: 'Nyamuneka uzuze ifishi.',
+    cta: 'Vugurura ifishi',
+    footer: 'Wakiriye iyi imeri kuko ucunga iri ahantu kuri MapForAll.',
+  },
+} satisfies Record<MailLang, Record<string, string>>
+
+export function placeChangesEmail({
+  name,
+  placeName,
+  reason,
+  lang,
+  appUrl,
+}: {
+  name: string
+  placeName: string
+  reason: string
+  lang: MailLang
+  appUrl: string
+}): MailContent {
+  const s = PLACE_CHANGES[lang]
+  const vars = { name, place: placeName }
+  const reasonLine = reason.trim() || s.reasonEmpty
+  const content = `
+      <h1 style="margin:0 0 12px;font-size:24px;line-height:1.25;font-weight:700;">${esc(fill(s.heading, vars))}</h1>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#3A2E28;">${esc(fill(s.intro, vars))}</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${INK};"><strong>${esc(s.reasonTitle)}:</strong> ${esc(reasonLine)}</p>
+      ${button(`${appUrl}/business/dashboard`, s.cta)}`
+  return {
+    subject: fill(s.subject, vars),
+    html: layout({ lang, preheader: s.preheader, content, footer: s.footer }),
+    text: [fill(s.intro, vars), '', `${s.reasonTitle}: ${reasonLine}`, '', s.footer].join('\n'),
+  }
+}
+
 export function otpEmail({ name, code, lang, minutes }: { name: string; code: string; lang: MailLang; minutes: number }): MailContent {
   const s = OTP[lang]
   const vars = { name, code, minutes: String(minutes) }

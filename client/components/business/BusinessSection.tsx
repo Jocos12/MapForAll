@@ -8,19 +8,22 @@ import { DangerZone } from '@/components/business/DangerZone'
 import { ListingPreview } from '@/components/business/ListingPreview'
 import type { OwnedSummary, OwnerDashboard } from '@/components/business/types'
 import { BIZ } from '@/components/business/ui'
+import { ownerBadge, type OwnerBadge } from '@/lib/listingLifecycle'
 
 const MAX_OWNED = 5
 
-export function statusKey(row: Pick<OwnedSummary, 'status' | 'paused'>): 'paused' | 'validated' | 'rejected' | 'pending' {
-  if (row.paused) return 'paused'
-  return row.status === 'validated' || row.status === 'rejected' ? row.status : 'pending'
+export function statusKey(row: Pick<OwnedSummary, 'status' | 'paused'>): OwnerBadge {
+  return ownerBadge(row.status, row.paused)
 }
 
-export const STATUS_DOT: Record<ReturnType<typeof statusKey>, string> = {
+export const STATUS_DOT: Record<OwnerBadge, string> = {
   validated: 'bg-[#2E8B57]',
-  pending: 'bg-[#E0A800]',
+  in_review: 'bg-[#E0A800]',
+  draft: 'bg-[#A1A1AA]',
+  changes_requested: 'bg-[#C2410C]',
   rejected: 'bg-[#DC2626]',
   paused: 'bg-[#71717A]',
+  archived: 'bg-[#71717A]',
 }
 
 interface Props {

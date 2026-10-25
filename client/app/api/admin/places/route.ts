@@ -7,6 +7,7 @@ import {
   computeDuplicateHints,
   matchesFilters,
   sortPlaces,
+  placeStatus,
   toAdminPlace,
   withPhotoProxy,
   type PlacesListQuery,
@@ -14,6 +15,9 @@ import {
 import { linkValidatedOwner, notifyAuthorModeration } from '@/lib/adminPlaceModeration'
 import { writeAudit } from '@/lib/audit'
 import { asId } from '@/lib/session'
+import { chooseKeeper, mergedKeeperPatch } from '@/lib/listingMerge'
+import { invalidatePrefix, ttlGet, ttlSet } from '@/lib/ttlCache'
+import { logSpan } from '@/lib/devTiming'
 
 export const runtime = 'nodejs'
 
@@ -34,8 +38,9 @@ const ListQuery = z.object({
 const ModerateSingle = z.object({
   place_id: z.string().min(1).max(200),
   status: z.enum(['validated', 'rejected']),
-  reason: z.string().max(280).optional().default(''),
+  reason: z.string().max(500).optional().default(''),
   action: z.enum(['request_changes', 'merge']).optional(),
+  merge_into: z.string().min(1).max(200).optional(),
 })
 
 const ModerateBulk = z.object({
@@ -57,7 +62,16 @@ const AdminCreateBody = z.object({
   status: z.enum(['pending', 'validated']).optional().default('validated'),
 })
 
-const PostBody = z.union([ModerateBulk, ModerateSingle, AdminCreateBody])
+const PlaceOp = z.object({
+  op: z.enum(['delete', 'restore', 'pause', 'unpause', 'revert']),
+  place_id: z.string().min(1).max(200),
+  confirm: z.string().max(200).optional(),
+  forever: z.boolean().optional(),
+  override: z.boolean().optional(),
+  status: z.string().max(40).optional(),
+})
+
+const PostBody = z.union([PlaceOp, ModerateBulk, ModerateSingle, AdminCreateBody])
 
 function appOrigin(req: NextRequest): string {
   const env = process.env.NEXT_PUBLIC_APP_URL?.trim()
@@ -72,9 +86,30 @@ async function loadRawPlaces(sid: string, filter: Record<string, unknown> = {}):
     filter,
     projection: { photos: 0 },
     sort: { created_at: -1 },
-    limit: 800,
+    limit: 2000,
   })
   return extractDocs(texts)
+}
+
+function statusTotals(rows: Record<string, unknown>[]) {
+  const totals = {
+    all: 0, validated: 0, pending: 0, in_review: 0, changes_requested: 0,
+    rejected: 0, paused: 0, archived: 0, draft: 0, deleted: 0,
+  }
+  for (const row of rows) {
+    const status = placeStatus(row)
+    if (status === 'deleted') totals.deleted += 1
+    else if (status === 'archived') totals.archived += 1
+    else if (status === 'paused') totals.paused += 1
+    else if (status === 'pending') totals.pending += 1
+    else if (status === 'in_review' || status === 'submitted') totals.in_review += 1
+    else if (status === 'changes_requested') totals.changes_requested += 1
+    else if (status === 'rejected') totals.rejected += 1
+    else if (status === 'draft') totals.draft += 1
+    else totals.validated += 1
+    if (status !== 'deleted' && status !== 'archived') totals.all += 1
+  }
+  return totals
 }
 
 function buildPlaceMongoFilter(q: {
@@ -85,15 +120,7 @@ function buildPlaceMongoFilter(q: {
   accessible?: string
 }): Record<string, unknown> {
   const filter: Record<string, unknown> = {}
-  if (q.status === 'pending') filter.status = 'pending'
-  else if (q.status === 'rejected') filter.status = 'rejected'
-  else if (q.status === 'archived') filter.archived = true
-  else if (q.status === 'validated') {
-    filter.$or = [{ status: 'validated' }, { status: { $exists: false } }, { status: null }]
-    filter.archived = { $ne: true }
-  } else {
-    filter.archived = { $ne: true }
-  }
+  if (q.status !== 'deleted') filter.deleted_at = { $exists: false }
   if (q.category) filter.categories = q.category.toLowerCase()
   if (q.source) filter.source = q.source
   if (q.local === '1') filter.local_business = true
@@ -109,6 +136,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid query.', details: parsed.error.flatten() }, { status: 400 })
   }
   const q = parsed.data
+  const started = Date.now()
+  const cacheKey = `admin:places:${req.nextUrl.searchParams.toString()}`
+  const cached = ttlGet<Record<string, unknown>>(cacheKey)
+  if (cached) {
+    const hit = NextResponse.json(cached)
+    hit.headers.set('Cache-Control', 'private, max-age=15')
+    logSpan('api', 'admin.places', Date.now() - started)
+    return withSessionRefresh(hit, gate.refreshedCookie)
+  }
   try {
     const sid = await mcpConnected()
     const mongoFilter = buildPlaceMongoFilter({
@@ -131,6 +167,7 @@ export async function GET(req: NextRequest) {
       page: q.page,
       limit: q.limit,
     }
+    const counted = raw.filter((doc) => matchesFilters(doc, { ...listQuery, status: undefined, includeHidden: true }))
     const filtered = raw.filter((doc) => matchesFilters(doc, listQuery))
     const itemsAll = filtered
       .map(toAdminPlace)
@@ -142,8 +179,12 @@ export async function GET(req: NextRequest) {
     const items = itemsAll.slice(start, start + q.limit)
     const idSet = new Set(items.map((p) => p.place_id))
     const duplicatesHints = computeDuplicateHints(raw, idSet)
-    const res = NextResponse.json({ items, total, page: q.page, duplicatesHints })
+    const totals = statusTotals(counted)
+    const body = { items, total, page: q.page, duplicatesHints, totals }
+    ttlSet(cacheKey, body, 15_000)
+    const res = NextResponse.json(body)
     res.headers.set('Cache-Control', 'private, max-age=20')
+    logSpan('api', 'admin.places', Date.now() - started)
     return withSessionRefresh(res, gate.refreshedCookie)
   } catch (err) {
     if (isMcpUnavailable(err)) return NextResponse.json({ error: 'Database unavailable' }, { status: 503 })
@@ -159,12 +200,70 @@ async function moderateOne(
   status: 'validated' | 'rejected',
   reason: string,
   action?: 'request_changes' | 'merge',
+  mergeInto?: string,
 ) {
   const existing = extractDocs(
     await mcpCall(sid, 'find', { database: DB, collection: 'places', filter: { place_id: placeId }, limit: 1 }),
   )[0]
   if (!existing) return { ok: false as const, status: 404, error: 'Place not found.' }
-  const effectiveStatus = action === 'request_changes' && status === 'rejected' ? 'pending' : status
+  if (existing.deleted_at || existing.status === 'deleted') {
+    return { ok: false as const, status: 409, error: 'This place is deleted.' }
+  }
+  const comment = reason.trim()
+  if ((action === 'request_changes' || (status === 'rejected' && action !== 'merge')) && comment.length < 3) {
+    return { ok: false as const, status: 400, error: 'A comment is required.' }
+  }
+
+  if (action === 'merge') {
+    const targetId = mergeInto || ''
+    if (!targetId || targetId === placeId) return { ok: false as const, status: 400, error: 'Choose the listing to keep.' }
+    const other = extractDocs(
+      await mcpCall(sid, 'find', { database: DB, collection: 'places', filter: { place_id: targetId }, limit: 1 }),
+    )[0]
+    if (!other) return { ok: false as const, status: 404, error: 'Place not found.' }
+    const { keeper, loser } = chooseKeeper(existing, other)
+    const keeperId = String(keeper.place_id)
+    const loserId = String(loser.place_id)
+    await mcpCall(sid, 'update-many', {
+      database: DB,
+      collection: 'places',
+      filter: { place_id: keeperId },
+      update: { $set: mergedKeeperPatch(keeper, loser) },
+    })
+    await mcpCall(sid, 'update-many', {
+      database: DB,
+      collection: 'places',
+      filter: { place_id: loserId },
+      update: {
+        $set: {
+          status: 'archived',
+          archived: true,
+          paused: true,
+          redirect_place_id: keeperId,
+          moderated_at: new Date().toISOString(),
+          moderated_by: gate.actor.uid,
+        },
+      },
+    })
+    await mcpCall(sid, 'update-many', {
+      database: DB,
+      collection: 'reviews',
+      filter: { placeId: loserId },
+      update: { $set: { placeId: keeperId } },
+    }).catch(() => [])
+    invalidatePrefix('places:')
+    await writeAudit({
+      actor: gate.actor,
+      action: 'place.merge',
+      targetType: 'place',
+      targetId: keeperId,
+      before: { status: existing.status, loser: loserId },
+      after: { status: keeper.status ?? 'validated', redirect_place_id: keeperId, reason: comment },
+    })
+    return { ok: true as const, place_id: placeId, status: 'archived', kept: keeperId }
+  }
+
+  const effectiveStatus = action === 'request_changes' ? 'changes_requested' : status
   await mcpCall(sid, 'update-many', {
     database: DB,
     collection: 'places',
@@ -172,33 +271,135 @@ async function moderateOne(
     update: {
       $set: {
         status: effectiveStatus,
-        rejection_reason: status === 'rejected' ? reason : '',
+        paused: false,
+        rejection_reason: effectiveStatus === 'validated' ? '' : comment,
         moderated_at: new Date().toISOString(),
         moderated_by: gate.actor.uid,
-        ...(action === 'merge' ? { merge_note: reason || 'merge_requested' } : {}),
+        ...(effectiveStatus === 'validated'
+          ? { validated_at: new Date().toISOString(), validated_by: gate.actor.uid }
+          : {}),
       },
     },
   })
-  if (status === 'validated') await linkValidatedOwner(placeId, existing)
-  if (status === 'validated' || status === 'rejected') {
-    const placeName = typeof existing.name === 'string' ? existing.name : placeId
+  invalidatePrefix('places:')
+  if (effectiveStatus === 'validated') await linkValidatedOwner(placeId, existing)
+  const placeName = typeof existing.name === 'string' ? existing.name : placeId
+  const addedBy = typeof existing.owner_id === 'string' ? existing.owner_id : typeof existing.added_by === 'string' ? existing.added_by : undefined
+  if (effectiveStatus === 'validated' || effectiveStatus === 'rejected' || effectiveStatus === 'changes_requested') {
     await notifyAuthorModeration({
-      addedBy: typeof existing.added_by === 'string' ? existing.added_by : undefined,
+      addedBy,
       placeName,
-      status,
-      reason,
+      status: effectiveStatus,
+      reason: comment,
       appUrl: appOrigin(req),
     })
   }
   await writeAudit({
     actor: gate.actor,
-    action: status === 'validated' ? 'place.validate' : 'place.reject',
+    action: effectiveStatus === 'validated' ? 'place.validate' : effectiveStatus === 'changes_requested' ? 'place.request_changes' : 'place.reject',
     targetType: 'place',
     targetId: placeId,
-    before: existing ? { status: existing.status } : null,
-    after: { status: effectiveStatus, reason, action: action ?? null },
+    before: { status: existing.status ?? null },
+    after: { status: effectiveStatus, reason: comment, action: action ?? null },
   })
   return { ok: true as const, place_id: placeId, status: effectiveStatus }
+}
+
+const REVERT_STATUSES = new Set(['draft', 'pending', 'submitted', 'in_review', 'validated', 'changes_requested', 'rejected', 'paused', 'archived'])
+
+async function handlePlaceOp(
+  gate: { actor: AdminActor },
+  body: { op: string; place_id: string; confirm?: string; forever?: boolean; override?: boolean; status?: string },
+) {
+  const sid = await mcpConnected()
+  const placeId = body.place_id
+  const existing = extractDocs(await mcpCall(sid, 'find', {
+    database: DB, collection: 'places', filter: { place_id: placeId }, limit: 1,
+  }))[0]
+  if (!existing) return NextResponse.json({ error: 'Place not found.' }, { status: 404 })
+  const name = typeof existing.name === 'string' ? existing.name : ''
+  const before = { status: existing.status ?? null, paused: existing.paused === true, deleted_at: existing.deleted_at ?? null }
+
+  if (body.op === 'delete') {
+    const confirm = (body.confirm ?? '').trim()
+    if (confirm !== name && confirm !== 'DELETE') {
+      return NextResponse.json({ error: 'Type the place name or DELETE to confirm.' }, { status: 400 })
+    }
+    const openReport = extractDocs(await mcpCall(sid, 'find', {
+      database: DB,
+      collection: 'place_reports',
+      filter: { place_id: placeId, status: { $in: ['open', 'pending'] } },
+      limit: 1,
+    }).catch(() => []))[0]
+    if ((openReport || existing.subscription_status === 'active') && !body.override) {
+      return NextResponse.json({ error: 'Open reports or an active subscription block deletion unless you override.', code: 'blocked' }, { status: 409 })
+    }
+    if (body.forever) {
+      if (gate.actor.role !== 'admin') return NextResponse.json({ error: 'Only an admin can delete forever.' }, { status: 403 })
+      await mcpCall(sid, 'delete-many', { database: DB, collection: 'places', filter: { place_id: placeId } })
+    } else {
+      await mcpCall(sid, 'update-many', {
+        database: DB,
+        collection: 'places',
+        filter: { place_id: placeId },
+        update: {
+          $set: {
+            status: 'deleted',
+            deleted_at: new Date().toISOString(),
+            deleted_by: gate.actor.uid,
+            previous_status: typeof existing.status === 'string' ? existing.status : 'validated',
+          },
+        },
+      })
+    }
+    invalidatePrefix('places:')
+    invalidatePrefix('admin:places')
+    await writeAudit({ actor: gate.actor, action: 'place.delete', targetType: 'place', targetId: placeId, before, after: { forever: !!body.forever }, meta: { reason: confirm } })
+    return NextResponse.json({ ok: true, status: 'deleted' })
+  }
+
+  if (body.op === 'restore') {
+    if (typeof existing.deleted_at !== 'string') return NextResponse.json({ error: 'This place is not deleted.' }, { status: 400 })
+    const age = Date.now() - Date.parse(existing.deleted_at)
+    if (Number.isFinite(age) && age > 30 * 86_400_000) {
+      return NextResponse.json({ error: 'The 30-day restore window has passed.' }, { status: 410 })
+    }
+    const status = typeof existing.previous_status === 'string' ? existing.previous_status : 'validated'
+    await mcpCall(sid, 'update-many', {
+      database: DB,
+      collection: 'places',
+      filter: { place_id: placeId },
+      update: { $set: { status }, $unset: { deleted_at: '', deleted_by: '' } },
+    })
+    invalidatePrefix('places:')
+    await writeAudit({ actor: gate.actor, action: 'place.update', targetType: 'place', targetId: placeId, before, after: { status, restored: true } })
+    return NextResponse.json({ ok: true, status })
+  }
+
+  if (body.op === 'pause' || body.op === 'unpause') {
+    const paused = body.op === 'pause'
+    await mcpCall(sid, 'update-many', {
+      database: DB, collection: 'places', filter: { place_id: placeId }, update: { $set: { paused } },
+    })
+    invalidatePrefix('places:')
+    await writeAudit({ actor: gate.actor, action: 'place.pause', targetType: 'place', targetId: placeId, before, after: { paused } })
+    return NextResponse.json({ ok: true, paused })
+  }
+
+  if (body.op === 'revert') {
+    const status = body.status ?? ''
+    if (!REVERT_STATUSES.has(status) || existing.deleted_at) {
+      return NextResponse.json({ error: 'That status change is not allowed.' }, { status: 409 })
+    }
+    await mcpCall(sid, 'update-many', {
+      database: DB, collection: 'places', filter: { place_id: placeId }, update: { $set: { status, paused: status === 'paused' } },
+    })
+    invalidatePrefix('places:')
+    await writeAudit({ actor: gate.actor, action: 'place.update', targetType: 'place', targetId: placeId, before, after: { status, undo: true } })
+    return NextResponse.json({ ok: true, status })
+  }
+
+  return NextResponse.json({ error: 'Unknown action.' }, { status: 400 })
 }
 
 export async function POST(req: NextRequest) {
@@ -209,6 +410,10 @@ export async function POST(req: NextRequest) {
   const parsed = PostBody.safeParse(raw)
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid payload.', details: parsed.error.flatten() }, { status: 400 })
+  }
+
+  if ('op' in parsed.data) {
+    return withSessionRefresh(await handlePlaceOp(gate, parsed.data), gate.refreshedCookie)
   }
 
   if ('create' in parsed.data && parsed.data.create) {
@@ -285,8 +490,8 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Missing place.' }, { status: 400 })
     }
-    const { status, reason, action } = parsed.data
-    const out = await moderateOne(sid, gate, req, placeId, status, reason ?? '', action)
+    const { status, reason, action, merge_into: mergeInto } = parsed.data
+    const out = await moderateOne(sid, gate, req, placeId, status, reason ?? '', action, mergeInto)
     if (!out.ok) return NextResponse.json({ error: out.error }, { status: out.status })
     const res = NextResponse.json({ ok: true, place_id: placeId, status: out.status })
     return withSessionRefresh(res, gate.refreshedCookie)

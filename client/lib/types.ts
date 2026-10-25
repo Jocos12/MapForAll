@@ -45,6 +45,12 @@ export interface Place {
   access_disputes?: number
   status?: string
   source?: string
+  /** Provenance after a catalog/Maps merge. Debugging only. */
+  sources?: string[]
+  google_place_id?: string
+  maps_place_id?: string
+  personalization_score?: number
+  user_ratings_total?: number
   added_by?: string
   confirmations_count?: number
   created_at?: string
@@ -106,6 +112,7 @@ export interface ChatMessage {
 export type StreamChunk =
   | { type: 'thinking'; agent: string; label: string }
   | { type: 'text'; text: string }
+  | { type: 'places'; places: Place[] }
   | { type: 'error' }
 
 export type Theme = 'dark' | 'light'

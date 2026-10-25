@@ -65,7 +65,7 @@ def test_local_bonus_outranks_equal_rating():
 def test_accessible_filter_drops_the_rest_and_still_bonuses():
     places = [
         _place("stairs", 4.9, local_business=True, accessible=False),
-        _place("ramp", 4.0, local_business=False, accessible=True),
+        _place("ramp", 4.0, local_business=False, accessible=True, categories=["cafe"]),
     ]
     ranked = rank_places(places, "coffee", limit=5, prefer_local=False, require_accessible=True)
     assert [p["place_id"] for p in ranked] == ["ramp"]

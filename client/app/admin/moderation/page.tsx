@@ -12,6 +12,7 @@ import { PLACE_CATEGORIES } from '@/lib/places'
 import { SECTOR_NAMES } from '@/lib/adminPlaces'
 import { useI18n } from '@/components/I18nProvider'
 import { useToast } from '@/components/ui/Toast'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 
 const AdminPlaceMiniMap = dynamic(
   () => import('@/components/admin/AdminPlaceMiniMap').then((m) => m.AdminPlaceMiniMap),
@@ -65,13 +66,13 @@ export default function AdminModerationPage() {
   }
 
   const moderate = useCallback(
-    async (ids: string[], status: 'validated' | 'rejected', action?: 'request_changes' | 'merge') => {
+    async (ids: string[], status: 'validated' | 'rejected', action?: 'request_changes' | 'merge', mergeInto?: string) => {
       if (!ids.length) return
       setBusy(true)
       try {
         const body =
           ids.length === 1
-            ? { place_id: ids[0], status, reason, action }
+            ? { place_id: ids[0], status, reason, action, merge_into: mergeInto }
             : { place_ids: ids, status, reason, action }
         const res = await fetch('/api/admin/places', {
           method: 'POST',
@@ -227,6 +228,7 @@ export default function AdminModerationPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  <AnimatePresence initial={false}>
                   {items.map((row) => (
                     <ModerationRow
                       key={row.place_id}
@@ -239,6 +241,7 @@ export default function AdminModerationPage() {
                       t={t}
                     />
                   ))}
+                  </AnimatePresence>
                 </tbody>
               </table>
             </div>
@@ -303,12 +306,46 @@ export default function AdminModerationPage() {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void moderate([focused.place_id], 'rejected', rejectPreset === 'incomplete' ? 'request_changes' : undefined)}
+                  onClick={() => {
+                    if (reason.trim().length < 3) {
+                      toast({ title: t('admin.moderation.reasonRequired'), tone: 'danger' })
+                      return
+                    }
+                    void moderate([focused.place_id], 'rejected', 'request_changes')
+                  }}
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-full border border-[#E8672A] px-3 py-2 text-[12px] font-medium text-[#C2410C] disabled:opacity-60"
+                >
+                  {t('admin.moderation.requestChanges')}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (reason.trim().length < 3) {
+                      toast({ title: t('admin.moderation.reasonRequired'), tone: 'danger' })
+                      return
+                    }
+                    void moderate([focused.place_id], 'rejected')
+                  }}
                   className="inline-flex flex-1 items-center justify-center gap-1 rounded-full bg-[#E8672A] px-3 py-2 text-[12px] font-medium text-white disabled:opacity-60"
                 >
                   <X size={14} /> {t('admin.reject')}
                 </button>
               </div>
+              {dupMap.get(focused.place_id) && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const target = dupMap.get(focused.place_id)?.matches[0]?.place_id
+                    if (!target) return
+                    void moderate([focused.place_id], 'rejected', 'merge', target)
+                  }}
+                  className="rounded-full border border-amber-500/40 px-3 py-2 text-[12px] font-medium text-amber-800 disabled:opacity-60"
+                >
+                  {t('admin.moderation.merge')}
+                </button>
+              )}
               {selected.size > 0 && (
                 <div className="border-t border-black/5 pt-3 dark:border-white/10">
                   <p className="mb-2 text-[12px] text-[#6E5B50]">{t('admin.moderation.bulkSelected').replace('{n}', String(selected.size))}</p>
@@ -324,7 +361,13 @@ export default function AdminModerationPage() {
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => void moderate([...selected], 'rejected')}
+                      onClick={() => {
+                        if (reason.trim().length < 3) {
+                          toast({ title: t('admin.moderation.reasonRequired'), tone: 'danger' })
+                          return
+                        }
+                        void moderate([...selected], 'rejected')
+                      }}
                       className="flex-1 rounded-full bg-[#E8672A] px-2 py-1.5 text-[11px] text-white disabled:opacity-60"
                     >
                       {t('admin.moderation.bulkReject')}
@@ -357,9 +400,14 @@ function ModerationRow({
   onFocus: () => void
   t: (k: string) => string
 }) {
+  const reduce = useReducedMotion()
   return (
-    <tr
-      className={`cursor-pointer border-b border-black/5 transition dark:border-white/5 ${active ? 'bg-[#E8672A]/8' : 'hover:bg-black/[0.02] dark:hover:bg-white/[0.03]'}`}
+    <motion.tr
+      initial={reduce ? false : { opacity: 0, x: 8 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={reduce ? undefined : { opacity: 0, x: 12 }}
+      transition={{ duration: reduce ? 0 : 0.2 }}
+      className={`cursor-pointer border-b border-black/5 dark:border-white/5 ${active ? 'bg-[#E8672A]/8' : 'hover:bg-black/[0.02] dark:hover:bg-white/[0.03]'}`}
       onClick={onFocus}
     >
       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
@@ -382,7 +430,7 @@ function ModerationRow({
       <td className="px-3 py-2 text-[#6E5B50] dark:text-white/55">{row.categories.join(', ')}</td>
       <td className="px-3 py-2 text-[#6E5B50] dark:text-white/55">{row.sector ?? '—'}</td>
       <td className="px-3 py-2 text-[#6E5B50] dark:text-white/55">{row.created_at?.slice(0, 10) ?? '—'}</td>
-    </tr>
+    </motion.tr>
   )
 }
 
@@ -402,6 +450,20 @@ function DetailPanel({
         <p className="mt-1 text-[12px] text-[#6E5B50] dark:text-white/55">{place.address}</p>
         <PlaceBadges place={place} className="mt-2" />
       </div>
+      <ul className="space-y-1 text-[12px]">
+        {([
+          ['name', place.name.trim().length >= 2],
+          ['category', place.categories.length > 0],
+          ['pin', Number.isFinite(place.coordinates.lat) && Number.isFinite(place.coordinates.lng)],
+          ['photos', Boolean(place.photo_url)],
+          ['duplicate', !duplicate],
+          ['spam', !/(https?:\/\/|www\.)/i.test(place.name)],
+        ] as const).map(([id, ok]) => (
+          <li key={id} className={ok ? 'text-[#1F6B43]' : 'text-[#B91C1C]'}>
+            {ok ? '✓' : '×'} {t(`biz.status.checks.${id}`)}
+          </li>
+        ))}
+      </ul>
       {duplicate && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px]">
           <p className="font-medium">{t('admin.moderation.duplicateTitle')}</p>

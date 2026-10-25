@@ -28,6 +28,11 @@ export function StatusBadge({
   const key = status || 'validated'
   const cfg: Record<string, { icon: LucideIcon; className: string }> = {
     pending: { icon: Clock, className: 'bg-amber-500/15 text-amber-800 dark:text-amber-300' },
+    submitted: { icon: Clock, className: 'bg-amber-500/15 text-amber-800 dark:text-amber-300' },
+    in_review: { icon: Clock, className: 'bg-amber-500/15 text-amber-800 dark:text-amber-300' },
+    changes_requested: { icon: Clock, className: 'bg-orange-500/15 text-orange-800 dark:text-orange-300' },
+    draft: { icon: Clock, className: 'bg-black/8 text-[#6E5B50] dark:bg-white/10 dark:text-white/55' },
+    paused: { icon: Clock, className: 'bg-black/8 text-[#6E5B50] dark:bg-white/10 dark:text-white/55' },
     validated: { icon: CheckCircle2, className: 'bg-[#1F8A5B]/12 text-[#1F8A5B]' },
     rejected: { icon: XCircle, className: 'bg-red-500/12 text-red-700 dark:text-red-400' },
     archived: { icon: Archive, className: 'bg-black/8 text-[#6E5B50] dark:bg-white/10 dark:text-white/55' },

@@ -1,5 +1,12 @@
-import os
+from typing import AsyncGenerator
+
 from google.adk.agents import LlmAgent
+from google.adk.agents.base_agent import BaseAgent
+from google.adk.agents.invocation_context import InvocationContext
+from google.adk.events import Event, EventActions
+
+from ..llm import on_model_error_callback, resolve_agent_model
+from ..tools.place_dedupe import rewrite_candidates_json
 from ..tools.maps_mcp import create_maps_toolset
 from ..tools.mongo_tools import find_similar_preferences
 from ..tools.places_tools import find_places_by_vector
@@ -83,7 +90,7 @@ Return ONLY a valid JSON array — no markdown fences, no commentary:
 """
 
 explorer_agent = LlmAgent(
-    model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+    model=resolve_agent_model(),
     name="explorer_agent",
     description="Finds 5-10 personalised candidate places via local vector DB + Maps + past user preferences.",
     instruction=EXPLORER_INSTRUCTION,
@@ -93,4 +100,22 @@ explorer_agent = LlmAgent(
         create_maps_toolset(tools=["search_places"]),
     ],
     output_key="candidates",
+    on_model_error_callback=on_model_error_callback,
 )
+
+
+class CandidateDedupe(BaseAgent):
+    """Collapse the same venue after the Explorer merges vector, Maps, and personalization."""
+
+    async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        raw = ctx.session.state.get("candidates")
+        cleaned = rewrite_candidates_json(raw, limit=10)
+        delta = {"candidates": cleaned} if cleaned else {}
+        yield Event(
+            author=self.name,
+            invocation_id=ctx.invocation_id,
+            actions=EventActions(state_delta=delta),
+        )
+
+
+candidate_dedupe_agent = CandidateDedupe(name="candidate_dedupe")

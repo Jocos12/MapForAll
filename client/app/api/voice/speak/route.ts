@@ -42,8 +42,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (!genaiConfigured()) {
-    console.warn('speak: Gemini not configured —', genaiMissingHint())
-    return NextResponse.json({ error: 'TTS not configured', fallback: 'browser' }, { status: 503 })
+    console.warn('[voice/speak] Vertex/Gemini TTS unavailable —', genaiMissingHint(), '→ client should use browser SpeechSynthesis')
+    return NextResponse.json(
+      {
+        error: 'TTS not configured',
+        fallback: 'browser',
+        hint: genaiMissingHint(),
+      },
+      { status: 503 },
+    )
   }
   let body: { text?: string; voice?: string }
   try {
@@ -70,7 +77,8 @@ export async function POST(req: NextRequest) {
 
     const audio = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData
     if (!audio?.data) {
-      return NextResponse.json({ error: 'No audio returned' }, { status: 502 })
+      console.warn('[voice/speak] No audio in Gemini response → fallback: browser')
+      return NextResponse.json({ error: 'No audio returned', fallback: 'browser' }, { status: 502 })
     }
     const pcm = Buffer.from(audio.data, 'base64')
     const wav = pcmToWav(pcm, rateFromMime(audio.mimeType ?? undefined))
@@ -82,7 +90,15 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (e) {
-    console.error('speak failed:', e)
-    return NextResponse.json({ error: 'Speech synthesis failed' }, { status: 502 })
+    console.error('[voice/speak] Vertex/Gemini TTS failed → fallback: browser —', e)
+    return NextResponse.json(
+      {
+        error: 'Speech synthesis failed',
+        fallback: 'browser',
+        hint:
+          'Set GOOGLE_GENAI_USE_VERTEXAI=TRUE, GOOGLE_CLOUD_PROJECT, and run: gcloud auth application-default login',
+      },
+      { status: 503 },
+    )
   }
 }

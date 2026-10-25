@@ -2,22 +2,32 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isMcpUnavailable } from '@/lib/mcp'
 import { cleanPhone, cleanText } from '@/lib/places'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
-import { getSession, signSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from '@/lib/session'
+import { getSession, SessionUnavailableError, signSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from '@/lib/session'
 import { bumpTokenVersion, changePassword, getAccountProfile, updateAccountProfile } from '@/lib/users'
 
 const MIN_PASSWORD = 8
 const AVATAR_LIMIT = 90_000
 
 function failure(err: unknown, fallback: string) {
-  if (isMcpUnavailable(err)) return NextResponse.json({ error: 'Database unavailable' }, { status: 503 })
+  if (err instanceof SessionUnavailableError || isMcpUnavailable(err)) {
+    return NextResponse.json({ error: 'Service temporarily unavailable, reconnecting...' }, { status: 503 })
+  }
   console.error('[account]', err)
   return NextResponse.json({ error: fallback }, { status: 500 })
 }
 
-export async function GET(req: NextRequest) {
-  const session = await getSession(req)
-  if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
+async function sessionOrNull(req: NextRequest) {
   try {
+    return await getSession(req)
+  } catch (err) {
+    throw err
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const session = await sessionOrNull(req)
+    if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
     const profile = await getAccountProfile(session.uid)
     if (!profile) return NextResponse.json({ error: 'Account not found.' }, { status: 404 })
     return NextResponse.json({ profile })
@@ -27,7 +37,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await getSession(req)
+  let session
+  try {
+    session = await sessionOrNull(req)
+  } catch (err) {
+    return failure(err, 'Could not save your profile.')
+  }
   if (!session) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 })
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
   const patch: { name?: string; phone?: string | null; avatar_url?: string | null; lang?: 'fr' | 'en' | 'rw' } = {}
@@ -46,8 +61,12 @@ export async function PATCH(req: NextRequest) {
   if ('avatar' in body) {
     const avatar = body.avatar
     if (avatar === null) patch.avatar_url = null
-    else if (typeof avatar === 'string' && avatar.startsWith('data:image/') && avatar.length <= AVATAR_LIMIT) patch.avatar_url = avatar
-    else return NextResponse.json({ error: 'The photo must be a small image.', code: 'invalid_avatar' }, { status: 400 })
+    else if (typeof avatar === 'string' && /^data:image\/(jpeg|jpg|png|webp);base64,/i.test(avatar) && avatar.length <= AVATAR_LIMIT) {
+      if (!rateLimit(`avatar:${session.uid}`, { capacity: 10, refillPerSec: 10 / 3600 }).allowed) {
+        return NextResponse.json({ error: 'Too many photo uploads. Try again in an hour.', code: 'avatar_rate' }, { status: 429 })
+      }
+      patch.avatar_url = avatar
+    } else return NextResponse.json({ error: 'The photo must be a small image.', code: 'invalid_avatar' }, { status: 400 })
   }
   if ('lang' in body) {
     if (body.lang !== 'fr' && body.lang !== 'en' && body.lang !== 'rw') {
@@ -76,7 +95,7 @@ export async function POST(req: NextRequest) {
   if (action === 'revoke_other_sessions') {
     try {
       const nextTv = await bumpTokenVersion(session.uid)
-      const cookie = signSession(session.uid, session.email, nextTv)
+      const cookie = signSession(session.uid, session.email, nextTv, session.role ?? undefined)
       const res = NextResponse.json({ ok: true })
       res.cookies.set(SESSION_COOKIE, cookie, SESSION_COOKIE_OPTS)
       res.headers.set('Cache-Control', 'no-store')

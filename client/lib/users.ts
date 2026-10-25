@@ -2,7 +2,9 @@
  * Create-or-load a Hodari user by email, via the MongoDB MCP. Shared by the
  * OAuth callback. Matches the existing `users` collection schema.
  */
+import { cache } from 'react'
 import { mcpConnected, mcpCall, extractDocs } from '@/lib/mcp'
+import { invalidateAuthCache } from '@/lib/session'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { isAdminEmail } from '@/lib/places'
@@ -18,6 +20,7 @@ export interface HodariUser {
   email: string
   home_country: string | null
   languages: string[]
+  lang?: 'fr' | 'en' | 'rw'
   budget_tier: string
   role: UserRole
   owned_place_id: string | null
@@ -54,6 +57,7 @@ function publicUser(doc: Record<string, unknown>): HodariUser {
     email,
     home_country: (doc.home_country as string) ?? null,
     languages: (doc.languages as string[]) ?? ['en'],
+    lang: doc.lang === 'fr' || doc.lang === 'en' || doc.lang === 'rw' ? doc.lang : undefined,
     budget_tier: (doc.budget_tier as string) ?? 'moderate',
     role: storedRole(doc, email),
     owned_place_id: typeof doc.owned_place_id === 'string' ? doc.owned_place_id : null,
@@ -112,13 +116,13 @@ export async function findOrCreateUser(email: string, name: string): Promise<Hod
   return publicUser(doc)
 }
 
-export async function findUserById(userId: string): Promise<HodariUser | null> {
+export const findUserById = cache(async (userId: string): Promise<HodariUser | null> => {
   const sid = await mcpConnected()
   const docs = extractDocs(
     await mcpCall(sid, 'find', { database: DB, collection: 'users', filter: { user_id: userId }, limit: 1 }),
   )
   return docs[0] ? publicUser(docs[0]) : null
-}
+})
 
 const lastTouched = new Map<string, number>()
 
@@ -159,6 +163,7 @@ export async function getTokenVersion(userId: string): Promise<number> {
  * `resolveSession` (logout / password reset).
  */
 export async function bumpTokenVersion(userId: string): Promise<number> {
+  invalidateAuthCache(userId)
   const sid = await mcpConnected()
   const current = await getTokenVersion(userId)
   const next = current + 1
@@ -275,6 +280,7 @@ export async function verifyUserPassword(email: string, plainPassword: string): 
 }
 
 export interface AccountProfile {
+  userId: string
   name: string
   email: string
   phone: string
@@ -290,13 +296,20 @@ async function readUserDoc(sid: string, userId: string): Promise<Record<string, 
   return docs[0] ?? null
 }
 
+function avatarUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null
+  if (value.startsWith('data:image/') || value.startsWith('/uploads/')) return value
+  return null
+}
+
 function toProfile(doc: Record<string, unknown>): AccountProfile {
   const user = publicUser(doc)
   return {
+    userId: user.user_id,
     name: user.name ?? '',
     email: user.email,
     phone: typeof doc.phone === 'string' ? doc.phone : '',
-    avatar: typeof doc.avatar_url === 'string' && doc.avatar_url.startsWith('data:image/') ? doc.avatar_url : null,
+    avatar: avatarUrl(doc.avatar_url),
     role: user.role,
     hasPassword: typeof doc.password_hash === 'string' && !!doc.password_hash,
   }
@@ -319,6 +332,7 @@ export async function updateAccountProfile(
     $set.languages = [patch.lang]
   }
   if (Object.keys($set).length) {
+    if ('avatar_url' in patch) $set.avatar_updated_at = new Date().toISOString()
     await mcpCall(sid, 'update-many', { database: DB, collection: 'users', filter: { user_id: userId }, update: { $set } })
   }
   const doc = await readUserDoc(sid, userId)

@@ -31,7 +31,7 @@ export function findPlaceIndexInText(text: string, places: Place[]): number | nu
   for (let i = 0; i < places.length; i++) {
     const name = places[i].name.toLowerCase()
     if (lower.includes(name)) return i
-    const tokens = name.split(/[\s|.,]+/).filter((w) => w.length > 3)
+    const tokens = name.split(/[\s|.,/]+/).filter((w) => w.length > 3 || /^\d{2,}$/.test(w))
     const hits = tokens.filter((w) => lower.includes(w))
     if (hits.length >= 2 || (hits.length === 1 && tokens.length <= 2)) return i
   }

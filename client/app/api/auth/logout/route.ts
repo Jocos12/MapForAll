@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { SESSION_COOKIE, SESSION_COOKIE_OPTS, verifySession } from '@/lib/session'
+import { invalidateAuthCache, SESSION_COOKIE, SESSION_COOKIE_OPTS, verifySession } from '@/lib/session'
 import { bumpTokenVersion } from '@/lib/users'
 import { OTP_COOKIE, OTP_COOKIE_OPTS } from '@/lib/otp'
 
@@ -12,6 +12,7 @@ export const runtime = 'nodejs'
 export async function POST(req: NextRequest) {
   const payload = verifySession(req.cookies.get(SESSION_COOKIE)?.value)
   if (payload?.uid) {
+    invalidateAuthCache(payload.uid)
     try {
       await bumpTokenVersion(payload.uid)
     } catch (err) {

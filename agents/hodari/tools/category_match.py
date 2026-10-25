@@ -31,7 +31,7 @@ _SIGNALS: dict[str, tuple[str, ...]] = {
     "clinic": ("clinic", "clinique", "hospital", "hôpital", "hopital", "dispensaire", "health"),
     "restaurant": ("restaurant", "resto", "dining"),
     "cafe": ("cafe", "café", "coffee"),
-    "market": ("market", "marché", "marche", "supermarket", "supermarché", "supermarche"),
+    "market": ("market", "marché", "marche", "supermarket", "supermarché", "supermarche", "tomato", "tomate", "inyanya", "vegetable", "greengrocer"),
     "shop": ("shop", "boutique", "magasin", "store"),
 }
 
@@ -58,6 +58,11 @@ _EMPTY_SAY: dict[str, str] = {
 
 def requested_category(text: str) -> str | None:
     """The category the user asked for, or None when the request is open."""
+    from .query_intent import extract_search_intent
+
+    intent = extract_search_intent(text or "")
+    if intent.category:
+        return intent.category
     for category, pattern in _CATEGORIES:
         if pattern.search(text or ""):
             return category

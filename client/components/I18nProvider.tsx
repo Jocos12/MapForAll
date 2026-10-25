@@ -34,25 +34,24 @@ function isLang(value: string | null): value is Lang {
   return value === 'fr' || value === 'en' || value === 'rw'
 }
 
-export function I18nProvider({ children }: { children: React.ReactNode }) {
-  // Server render and the first client render both use French. A language
-  // the visitor explicitly picked is applied only after mount. The browser
-  // language does not override this default.
-  const [lang, setLangState] = useState<Lang>(DEFAULT_LANG)
+export function I18nProvider({ children, initialLang = DEFAULT_LANG }: { children: React.ReactNode; initialLang?: Lang }) {
+  const [lang, setLangState] = useState<Lang>(isLang(initialLang) ? initialLang : DEFAULT_LANG)
 
   useEffect(() => {
-    let next: Lang = DEFAULT_LANG
+    let next: Lang = lang
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (isLang(saved)) next = saved
-    } catch { /* keep French */ }
-    if (next !== DEFAULT_LANG) setLangState(next)
+    } catch { /* keep the server language */ }
+    if (next !== lang) setLangState(next)
     document.documentElement.lang = next
-  }, [])
+    document.cookie = `hodari_lang=${next};path=/;max-age=31536000;samesite=lax`
+  }, [lang])
 
   const setLang = useCallback((next: Lang) => {
     setLangState(next)
     try { localStorage.setItem(STORAGE_KEY, next) } catch { /* ignore */ }
+    document.cookie = `hodari_lang=${next};path=/;max-age=31536000;samesite=lax`
     document.documentElement.lang = next
   }, [])
 

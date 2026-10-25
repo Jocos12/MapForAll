@@ -3,7 +3,9 @@
 import Link from 'next/link'
 import { motion, useReducedMotion } from 'framer-motion'
 import { memo, useEffect, useState } from 'react'
+import { useI18n } from '@/components/I18nProvider'
 import { cn } from '@/lib/design/cn'
+import type { Trend } from '@/lib/trend'
 import type { LucideIcon } from 'lucide-react'
 
 function AnimatedNumber({ value }: { value: number }) {
@@ -16,7 +18,7 @@ function AnimatedNumber({ value }: { value: number }) {
     }
     const start = performance.now()
     const from = n
-    const dur = 650
+    const dur = 600
     let raf = 0
     const tick = (t: number) => {
       const p = Math.min(1, (t - start) / dur)
@@ -36,28 +38,35 @@ export const StatCard = memo(function StatCard({
   value,
   href,
   icon: Icon,
+  trend,
   trendPct,
   trendLabel,
+  hint,
   index = 0,
 }: {
   label: string
   value: number
   href?: string
   icon: LucideIcon
+  trend?: Trend | null
+  /** Legacy numeric percent. Ignored when it would read as −100% beside a positive value. */
   trendPct?: number | null
   trendLabel?: string
+  hint?: string
   index?: number
 }) {
+  const { t } = useI18n()
   const reduced = useReducedMotion()
   const body = (
     <motion.div
       initial={reduced ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05, duration: reduced ? 0 : 0.35 }}
+      transition={{ delay: reduced ? 0 : index * 0.06, duration: reduced ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+      title={hint}
       className={cn(
         'rounded-2xl border border-black/[0.06] bg-white p-4 shadow-[0_1px_2px_rgba(26,22,20,0.04)]',
         'dark:border-white/10 dark:bg-white/[0.04]',
-        href && 'transition hover:-translate-y-0.5 hover:border-[#E8672A]/35',
+        href && 'transition duration-200 hover:-translate-y-0.5 hover:border-[#E8672A]/35',
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -71,20 +80,49 @@ export const StatCard = memo(function StatCard({
       <p className="mt-3 font-display text-[32px] font-semibold leading-none tracking-tight">
         <AnimatedNumber value={value} />
       </p>
-      {typeof trendPct === 'number' && (
-        <p
-          className={cn(
-            'mt-2 text-[12px] font-medium',
-            trendPct > 0 && 'text-[#1F8A5B]',
-            trendPct < 0 && 'text-red-600',
-            trendPct === 0 && 'text-[#6E5B50] dark:text-white/50',
-          )}
-        >
-          {trendPct > 0 ? '+' : ''}
-          {trendPct}%{trendLabel ? ` ${trendLabel}` : ''}
-        </p>
+      {(trend || typeof trendPct === 'number') && (
+        <TrendLine trend={trend} trendPct={trendPct} value={value} label={trendLabel} newLabel={t('greet.trendNew')} />
       )}
     </motion.div>
   )
   return href ? <Link href={href}>{body}</Link> : body
 })
+
+function TrendLine({
+  trend,
+  trendPct,
+  value,
+  label,
+  newLabel,
+}: {
+  trend?: Trend | null
+  trendPct?: number | null
+  value: number
+  label?: string
+  newLabel: string
+}) {
+  const resolved: Trend | null = trend
+    ?? (typeof trendPct === 'number'
+      ? (value > 0 && trendPct <= -100 ? { kind: 'none' } : { kind: 'pct', pct: trendPct })
+      : null)
+  if (!resolved || resolved.kind === 'none') {
+    return <p className="mt-2 text-[12px] font-medium text-[#6E5B50] dark:text-white/50">—{label ? ` ${label}` : ''}</p>
+  }
+  if (resolved.kind === 'new') {
+    return <p className="mt-2 text-[12px] font-medium text-[#1F8A5B]">{newLabel}{label ? ` ${label}` : ''}</p>
+  }
+  const pct = resolved.pct
+  return (
+    <p
+      className={cn(
+        'mt-2 text-[12px] font-medium',
+        pct > 0 && 'text-[#1F8A5B]',
+        pct < 0 && 'text-red-600',
+        pct === 0 && 'text-[#6E5B50] dark:text-white/50',
+      )}
+    >
+      {pct > 0 ? '+' : ''}
+      {pct}%{label ? ` ${label}` : ''}
+    </p>
+  )
+}

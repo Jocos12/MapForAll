@@ -4,6 +4,7 @@ import { useId, useState, type KeyboardEvent } from 'react'
 import { LineChart, Star, type LucideIcon } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
 import { GREEN, ORANGE } from '@/components/business/ui'
+import { trend } from '@/lib/trend'
 
 /** 1★ → 5★: light red, orange, green. Each bar clears 3:1 against white. */
 const STAR_COLORS = ['#D9443C', '#E06A50', '#D97706', '#3F9A68', GREEN]
@@ -219,13 +220,14 @@ export function RatingBarChart({
   )
 }
 
-/** Week-over-week change: green when up, red when down. */
+/** Change versus the previous window. "New" when there was nothing before; "—" when both are zero. */
 export function TrendChip({ current, previous, label }: { current: number; previous: number; label?: string }) {
   const { t } = useI18n()
   const caption = label ?? t('biz.charts.vsLastWeek')
-  if (!previous && !current) return null
-  const pct = previous ? Math.round(((current - previous) / previous) * 100) : 100
-  const up = current >= previous
+  const change = trend(current, previous)
+  if (change.kind === 'none') return <span className="text-[11.5px] font-semibold text-[#71717A]" title={caption}>—</span>
+  const up = change.kind === 'new' || (change.kind === 'pct' && change.pct >= 0)
+  const text = change.kind === 'new' ? t('greet.trendNew') : `${change.pct > 0 ? '+' : ''}${change.pct}%`
   return (
     <span
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${
@@ -233,7 +235,7 @@ export function TrendChip({ current, previous, label }: { current: number; previ
       }`}
       title={caption}
     >
-      {up ? '▲' : '▼'} {Math.abs(pct)}%
+      {change.kind === 'pct' ? (up ? '▲' : '▼') : '●'} {text}
       <span className="sr-only font-normal sm:not-sr-only">{caption}</span>
     </span>
   )

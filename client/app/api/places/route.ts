@@ -12,9 +12,19 @@ import {
   toClientPlace,
   writePlacePhotos,
 } from '@/lib/places'
+import { buildTextMatchOr, filterByTextRelevance, textRelevance } from '@/lib/placeTextMatch'
 import { getSession } from '@/lib/session'
 import { MAX_OWNED_PLACES, findUserById, setOwnedPlaces } from '@/lib/users'
 import { cleanWeek } from '@/lib/hours'
+import { duplicateSearchToken, findDuplicatePlace, normalizePlaceLabel } from '@/lib/placeDedupe'
+import { isPublished } from '@/lib/listingLifecycle'
+import { claimPayloadSchema } from '@/lib/businessFormSchema'
+import { logSpan } from '@/lib/devTiming'
+import { invalidatePrefix, ttlGet, ttlSet } from '@/lib/ttlCache'
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
 
@@ -34,6 +44,11 @@ function ensurePlaceIndexes(): void {
       { keys: { local_business: 1 }, name: 'places_local_business' },
       { keys: { accessible: 1 }, name: 'places_accessible' },
       { keys: { location: '2dsphere' }, name: 'places_location_2dsphere' },
+      // name + description + tags for catalog text search (cahier search fidelity)
+      {
+        keys: { name: 'text', description: 'text', summary: 'text', tags: 'text', categories: 'text' },
+        name: 'places_text_name_desc',
+      },
     ]
     for (const spec of specs) {
       try {
@@ -53,34 +68,36 @@ function ensurePlaceIndexes(): void {
   })
 }
 
+const PUBLIC_HIDDEN = ['draft', 'submitted', 'in_review', 'pending', 'changes_requested', 'rejected', 'paused', 'archived']
+
 export async function GET(req: NextRequest) {
+  const started = Date.now()
   void ensurePlaceIndexes()
   const local = req.nextUrl.searchParams.get('local_business') === '1'
   const accessible = req.nextUrl.searchParams.get('accessible') === '1'
   const category = (req.nextUrl.searchParams.get('category') ?? '').trim().toLowerCase()
   const q = (req.nextUrl.searchParams.get('q') ?? '').trim().slice(0, 120)
-  const session = await getSession(req)
-  const statusOr: Record<string, unknown>[] = [
-    { status: 'validated' },
-    { status: { $exists: false } },
-  ]
-  if (session) statusOr.push({ status: 'pending', added_by: session.uid })
-  const filter: Record<string, unknown> = { $or: statusOr, paused: { $ne: true } }
+  const cacheKey = `places:${req.nextUrl.search}`
+  const cached = ttlGet<{ places: unknown[] }>(cacheKey)
+  if (cached) {
+    logSpan('api', 'GET /api/places cache', Date.now() - started)
+    return NextResponse.json(cached)
+  }
+  const filter: Record<string, unknown> = {
+    paused: { $ne: true },
+    archived: { $ne: true },
+    status: { $nin: PUBLIC_HIDDEN },
+  }
   if (local) filter.local_business = true
   if (accessible) filter.accessible = true
   if (category) filter.categories = category
   if (q) {
-    // Case-insensitive name / address match so chat and chips find owner listings by title.
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    filter.$and = [
-      {
-        $or: [
-          { name: { $regex: escaped, $options: 'i' } },
-          { address: { $regex: escaped, $options: 'i' } },
-          { tags: { $regex: escaped, $options: 'i' } },
-        ],
-      },
-    ]
+    // Name (exact/phrase) + description/tags/address token+synonym match.
+    // Exact name search is preserved via the phrase clause in buildTextMatchOr.
+    const textOr = buildTextMatchOr(q)
+    if (textOr.length) {
+      filter.$and = [...(Array.isArray(filter.$and) ? filter.$and as unknown[] : []), { $or: textOr }]
+    }
   }
   try {
     const sid = await mcpConnected()
@@ -90,9 +107,44 @@ export async function GET(req: NextRequest) {
       filter,
       projection: { photos: 0 },
       sort: { claimed_by_owner: -1, local_business: -1, created_at: -1 },
-      limit: q ? 40 : 200,
+      limit: q ? 80 : 200,
     })
-    let places = extractDocs(texts)
+    let docs = extractDocs(texts)
+    if (q) {
+      // Drop weak / accidental matches (e.g. sushi must not pull a coffee shop).
+      docs = filterByTextRelevance(
+        docs.map((d) => ({
+          ...d,
+          name: typeof d.name === 'string' ? d.name : '',
+          description: typeof d.description === 'string' ? d.description : '',
+          summary: typeof d.summary === 'string' ? d.summary : '',
+          address: typeof d.address === 'string' ? d.address : '',
+          tags: Array.isArray(d.tags) ? d.tags.filter((t): t is string => typeof t === 'string') : [],
+          categories: Array.isArray(d.categories) ? d.categories.filter((t): t is string => typeof t === 'string') : [],
+          local_business: d.local_business === true,
+        })),
+        q,
+      ) as typeof docs
+      docs = [...docs].sort((a, b) => {
+        const sa = textRelevance({
+          name: String(a.name ?? ''),
+          description: String(a.description ?? ''),
+          summary: String(a.summary ?? ''),
+          tags: Array.isArray(a.tags) ? a.tags as string[] : [],
+          local_business: a.local_business === true,
+        }, q)
+        const sb = textRelevance({
+          name: String(b.name ?? ''),
+          description: String(b.description ?? ''),
+          summary: String(b.summary ?? ''),
+          tags: Array.isArray(b.tags) ? b.tags as string[] : [],
+          local_business: b.local_business === true,
+        }, q)
+        return sb - sa
+      })
+    }
+    let places = docs
+      .filter((doc) => isPublished(doc))
       .map(toClientPlace)
       .filter((place): place is NonNullable<typeof place> => place !== null)
       .map((place) => (place.photo_url?.startsWith('data:image/')
@@ -107,7 +159,11 @@ export async function GET(req: NextRequest) {
           return (b.access_confirmations ?? 0) - (a.access_confirmations ?? 0)
         })
     }
-    return NextResponse.json({ places })
+    if (q) places = places.slice(0, 40)
+    const payload = { places }
+    ttlSet(cacheKey, payload, 45_000)
+    logSpan('api', 'GET /api/places', Date.now() - started)
+    return NextResponse.json(payload)
   } catch (err) {
     if (isMcpUnavailable(err)) {
       return NextResponse.json({ error: 'Database unavailable', places: [] }, { status: 503 })
@@ -139,8 +195,24 @@ export async function POST(req: NextRequest) {
   if (Array.isArray(body.photos) && photos.length !== Math.min(body.photos.length, MAX_PHOTOS)) {
     return NextResponse.json({ error: 'Each photo must be a small image.' }, { status: 400 })
   }
-  const photo = photos[0] ?? ''
   const claim = body.claim === true
+  if (claim) {
+    const checked = claimPayloadSchema.safeParse({
+      name,
+      category,
+      phone: typeof body.phone === 'string' ? body.phone : '',
+      description: typeof body.description === 'string' ? body.description : '',
+      address: typeof body.address === 'string' ? body.address : '',
+      latitude,
+      longitude,
+      hoursWeek: body.hoursWeek ?? null,
+      photos,
+    })
+    if (!checked.success) {
+      const fields = [...new Set(checked.error.issues.map((issue) => String(issue.path[0] ?? 'form')))]
+      return NextResponse.json({ error: 'Check the highlighted fields.', fields }, { status: 400 })
+    }
+  }
   let ownedBefore: string[] = []
   if (claim) {
     const owner = await findUserById(session.uid)
@@ -164,9 +236,9 @@ export async function POST(req: NextRequest) {
   const week = cleanWeek(body.hoursWeek)
   const createdAt = new Date().toISOString()
   const placeId = `user_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
-  // Owner-claimed listings go live immediately (cahier §4.2): validated + public map.
-  // Community submissions stay pending until an admin approves them.
-  const status = claim ? 'validated' : 'pending'
+  const idempotencyKey = (req.headers.get('idempotency-key') ?? '').trim().slice(0, 80)
+  // New listings wait for an admin. They are not on the public map until validated.
+  const status = claim ? 'in_review' : 'pending'
   const doc = {
     place_id: placeId,
     name,
@@ -194,12 +266,65 @@ export async function POST(req: NextRequest) {
     photo_url: null,
     photo_count: 0,
     added_by: session.uid,
+    owner_id: claim ? session.uid : null,
+    idempotency_key: idempotencyKey || null,
     confirmations_count: 0,
     views: 0,
     created_at: createdAt,
   }
   try {
     const sid = await mcpConnected()
+    if (idempotencyKey && claim) {
+      const prior = extractDocs(await mcpCall(sid, 'find', {
+        database: DB,
+        collection: 'places',
+        filter: { idempotency_key: idempotencyKey, owner_id: session.uid },
+        projection: { place_id: 1, status: 1 },
+        limit: 1,
+      }))[0]
+      if (prior?.place_id) {
+        return NextResponse.json({ ok: true, place_id: String(prior.place_id), status: prior.status ?? status, idempotent: true })
+      }
+    }
+    const phoneDigits = cleanPhone(body.phone).replace(/\D/g, '')
+    const googleId = typeof body.google_place_id === 'string' ? body.google_place_id.trim() : ''
+    const token = duplicateSearchToken(name)
+    const dupOr: Record<string, unknown>[] = []
+    if (token) dupOr.push({ name: { $regex: escapeRegex(token), $options: 'i' } })
+    if (phoneDigits.length >= 8) dupOr.push({ phone: { $regex: escapeRegex(phoneDigits.slice(-9)) } })
+    if (googleId) dupOr.push({ google_place_id: googleId }, { maps_place_id: googleId }, { place_id: googleId })
+    if (claim) dupOr.push({ owner_id: session.uid, name: { $regex: `^${escapeRegex(name.trim())}$`, $options: 'i' } })
+    if (dupOr.length) {
+      const existing = extractDocs(
+        await mcpCall(sid, 'find', {
+          database: DB,
+          collection: 'places',
+          filter: { $or: dupOr, status: { $ne: 'archived' } },
+          projection: { name: 1, place_id: 1, address: 1, location: 1, google_place_id: 1, maps_place_id: 1, phone: 1, owner_id: 1, added_by: 1 },
+          limit: 40,
+        }),
+      )
+      const duplicate = findDuplicatePlace(
+        { name, address: typeof doc.address === 'string' ? doc.address : undefined, coordinates: { lat: latitude, lng: longitude }, phone: phoneDigits, google_place_id: googleId },
+        existing,
+      )
+      const sameOwner = existing.some((row) => (
+        (row.owner_id === session.uid || row.added_by === session.uid)
+        && normalizePlaceLabel(typeof row.name === 'string' ? row.name : '') === normalizePlaceLabel(name)
+      ))
+      const samePhone = !!phoneDigits && phoneDigits.length >= 8 && existing.some((row) => (
+        typeof row.phone === 'string' && row.phone.replace(/\D/g, '') === phoneDigits
+      ))
+      const sameGoogle = !!googleId && existing.some((row) => row.google_place_id === googleId || row.maps_place_id === googleId || row.place_id === googleId)
+      if (duplicate?.place_id || sameOwner || samePhone || sameGoogle) {
+        const hit = duplicate?.place_id ?? existing[0]?.place_id
+        return NextResponse.json(
+          { error: 'This place already exists.', code: 'duplicate', place_id: hit ? String(hit) : undefined },
+          { status: 409 },
+        )
+      }
+    }
+    invalidatePrefix('places:')
     await mcpCall(sid, 'insert-many', { database: DB, collection: 'places', documents: [doc] })
     if (claim) await setOwnedPlaces(session.uid, [...ownedBefore, placeId])
     if (photos.length) await writePlacePhotos((tool, args) => mcpCall(sid, tool, args), DB, placeId, photos)

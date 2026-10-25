@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     const match = url?.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i)
     if (!match) return new NextResponse(null, { status: 404 })
     return new NextResponse(Buffer.from(match[2], 'base64'), {
-      headers: { 'Content-Type': match[1], 'Cache-Control': 'public, max-age=300' },
+      headers: { 'Content-Type': match[1], 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' },
     })
   } catch {
     return new NextResponse(null, { status: 503 })

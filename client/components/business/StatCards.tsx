@@ -9,7 +9,7 @@ import { BIZ } from '@/components/business/ui'
 
 export type StatTarget = 'business' | 'stats' | 'reviews' | 'promotion'
 
-const COUNT_MS = 500
+const COUNT_MS = 250
 
 export function formatAverage(value: number | null, lang: string): string {
   if (value == null) return '—'
@@ -77,7 +77,7 @@ export function StatCards({ stats, published, onOpen, delay = 0 }: { stats: Owne
       value: stats.views7,
       empty: stats.views === 0,
       extra: <TrendChip current={stats.views7} previous={stats.viewsPrev7} />,
-      hint: t('biz.stats.viewsTotal').replace('{n}', String(stats.views)),
+      hint: `${t('biz.stats.viewsTotal').replace('{n}', String(stats.views))} ${t('biz.stats.viewsOfficial')}`,
       target: 'stats',
     },
     { id: 'average', icon: Star, label: t('biz.stats.average'), value: stats.average, decimals: 1, empty: stats.average == null, hint: t('biz.stats.averageHint'), target: 'reviews' },

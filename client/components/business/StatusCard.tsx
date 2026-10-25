@@ -1,17 +1,23 @@
 'use client'
 
 import type { CSSProperties } from 'react'
-import { Check, CheckCircle2, Clock, ExternalLink, Eye, PauseCircle, ShieldCheck, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, Clock, ExternalLink, Eye, PauseCircle, ShieldCheck, X, XCircle } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
+import { motion, useReducedMotion } from 'framer-motion'
 import { MODERATION_CHECKS, type ModerationCheck } from '@/components/business/types'
 import { BIZ } from '@/components/business/ui'
+import { ownerBadge, type OwnerBadge } from '@/lib/listingLifecycle'
+import { motionTransition } from '@/lib/motion'
 
-const TONES = {
+const TONES: Record<OwnerBadge, { icon: typeof CheckCircle2; badge: string; ring: string }> = {
   validated: { icon: CheckCircle2, badge: 'bg-[#2E8B57] text-white', ring: 'border-[#2E8B57]/35 bg-[#2E8B57]/[0.06]' },
-  pending: { icon: Clock, badge: 'bg-[#F5C542] text-[#422006]', ring: 'border-[#E0A800]/45 bg-[#FFF8E1]' },
+  in_review: { icon: Clock, badge: 'bg-[#F5C542] text-[#422006]', ring: 'border-[#E0A800]/45 bg-[#FFF8E1]' },
+  draft: { icon: Clock, badge: 'bg-[#E4E4E7] text-[#3F3F46]', ring: 'border-[#D4D4D8] bg-[#FAFAFA]' },
+  changes_requested: { icon: AlertTriangle, badge: 'bg-[#C2410C] text-white', ring: 'border-[#C2410C]/35 bg-[#FFF7ED]' },
   rejected: { icon: XCircle, badge: 'bg-[#DC2626] text-white', ring: 'border-[#DC2626]/35 bg-[#FEF2F2]' },
   paused: { icon: PauseCircle, badge: 'bg-[#52525B] text-white', ring: 'border-[#A1A1AA]/60 bg-[#F4F4F5]' },
-} as const
+  archived: { icon: PauseCircle, badge: 'bg-[#3F3F46] text-white', ring: 'border-[#A1A1AA]/60 bg-[#F4F4F5]' },
+}
 
 /** Thin labelled bar: "3/4 critères validés". */
 function CheckBar({ passed, total, label }: { passed: number; total: number; label: string }) {
@@ -46,6 +52,7 @@ export function StatusCard({
   checks,
   onFix,
   onPreview,
+  completeness,
   className = '',
   style,
 }: {
@@ -56,13 +63,16 @@ export function StatusCard({
   checks?: Record<ModerationCheck, boolean>
   onFix?: () => void
   onPreview?: () => void
+  completeness?: number
   className?: string
   style?: CSSProperties
 }) {
   const { t } = useI18n()
-  const key: keyof typeof TONES = paused ? 'paused' : status === 'validated' || status === 'rejected' ? status : 'pending'
+  const reduce = useReducedMotion()
+  const key = ownerBadge(status, paused)
   const tone = TONES[key]
   const Icon = tone.icon
+  const lowCompleteness = key === 'validated' && typeof completeness === 'number' && completeness < 1
   const passed = checks ? MODERATION_CHECKS.filter((id) => checks[id]).length : MODERATION_CHECKS.length
   const total = MODERATION_CHECKS.length
   const failing = checks ? MODERATION_CHECKS.filter((id) => !checks[id]) : []
@@ -71,11 +81,17 @@ export function StatusCard({
     <section className={`flex flex-col rounded-2xl border p-5 ${tone.ring} ${className}`} style={style} aria-labelledby="listing-status">
       <p id="listing-status" className="text-[12px] font-semibold uppercase tracking-wide text-[#3F3F46]">{t('biz.status.title')}</p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold ${tone.badge}`}>
+        <motion.span
+          key={key}
+          initial={reduce ? false : { opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={motionTransition(!!reduce)}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold ${tone.badge}`}
+        >
           <Icon size={15} aria-hidden />
           {t(`biz.status.${key}`)}
-        </span>
-        {key === 'pending' && (
+        </motion.span>
+        {key === 'in_review' && (
           <span className="inline-flex items-center gap-1 text-[12px] font-medium text-[#713F12]">
             <Clock size={13} aria-hidden />
             {t('biz.status.eta')}
@@ -84,7 +100,11 @@ export function StatusCard({
       </div>
       <p className="mt-3 text-[13px] leading-relaxed text-[#27272A]">{t(`biz.status.${key}Hint`)}</p>
 
-      {key === 'pending' && (
+      {lowCompleteness && (
+        <p className="mt-2 text-[13px] font-medium text-[#1F6B43]">{t('biz.status.publishedIncomplete')}</p>
+      )}
+
+      {(key === 'in_review' || key === 'changes_requested' || key === 'draft') && (
         <div className="mt-3 rounded-xl bg-white/80 p-3">
           <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-[#18181B]">
             <ShieldCheck size={14} className="text-[#1F6B43]" aria-hidden />
@@ -139,7 +159,7 @@ export function StatusCard({
         </div>
       )}
 
-      {key === 'rejected' && (
+      {(key === 'rejected' || key === 'changes_requested') && (
         <p className="mt-2 rounded-lg bg-white px-3 py-2 text-[13px] text-[#7F1D1D]">
           <strong>{t('biz.status.reason')}</strong> {reason?.trim() || t('biz.status.noReason')}
         </p>

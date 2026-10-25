@@ -13,7 +13,7 @@ export const runtime = 'nodejs'
 
 const ADK_BASE = process.env.ADK_BASE_URL ?? 'http://localhost:8000'
 const APP_NAME = process.env.ADK_APP_NAME ?? 'hodari'
-const MAX_USER_TURNS = 8
+const MAX_USER_TURNS = 6
 const REPLY_CACHE_TTL_MS = 30 * 60_000
 
 type AdkEvent = {

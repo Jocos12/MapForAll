@@ -38,9 +38,11 @@ export default function BusinessOnboarding() {
     setError('')
     setBusy(true)
     try {
+      let idem = ''
+      try { idem = localStorage.getItem('hodari_biz_idem') || crypto.randomUUID() } catch { idem = crypto.randomUUID() }
       const res = await fetch('/api/places', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idem },
         body: JSON.stringify({
           name: values.name,
           category: values.category,
@@ -65,8 +67,12 @@ export default function BusinessOnboarding() {
         return
       }
       setDone(true)
+      try {
+        localStorage.removeItem('hodari_biz_draft')
+        localStorage.removeItem('hodari_biz_idem')
+      } catch { /* ignore */ }
       const target = typeof data.place_id === 'string' ? `/business/dashboard?place=${encodeURIComponent(data.place_id)}#overview` : '/business/dashboard'
-      window.setTimeout(() => router.push(target), 700)
+      window.setTimeout(() => router.push(target), 900)
     } catch {
       setError(t('auth.errors.network'))
       setBusy(false)

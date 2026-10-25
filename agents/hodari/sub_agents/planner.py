@@ -1,5 +1,5 @@
-import os
 from google.adk.agents import LlmAgent
+from ..llm import on_model_error_callback, resolve_agent_model
 
 PLANNER_INSTRUCTION = """You are the Planner for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
 
@@ -45,9 +45,10 @@ Examples of good subtasks:
 """
 
 planner_agent = LlmAgent(
-    model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+    model=resolve_agent_model(),
     name="planner_agent",
     description="Parses user intent into a structured Plan with goal, constraints, and subtasks. No external tools.",
     instruction=PLANNER_INSTRUCTION,
     output_key="plan",
+    on_model_error_callback=on_model_error_callback,
 )

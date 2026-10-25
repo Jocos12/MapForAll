@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { ArrowDownUp, CornerDownRight, Loader2, MessageSquare, Pencil, Star, Trash2 } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
+import { Avatar } from '@/components/ui/Avatar'
 import { withPlace, type OwnerReview } from '@/components/business/types'
 import { BIZ } from '@/components/business/ui'
 
@@ -55,9 +56,7 @@ function ReviewRow({ placeId, review, onReplied }: { placeId: string; review: Ow
   return (
     <li className={`${BIZ.card} p-4 ${low && !review.reply ? 'border-l-4 border-l-[#DC2626]' : ''}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F4F4F5] text-[13px] font-semibold text-[#3F3F46]" aria-hidden>
-          {review.firstName.slice(0, 1).toUpperCase()}
-        </span>
+        <Avatar name={review.firstName} seed={review.key} size="sm" />
         <span className="text-[13.5px] font-semibold text-[#18181B]">{review.firstName}</span>
         <span className="inline-flex items-center gap-0.5" aria-label={t('biz.reviews.ratingLabel').replace('{n}', String(review.rating))}>
           {Array.from({ length: 5 }, (_, i) => (

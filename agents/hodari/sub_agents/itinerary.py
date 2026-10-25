@@ -10,6 +10,8 @@ from google.adk.events import Event, EventActions
 from google.genai import types
 
 from ..tools.maps_mcp import create_maps_toolset
+from ..tools.place_dedupe import dedupe_places, rewrite_itinerary_json
+from ..llm import on_model_error_callback, resolve_agent_model
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ Return ONLY this compact JSON (no markdown, no extra keys):
 """
 
 itinerary_agent = LlmAgent(
-    model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+    model=resolve_agent_model(),
     name="itinerary_agent",
     description="Builds a weather-aware 2-3 stop itinerary from candidate places.",
     instruction=ITINERARY_INSTRUCTION,
@@ -63,6 +65,7 @@ itinerary_agent = LlmAgent(
     # makes that call harmless instead of crashing the pipeline.
     tools=[create_maps_toolset(tools=["search_places", "lookup_weather", "compute_routes"])],
     output_key="itinerary",
+    on_model_error_callback=on_model_error_callback,
 )
 
 
@@ -80,14 +83,6 @@ def _parse_json(raw: Any) -> Any:
     return raw
 
 
-def _distinct_ids(items: list[dict[str, Any]]) -> set[str]:
-    return {
-        str(it.get("place_id") or it.get("name") or "").strip().lower()
-        for it in items
-        if isinstance(it, dict) and (it.get("place_id") or it.get("name"))
-    }
-
-
 def validate_itinerary(itinerary_raw: Any, candidates_raw: Any) -> str | None:
     """Return corrective feedback for the itinerary agent, or None if the itinerary is acceptable."""
     itinerary = _parse_json(itinerary_raw)
@@ -100,10 +95,14 @@ def validate_itinerary(itinerary_raw: Any, candidates_raw: Any) -> str | None:
         )
 
     candidates = _parse_json(candidates_raw)
+    if isinstance(candidates, dict):
+        candidates = candidates.get("places") or []
     if not isinstance(candidates, list):
         candidates = []
-    n_candidates = len(_distinct_ids(candidates))
-    n_stops = len(_distinct_ids([s for s in stops if isinstance(s, dict)]))
+    stop_rows = [s for s in stops if isinstance(s, dict)]
+    candidate_rows = [c for c in candidates if isinstance(c, dict)]
+    n_candidates = len(dedupe_places(candidate_rows))
+    n_stops = len(dedupe_places(stop_rows))
 
     if n_stops >= 2 or n_candidates < 2:
         return None
@@ -121,15 +120,18 @@ class ItineraryChecker(BaseAgent):
     otherwise feeds corrective text back so the next loop iteration can fix it."""
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        raw_itinerary = ctx.session.state.get("itinerary")
+        cleaned = rewrite_itinerary_json(raw_itinerary)
         feedback = validate_itinerary(
-            ctx.session.state.get("itinerary"),
+            cleaned or raw_itinerary,
             ctx.session.state.get("candidates"),
         )
         if feedback is None:
+            delta = {"itinerary": cleaned} if cleaned else {}
             yield Event(
                 author=self.name,
                 invocation_id=ctx.invocation_id,
-                actions=EventActions(escalate=True),
+                actions=EventActions(escalate=True, state_delta=delta),
             )
             return
         logger.warning("Itinerary rejected, retrying: %s", feedback[:160])

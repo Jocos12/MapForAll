@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
 import { StatCard } from '@/components/admin/StatCard'
+import { Greeting } from '@/components/Greeting'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DemoModeBanner, storeDemoSession } from '@/components/admin/DemoModeBanner'
 import { AdminActivityFeed, normalizeActivityItems } from '@/components/admin/AdminActivityFeed'
@@ -33,7 +34,7 @@ const DashboardCharts = dynamic(
   },
 )
 
-type Trend = { value: number; prev: number; deltaPct: number }
+import type { Trend } from '@/lib/trend'
 
 type DashboardPayload = {
   range: string
@@ -76,8 +77,10 @@ export default function AdminDashboardPage() {
   const [data, setData] = useState<DashboardPayload | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [slow, setSlow] = useState(false)
   const [activity, setActivity] = useState<DashboardPayload['activity']>([])
   const [demoBusy, setDemoBusy] = useState(false)
+  const [who, setWho] = useState<{ name: string; email: string; userId: string }>({ name: '', email: '', userId: '' })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -89,8 +92,8 @@ export default function AdminDashboardPage() {
         qs.set('to', new Date(customTo).toISOString())
       }
       const [statsRes, activityRes] = await Promise.all([
-        fetch(`/api/admin/stats?${qs}`, { credentials: 'include' }),
-        fetch('/api/admin/activity', { credentials: 'include', cache: 'no-store' }),
+        fetch(`/api/admin/stats?${qs}`, { credentials: 'include', signal: AbortSignal.timeout(12000) }),
+        fetch('/api/admin/activity', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(12000) }),
       ])
       const json = await statsRes.json().catch(() => ({}))
       if (!statsRes.ok) {
@@ -114,6 +117,30 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!loading) {
+      setSlow(false)
+      return
+    }
+    const timer = window.setTimeout(() => setSlow(true), 8000)
+    return () => window.clearTimeout(timer)
+  }, [loading])
+
+  useEffect(() => {
+    void fetch('/api/account', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        const profile = json?.profile
+        if (!profile) return
+        setWho({
+          name: typeof profile.name === 'string' ? profile.name : '',
+          email: typeof profile.email === 'string' ? profile.email : '',
+          userId: typeof profile.userId === 'string' ? profile.userId : '',
+        })
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -151,13 +178,12 @@ export default function AdminDashboardPage() {
       <DemoModeBanner />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#E8672A]">
-            {t('admin.shell.console')}
-          </p>
-          <h1 className="mt-1 font-display text-[28px] font-semibold tracking-tight">
-            {t('admin.nav.dashboard')}
-          </h1>
-          <p className="mt-1 text-[14px] text-[#6E5B50] dark:text-white/55">{t('admin.dashboard.subtitle')}</p>
+          <Greeting
+            name={who.name}
+            email={who.email}
+            userId={who.userId}
+            detail={stats ? t('greet.pending').replace('{n}', String(stats.pending)) : t('admin.dashboard.subtitle')}
+          />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {(['7', '30', '90', 'custom'] as RangeKey[]).map((key) => (
@@ -216,19 +242,30 @@ export default function AdminDashboardPage() {
       )}
 
       {error && (
-        <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px]">{error}</p>
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px]" role="alert">
+          <p>{error}</p>
+          <button type="button" onClick={() => void load()} className="min-h-11 rounded-full bg-white px-4 text-[13px] font-medium text-[#18181B]">{t('biz.retry')}</button>
+        </div>
+      )}
+
+      {loading && slow && !error && (
+        <div className="rounded-2xl border border-black/10 bg-white px-4 py-4 text-[13px] dark:border-white/10 dark:bg-white/5" role="status">
+          <p className="font-semibold">{t('biz.load.slowTitle')}</p>
+          <p className="mt-1 text-[#6E5B50] dark:text-white/55">{t('biz.load.slowBody')}</p>
+          <button type="button" onClick={() => void load()} className="mt-3 min-h-11 rounded-full border border-black/10 px-4 text-[13px] font-medium dark:border-white/15">{t('biz.retry')}</button>
+        </div>
       )}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {loading && Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
         {!loading && stats && (
           <>
-            <StatCard index={0} label={t('admin.dashboard.kpi.validated')} value={stats.validated} icon={CheckCircle2} href="/admin/places" trendPct={stats.trends.validated.deltaPct} trendLabel={t('admin.dashboard.vsPrev')} />
-            <StatCard index={1} label={t('admin.dashboard.kpi.pending')} value={stats.pending} icon={Clock} href="/admin/moderation" trendPct={stats.trends.pending.deltaPct} trendLabel={t('admin.dashboard.vsPrev')} />
-            <StatCard index={2} label={t('admin.dashboard.kpi.local')} value={stats.local} icon={Building2} href="/admin/businesses" trendPct={stats.trends.local.deltaPct} trendLabel={t('admin.dashboard.vsPrev')} />
-            <StatCard index={3} label={t('admin.dashboard.kpi.accessible')} value={stats.accessible} icon={ShieldCheck} href="/admin/places" trendPct={stats.trends.accessible.deltaPct} trendLabel={t('admin.dashboard.vsPrev')} />
-            <StatCard index={4} label={t('admin.dashboard.kpi.users')} value={stats.activeUsers} icon={Users} href="/admin/users" trendPct={stats.trends.users.deltaPct} trendLabel={t('admin.dashboard.vsPrev')} />
-            <StatCard index={5} label={t('admin.dashboard.kpi.reports')} value={stats.openReports} icon={AlertTriangle} href="/admin/reports" trendPct={stats.trends.reports.deltaPct} trendLabel={t('admin.dashboard.vsPrev')} />
+            <StatCard index={0} label={t('admin.dashboard.kpi.validated')} value={stats.validated} icon={CheckCircle2} href="/admin/places" trend={stats.trends.validated} trendLabel={t('admin.dashboard.vsPrev')} hint={t('admin.dashboard.kpiTip.validated')} />
+            <StatCard index={1} label={t('admin.dashboard.kpi.pending')} value={stats.pending} icon={Clock} href="/admin/moderation" trend={stats.trends.pending} trendLabel={t('admin.dashboard.vsPrev')} hint={t('admin.dashboard.kpiTip.pending')} />
+            <StatCard index={2} label={t('admin.dashboard.kpi.local')} value={stats.local} icon={Building2} href="/admin/businesses" trend={stats.trends.local} trendLabel={t('admin.dashboard.vsPrev')} hint={t('admin.dashboard.kpiTip.local')} />
+            <StatCard index={3} label={t('admin.dashboard.kpi.accessible')} value={stats.accessible} icon={ShieldCheck} href="/admin/places" trend={stats.trends.accessible} trendLabel={t('admin.dashboard.vsPrev')} hint={t('admin.dashboard.kpiTip.accessible')} />
+            <StatCard index={4} label={t('admin.dashboard.kpi.users')} value={stats.activeUsers} icon={Users} href="/admin/users" trend={stats.trends.users} trendLabel={t('admin.dashboard.vsPrev')} hint={t('admin.dashboard.kpiTip.users')} />
+            <StatCard index={5} label={t('admin.dashboard.kpi.reports')} value={stats.openReports} icon={AlertTriangle} href="/admin/reports" trend={stats.trends.reports} trendLabel={t('admin.dashboard.vsPrev')} hint={t('admin.dashboard.kpiTip.reports')} />
           </>
         )}
       </section>

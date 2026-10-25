@@ -1,4 +1,4 @@
-import type { StreamChunk } from './types'
+import type { Place, StreamChunk } from './types'
 
 /** Thrown when /api/chat refuses a run because the caller hit a quota gate. */
 export class ChatGateError extends Error {
@@ -36,6 +36,24 @@ const PIPELINE_MILESTONES: Array<{ atMs: number; agent: string; label: string }>
 
 function milestoneKey(m: { agent: string; label: string }) {
   return `${m.agent}:${m.label}`
+}
+
+function placesFromToolResponse(response: unknown): Place[] | null {
+  let payload: unknown = response
+  if (payload && typeof payload === 'object' && 'result' in payload) {
+    payload = (payload as { result: unknown }).result
+  }
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload)
+    } catch {
+      return null
+    }
+  }
+  if (!payload || typeof payload !== 'object') return null
+  const candidates = (payload as { candidates?: unknown }).candidates
+  if (!Array.isArray(candidates)) return null
+  return candidates.filter((place): place is Place => !!place && typeof place === 'object' && typeof (place as Place).name === 'string')
 }
 
 async function* streamTextChunks(text: string): AsyncGenerator<StreamChunk> {
@@ -185,6 +203,12 @@ export async function* streamChat(
           const fnName: string | undefined = part?.functionCall?.name
           if (fnName) {
             yield* emitToolStep(fnName)
+            continue
+          }
+          const response = part?.functionResponse ?? part?.function_response
+          if (response && (response.name === 'hodari_pipeline' || response.name === 'discover_places')) {
+            const places = placesFromToolResponse(response.response)
+            if (places !== null) yield { type: 'places', places }
             continue
           }
           if (part.text) {

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { Place } from '@/lib/types'
+import { dedupePlaces, placeKey } from '@/lib/placeDedupe'
 
 interface Props {
   places: Place[]
@@ -71,7 +72,8 @@ export function PlaceStack({
     }
   }
 
-  const active = activeIndex != null ? places[activeIndex] : null
+  const unique = dedupePlaces(places)
+  const active = activeIndex != null ? unique[activeIndex] : null
   const isOpen = expanded && active != null
 
   return (
@@ -83,7 +85,7 @@ export function PlaceStack({
           className="glass rounded-xl px-4 py-3 flex items-center gap-2 text-text2 hover:text-gold transition-colors animate-fade-up"
         >
           <span className="font-mono text-xs tracking-wider uppercase">
-            Places · {places.length}
+            Places · {unique.length}
           </span>
           <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" /></svg>
         </button>
@@ -91,7 +93,7 @@ export function PlaceStack({
         <>
           <div className="flex items-center justify-between mb-2.5 max-w-lg">
             <span className="font-mono text-[11px] tracking-widest uppercase text-text3">
-              Nearby picks · {places.length} {places.length === 1 ? 'place' : 'places'}
+              Nearby picks · {unique.length} {unique.length === 1 ? 'place' : 'places'}
             </span>
             <button
               onClick={() => setCollapsed(true)}
@@ -170,11 +172,11 @@ export function PlaceStack({
           )}
 
           <div className="flex gap-2 overflow-x-auto scrollbar-hide max-w-[min(100%,42rem)] pb-1">
-            {places.map((place, i) => {
+            {unique.map((place, i) => {
               const isActive = activeIndex === i
               return (
                 <button
-                  key={`${place.place_id || place.name}-${i}`}
+                  key={placeKey(place)}
                   onClick={() => handleCardClick(i)}
                   className={`shrink-0 glass rounded-xl px-4 py-3 text-left min-w-[140px] max-w-[200px] transition-all ${
                     isActive ? 'ring-1 ring-gold/50 border-gold/30' : 'hover:border-gold/20'

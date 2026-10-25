@@ -31,4 +31,16 @@ export type PlacesListResponse = {
   total: number
   page: number
   duplicatesHints: DuplicateHint[]
+  totals?: {
+    all: number
+    validated: number
+    pending: number
+    paused: number
+    rejected: number
+    archived: number
+    in_review?: number
+    changes_requested?: number
+    draft?: number
+    deleted?: number
+  }
 }

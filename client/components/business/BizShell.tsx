@@ -19,6 +19,7 @@ import {
   Store,
   Sun,
   UserRound,
+  Users,
   XCircle,
 } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
@@ -33,13 +34,14 @@ export const SECTIONS = [
   { id: 'business', icon: Store },
   { id: 'stats', icon: BarChart3 },
   { id: 'reviews', icon: MessageSquare },
+  { id: 'team', icon: Users },
   { id: 'promotion', icon: Megaphone },
   { id: 'settings', icon: Settings },
   { id: 'profile', icon: UserRound },
 ] as const
 
-/** The phone tab bar keeps six slots; the profile is reached from the avatar menu there. */
-const MOBILE_SECTIONS = SECTIONS.filter((row) => row.id !== 'profile')
+/** Phone tab bar: keep primary ops; profile + settings stay in the avatar menu. */
+const MOBILE_SECTIONS = SECTIONS.filter((row) => row.id !== 'profile' && row.id !== 'settings')
 
 export type SectionId = (typeof SECTIONS)[number]['id']
 
@@ -101,6 +103,14 @@ function statusNotice(status: string, reason: string | undefined, timeline: List
       id: `status-validated-${moderatedAt ?? ''}`,
       kind: edited ? 'edited' : 'validated',
       text: t(edited ? 'biz.notifications.editValidated' : 'biz.notifications.validated'),
+      at: moderatedAt ?? '',
+    }
+  }
+  if (status === 'changes_requested') {
+    return {
+      id: `status-changes-${moderatedAt ?? ''}`,
+      kind: 'rejected',
+      text: `${t('biz.notifications.changes')} ${reason?.trim() || ''}`.trim(),
       at: moderatedAt ?? '',
     }
   }
@@ -234,10 +244,12 @@ function PlaceSwitcher({
   places,
   activeId,
   onSwitch,
+  loading,
 }: {
   places: OwnedSummary[]
   activeId: string
   onSwitch: (id: string) => void
+  loading?: boolean
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
@@ -252,10 +264,10 @@ function PlaceSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-[#E4E4E7] bg-white px-3 py-2 text-left transition-colors hover:border-[#A1A1AA] ${BIZ.focus}`}
+        className={`flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg border border-[#E4E4E7] bg-white px-3 py-2 text-left transition-colors hover:border-[#A1A1AA] ${BIZ.focus}`}
       >
         <span className="hidden shrink-0 text-[12.5px] text-[#52525B] sm:inline">{t('biz.header.managing')}</span>
-        <span className="truncate text-[13.5px] font-semibold text-[#18181B]">{active?.name ?? '—'}</span>
+        <span className="truncate text-[13.5px] font-semibold text-[#18181B]">{loading ? t('biz.loading') : (active?.name ?? '—')}</span>
         <ChevronDown size={15} className={`shrink-0 text-[#52525B] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
       </button>
       {open && (
@@ -350,6 +362,7 @@ interface ShellProps {
   section: SectionId
   onSection: (id: SectionId) => void
   places: OwnedSummary[]
+  placesLoading?: boolean
   activeId: string | null
   onSwitch: (id: string) => void
   status: string
@@ -361,7 +374,7 @@ interface ShellProps {
   children: ReactNode
 }
 
-export function BizShell({ section, onSection, places, activeId, onSwitch, status, reason, timeline, reviews, account, onLogout, children }: ShellProps) {
+export function BizShell({ section, onSection, places, placesLoading, activeId, onSwitch, status, reason, timeline, reviews, account, onLogout, children }: ShellProps) {
   const { t } = useI18n()
   const unanswered = reviews.filter((row) => !row.reply).length
 
@@ -417,7 +430,9 @@ export function BizShell({ section, onSection, places, activeId, onSwitch, statu
             <span className="rounded-md bg-[#1A1614] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">Pro</span>
           </span>
           <div className="min-w-0 flex-1">
-            {activeId && <PlaceSwitcher places={places} activeId={activeId} onSwitch={onSwitch} />}
+            {(activeId || placesLoading) && (
+              <PlaceSwitcher places={places} activeId={activeId ?? ''} onSwitch={onSwitch} loading={!!placesLoading && places.length === 0} />
+            )}
           </div>
           <ThemeToggle />
           {activeId && (

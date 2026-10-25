@@ -2,6 +2,7 @@
  * Admin user listing, detail, and mutations (MongoDB via MCP).
  */
 import { extractDocs, mcpCall, mcpConnected } from '@/lib/mcp'
+import { bumpTokenVersion } from '@/lib/users'
 import { hashPassword } from '@/lib/password'
 import { isAdminEmail } from '@/lib/places'
 import type { UserRole } from '@/lib/users'
@@ -127,13 +128,29 @@ function sortUsers(a: AdminUserListItem, b: AdminUserListItem, sort: AdminUserSo
   }
 }
 
+const USER_LIST_PROJECTION = {
+  _id: 0,
+  user_id: 1,
+  name: 1,
+  email: 1,
+  role: 1,
+  status: 1,
+  deleted_at: 1,
+  avatar_url: 1,
+  created_at: 1,
+  last_active_at: 1,
+  last_login_at: 1,
+}
+
 async function loadAllUsers(sid: string): Promise<Record<string, unknown>[]> {
   return extractDocs(
     await mcpCall(sid, 'find', {
       database: DB,
       collection: 'users',
       filter: {},
-      limit: 5000,
+      projection: USER_LIST_PROJECTION,
+      sort: { created_at: -1 },
+      limit: 1000,
     }),
   )
 }
@@ -192,10 +209,9 @@ function countsFor(
   return { places: maps.places.get(userId) ?? 0, reports: maps.reports.get(userId) ?? 0 }
 }
 
-export async function listAdminUsers(query: AdminUsersListQuery): Promise<{ items: AdminUserListItem[]; total: number; page: number }> {
+export async function listAdminUsers(query: AdminUsersListQuery): Promise<{ items: AdminUserListItem[]; total: number; page: number; limit: number }> {
   const sid = await mcpConnected()
   const raw = await loadAllUsers(sid)
-  const maps = await activityMaps(sid)
   const sort = query.sort ?? 'created_desc'
   const page = query.page ?? 1
   const limit = query.limit ?? 50
@@ -231,13 +247,46 @@ export async function listAdminUsers(query: AdminUsersListQuery): Promise<{ item
 
   const filtered = [...byEmail.values()]
     .filter((doc) => matchesQuery(doc, query))
-    .map((doc) => toAdminUserListItem(doc, countsFor(String(doc.user_id), maps)))
+    .map((doc) => toAdminUserListItem(doc, { places: 0, reports: 0 }))
     .sort((a, b) => sortUsers(a, b, sort))
 
   const total = filtered.length
   const start = (page - 1) * limit
-  const items = filtered.slice(start, start + limit)
-  return { items, total, page }
+  const pageItems = filtered.slice(start, start + limit)
+  const ids = pageItems.map((row) => row.user_id)
+  let maps = { places: new Map<string, number>(), reports: new Map<string, number>() }
+  if (ids.length) {
+    try {
+      const [placeRows, reportRows] = await Promise.all([
+        extractDocs(await mcpCall(sid, 'find', {
+          database: DB,
+          collection: 'places',
+          filter: { $or: [{ added_by: { $in: ids } }, { owner_id: { $in: ids } }] },
+          projection: { _id: 0, added_by: 1, owner_id: 1 },
+          limit: 500,
+        })),
+        extractDocs(await mcpCall(sid, 'find', {
+          database: DB,
+          collection: 'place_reports',
+          filter: { reporter_uid: { $in: ids } },
+          projection: { _id: 0, reporter_uid: 1 },
+          limit: 500,
+        }).catch(() => [])),
+      ])
+      for (const row of placeRows) {
+        const uid = typeof row.owner_id === 'string' ? row.owner_id : typeof row.added_by === 'string' ? row.added_by : ''
+        if (uid) maps.places.set(uid, (maps.places.get(uid) ?? 0) + 1)
+      }
+      for (const row of reportRows) {
+        const uid = typeof row.reporter_uid === 'string' ? row.reporter_uid : ''
+        if (uid) maps.reports.set(uid, (maps.reports.get(uid) ?? 0) + 1)
+      }
+    } catch {
+      maps = { places: new Map(), reports: new Map() }
+    }
+  }
+  const items = pageItems.map((row) => ({ ...row, ...countsFor(row.user_id, maps), places_added: maps.places.get(row.user_id) ?? 0, reports_count: maps.reports.get(row.user_id) ?? 0 }))
+  return { items, total, page, limit }
 }
 
 export async function getAdminUserById(userId: string): Promise<AdminUserDetail | null> {
@@ -348,6 +397,7 @@ export async function updateAdminUser(
   if (Object.keys($set).length) {
     await mcpCall(sid, 'update-many', { database: DB, collection: 'users', filter: { user_id: userId }, update: { $set } })
   }
+  if (patch.role !== undefined || patch.status === 'suspended') await bumpTokenVersion(userId)
   return getAdminUserById(userId)
 }
 
@@ -370,6 +420,7 @@ export async function softDeleteAdminUser(userId: string): Promise<boolean> {
       },
     },
   })
+  await bumpTokenVersion(userId)
   return true
 }
 

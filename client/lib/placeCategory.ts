@@ -20,9 +20,28 @@ const SIGNALS: Record<string, string[]> = {
   shop: ['shop', 'boutique', 'magasin', 'store'],
 }
 
+const PRODUCT_ASKS: Array<{ category: string; pattern: RegExp; signals: string[] }> = [
+  {
+    category: 'market',
+    pattern: /tomato|tomatoes|tomate|tomates|inyanya|vegetable|légume|legume|grocery|épicerie|epicerie|supermarket|supermarché|marché|market\b|isoko/i,
+    signals: ['market', 'marché', 'marche', 'supermarket', 'supermarché', 'supermarche', 'grocery', 'épicerie', 'epicerie', 'vegetable', 'shop', 'store'],
+  },
+]
+
 export function requestedCategory(text: string): string | null {
+  for (const ask of PRODUCT_ASKS) {
+    if (ask.pattern.test(text)) return ask.category
+  }
   for (const [category, pattern] of CATEGORIES) {
     if (pattern.test(text)) return category
+  }
+  return null
+}
+
+function productSignals(text: string): string[] | null {
+  if (/h[oô]tels?|hotels?/i.test(text) && !/tomato|tomate|inyanya/i.test(text)) return null
+  for (const ask of PRODUCT_ASKS) {
+    if (ask.pattern.test(text)) return ask.signals
   }
   return null
 }
@@ -36,8 +55,15 @@ export function matchesCategory(place: Place, category: string): boolean {
   return (SIGNALS[category] ?? []).some((word) => text.includes(word))
 }
 
-/** Drop places from another category. Unfiltered when the ask has no category. */
+/** Drop places that are not the kind of place the user asked for. */
 export function placesForAsk(places: Place[], ask: string): Place[] {
+  const signals = productSignals(ask)
+  if (signals) {
+    return places.filter((place) => {
+      const text = blob(place)
+      return signals.some((word) => text.includes(word))
+    })
+  }
   const category = requestedCategory(ask)
   if (!category) return places
   return places.filter((place) => matchesCategory(place, category))

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit, type RateLimitRule } from './lib/rateLimit'
-import { SESSION_COOKIE, verifySession } from './lib/session'
+import { classifyCookie, SESSION_COOKIE } from './lib/session'
 
 /**
  * Per-route rate limits, keyed by client IP. Tighter buckets guard the
@@ -55,9 +55,11 @@ export function middleware(req: NextRequest) {
     res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private')
     res.headers.set('Pragma', 'no-cache')
     const token = req.cookies.get(SESSION_COOKIE)?.value
-    if (!verifySession(token)) {
+    const cookie = classifyCookie(token)
+    if (!cookie.ok) {
+      if (cookie.reason !== 'missing') console.info(`[session] logout reason=${cookie.reason}`)
       const login = new URL('/login', req.url)
-      login.searchParams.set('expired', '1')
+      if (cookie.reason !== 'missing') login.searchParams.set('expired', '1')
       return NextResponse.redirect(login)
     }
     return res

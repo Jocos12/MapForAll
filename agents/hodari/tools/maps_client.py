@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -15,6 +17,20 @@ from mcp.client.streamable_http import streamable_http_client
 logger = logging.getLogger(__name__)
 
 MAPS_MCP_URL = os.getenv("MAPS_GROUNDING_MCP_URL", "https://mapstools.googleapis.com/mcp")
+_http_clients: dict[int, httpx.AsyncClient] = {}
+
+
+def _shared_http_client() -> httpx.AsyncClient:
+    """One HTTP client per event loop, reused across Maps MCP calls."""
+    loop_id = id(asyncio.get_running_loop())
+    client = _http_clients.get(loop_id)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            headers={"X-Goog-Api-Key": _api_key()},
+            timeout=httpx.Timeout(60.0),
+        )
+        _http_clients[loop_id] = client
+    return client
 
 
 def _api_key() -> str:
@@ -22,6 +38,31 @@ def _api_key() -> str:
     if not key:
         raise RuntimeError("GOOGLE_MAPS_API_KEY is not set")
     return key
+
+
+def _places_api_key() -> str:
+    """Key allowed to call Places API (New). The Grounding Lite key is not.
+
+    Locally, the Next.js server key in client/.env.local is used when the
+    agent env does not set one. The value is never logged.
+    """
+    for name in ("GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_SERVER_KEY"):
+        value = (os.environ.get(name) or "").strip()
+        if value and not value.startswith("your_"):
+            return value
+    env_path = Path(__file__).resolve().parents[3] / "client" / ".env.local"
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            if name.strip() in ("GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_SERVER_KEY"):
+                value = value.strip().strip('"').strip("'")
+                if value and not value.startswith("your_"):
+                    os.environ.setdefault(name.strip(), value)
+                    return value
+    return (os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
 
 
 def _parse_tool_payload(raw: Any) -> Any:
@@ -49,9 +90,8 @@ def _parse_tool_payload(raw: Any) -> Any:
 
 async def call_maps_tool_async(tool_name: str, arguments: dict[str, Any]) -> Any:
     """Invoke a Maps Grounding Lite MCP tool via the official MCP HTTP transport."""
-    headers = {"X-Goog-Api-Key": _api_key()}
-    async with httpx.AsyncClient(headers=headers, timeout=60.0) as http_client:
-        async with streamable_http_client(MAPS_MCP_URL, http_client=http_client) as (
+    http_client = _shared_http_client()
+    async with streamable_http_client(MAPS_MCP_URL, http_client=http_client) as (
             read,
             write,
             _get_session_id,
@@ -93,6 +133,152 @@ def search_places(text_query: str, location_bias: Optional[str] = None) -> list[
     return asyncio.run(search_places_async(text_query, location_bias))
 
 
+_PLACES_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
+
+
+def _places_referer() -> str:
+    """Browser-restricted Maps keys reject a server call with an empty Referer."""
+    referer = (
+        os.getenv("PLACES_HTTP_REFERER")
+        or os.getenv("PUBLIC_BASE_URL")
+        or "http://localhost:3000/"
+    ).strip()
+    return referer if referer.endswith("/") else referer + "/"
+
+
+_PLACES_FIELD_MASK = ",".join(
+    [
+        "places.id",
+        "places.displayName",
+        "places.formattedAddress",
+        "places.location",
+        "places.types",
+        "places.rating",
+        "places.userRatingCount",
+        "places.priceLevel",
+        "places.googleMapsUri",
+        "places.websiteUri",
+        "places.currentOpeningHours",
+        "places.photos",
+    ]
+)
+
+
+async def _photo_uri(photo_name: str) -> str | None:
+    """Resolve a Places photo resource to a public image URL. The key stays on the server."""
+    key = _places_api_key()
+    if not photo_name or not key:
+        return None
+    try:
+        response = await _shared_http_client().get(
+            f"https://places.googleapis.com/v1/{photo_name}/media",
+            params={"maxHeightPx": "480", "skipHttpRedirect": "true"},
+            headers={"X-Goog-Api-Key": key, "Referer": _places_referer()},
+            timeout=4.0,
+        )
+    except Exception as exc:
+        logger.info("Places photo lookup failed: %s", exc)
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        uri = response.json().get("photoUri")
+    except Exception:
+        return None
+    return uri if isinstance(uri, str) and uri.startswith("https://") else None
+
+
+async def search_text_places(
+    text_query: str,
+    lat: float,
+    lng: float,
+    radius_m: float,
+    *,
+    included_type: str | None = None,
+    open_now: bool = False,
+    page_size: int = 10,
+) -> tuple[list[dict[str, Any]], int]:
+    """Places API (New) Text Search biased to a circle around the user.
+
+    Returns (places, http_status). Status 0 means the key is missing and no request was sent.
+    """
+    places_key = _places_api_key()
+    if not places_key:
+        logger.info("Places API searchText HTTP 0 query=%r (no API key)", text_query)
+        return [], 0
+
+    body: dict[str, Any] = {
+        "textQuery": text_query,
+        "pageSize": max(1, min(page_size, 20)),
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lng},
+                "radius": float(radius_m),
+            }
+        },
+    }
+    if included_type:
+        body["includedType"] = included_type
+    if open_now:
+        body["openNow"] = True
+
+    try:
+        response = await _shared_http_client().post(
+            _PLACES_TEXT_URL,
+            json=body,
+            headers={
+                "X-Goog-Api-Key": places_key,
+                "X-Goog-FieldMask": _PLACES_FIELD_MASK,
+                "Content-Type": "application/json",
+                "Referer": _places_referer(),
+            },
+            timeout=8.0,
+        )
+    except Exception as exc:
+        logger.info("Places API searchText HTTP 0 query=%r radius=%s error=%s", text_query, radius_m, exc)
+        return [], 0
+
+    status = response.status_code
+    logger.info(
+        "Places API searchText HTTP %s query=%r radius=%s type=%s",
+        status, text_query, int(radius_m), included_type or "-",
+    )
+    if status != 200:
+        detail = ""
+        try:
+            err = response.json().get("error") or {}
+            detail = f"{err.get('status') or ''} {str(err.get('message') or '')[:200]}".strip()
+        except Exception:
+            detail = ""
+        if detail:
+            logger.info("Places API searchText HTTP %s detail=%s", status, detail)
+        return [], status
+
+    try:
+        payload = response.json()
+    except Exception:
+        return [], status
+    raw_places = payload.get("places") if isinstance(payload, dict) else None
+    if not isinstance(raw_places, list):
+        return [], status
+
+    normalized = [_normalize_place(item) for item in raw_places if isinstance(item, dict)]
+    photo_names: list[str] = []
+    for item, place in zip(raw_places, normalized):
+        photos = item.get("photos") if isinstance(item, dict) else None
+        photo_name = ""
+        if isinstance(photos, list) and photos and isinstance(photos[0], dict):
+            photo_name = str(photos[0].get("name") or "")
+        photo_names.append(photo_name)
+        place["source"] = "places_api"
+    uris = await asyncio.gather(*(_photo_uri(name) for name in photo_names[:8]))
+    for place, uri in zip(normalized, uris):
+        if uri:
+            place["photo_url"] = uri
+    logger.info("Places API searchText HTTP %s returned %d places", status, len(normalized))
+    return [place for place in normalized if place.get("name")], status
+
+
 def _extract_places(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, list):
         return [_normalize_place(p) for p in raw if isinstance(p, dict)]
@@ -106,12 +292,27 @@ def _extract_places(raw: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _plain_name(value: Any) -> str:
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("name") or ""
+        return text if isinstance(text, str) else ""
+    return value if isinstance(value, str) else ""
+
+
 def _name_from_attribution(place: dict[str, Any]) -> str:
+    display = _plain_name(place.get("displayName"))
+    if display:
+        return display
     attribution = place.get("attribution") or {}
     title = attribution.get("title") or ""
-    if title.endswith(" - Google Maps"):
-        return title[: -len(" - Google Maps")].strip()
-    return title or place.get("name") or place.get("displayName") or ""
+    if isinstance(title, str) and title.endswith(" - Google Maps"):
+        title = title[: -len(" - Google Maps")].strip()
+    if title:
+        return title
+    raw = _plain_name(place.get("name"))
+    if raw.startswith("places/"):
+        return ""
+    return raw
 
 
 def _normalize_place(place: dict[str, Any]) -> dict[str, Any]:
@@ -177,5 +378,7 @@ def _normalize_place(place: dict[str, Any]) -> dict[str, Any]:
         "status": place.get("status") or "validated",
         "source": place.get("source") or "official",
         "photo_url": place.get("photo_url") or None,
+        "user_ratings_total": place.get("user_ratings_total") or place.get("userRatingCount"),
+        "google_place_id": place_ref or None,
         "confirmations_count": place.get("confirmations_count") or 0,
     }

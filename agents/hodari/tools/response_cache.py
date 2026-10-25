@@ -52,12 +52,13 @@ class ResponseCache:
                 return None
             return entry.value
 
-    def set(self, request: str, value: str) -> None:
-        if self._ttl <= 0:
+    def set(self, request: str, value: str, ttl: float | None = None) -> None:
+        keep = self._ttl if ttl is None else ttl
+        if keep <= 0:
             return
         key = _normalize(request)
         with self._lock:
-            self._store[key] = _Entry(value, self._ttl)
+            self._store[key] = _Entry(value, keep)
 
     def clear(self) -> None:
         with self._lock:

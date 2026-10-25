@@ -10,6 +10,8 @@ const COLLECTION = 'admin_audit'
 export type AuditAction =
   | 'place.validate'
   | 'place.reject'
+  | 'place.request_changes'
+  | 'place.merge'
   | 'place.update'
   | 'place.delete'
   | 'place.pause'

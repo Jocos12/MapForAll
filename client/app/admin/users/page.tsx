@@ -43,7 +43,7 @@ export default function AdminUsersPage() {
     status: 'active',
     sort: 'created_desc',
     page: 1,
-    limit: 50,
+    limit: 20,
   })
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -61,7 +61,7 @@ export default function AdminUsersPage() {
   const items = data?.items ?? []
   const total = data?.total ?? 0
   const page = data?.page ?? 1
-  const limit = query.limit ?? 50
+  const limit = query.limit ?? 20
   const totalPages = Math.max(1, Math.ceil(total / limit))
 
   const stats = useMemo(() => ({
@@ -309,7 +309,14 @@ export default function AdminUsersPage() {
         </select>
       </div>
 
-      {error && <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px]">{t('admin.shell.loadError')}</p>}
+      {error && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px]" role="alert">
+          <p>{error === 'timeout' ? t('admin.users.loadTimeout') : t('admin.shell.loadError')}</p>
+          <button type="button" onClick={() => void reload()} className="rounded-full bg-[#E8672A] px-3 py-1.5 text-[12px] font-medium text-white">
+            {t('admin.users.retry')}
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         <div className="overflow-hidden rounded-2xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
@@ -352,7 +359,7 @@ export default function AdminUsersPage() {
                     >
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
-                          <Avatar src={row.avatar_url} name={row.name ?? row.email} size="sm" />
+                          <Avatar src={row.avatar_url} name={row.name ?? row.email} seed={row.user_id} size="sm" />
                           <div>
                             <div className="font-medium">{row.name ?? '—'}</div>
                             <div className="text-[12px] text-[#6E5B50] dark:text-white/50">{row.email}</div>
@@ -425,7 +432,7 @@ export default function AdminUsersPage() {
           {detail && (
             <div className="space-y-4">
               <div className="flex items-start gap-3">
-                <Avatar src={detail.avatar_url} name={detail.name ?? detail.email} size="lg" />
+                <Avatar src={detail.avatar_url} name={detail.name ?? detail.email} seed={detail.user_id} size="lg" />
                 <div className="min-w-0">
                   <h2 className="font-display text-lg font-semibold leading-tight">{detail.name ?? detail.email}</h2>
                   <p className="truncate text-[12px] text-[#6E5B50] dark:text-white/50">{detail.email}</p>
@@ -523,10 +530,12 @@ export default function AdminUsersPage() {
       </div>
 
       <p className="text-[12px] text-[#6E5B50] dark:text-white/45">
-        {t('admin.users.statsLine')
-          .replace('{total}', String(stats.total))
-          .replace('{active}', String(stats.active))
-          .replace('{suspended}', String(stats.suspended))}
+        {loading && !data
+          ? t('admin.users.loading')
+          : t('admin.users.statsLine')
+            .replace('{total}', String(stats.total))
+            .replace('{active}', String(stats.active))
+            .replace('{suspended}', String(stats.suspended))}
       </p>
 
       {createOpen && (

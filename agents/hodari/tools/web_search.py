@@ -32,6 +32,9 @@ Rules:
 """
 
 
+# NOTE: google_search is a Gemini-only built-in — this sub-agent must stay on
+# Gemini. Conversational / planner / explorer / itinerary agents use
+# resolve_agent_model() (Gemini → Groq → Claude → OpenAI) instead.
 def create_web_search_tool() -> GoogleSearchAgentTool:
     """Build the web_search AgentTool the orchestrator can call."""
     model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")

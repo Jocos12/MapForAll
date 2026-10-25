@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from '@/lib/session'
+import { classifyCookie, getSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, SessionUnavailableError } from '@/lib/session'
 import { extractDocs, isMcpUnavailable, mcpCall, mcpConnected } from '@/lib/mcp'
 import { findUserById, type UserRole } from '@/lib/users'
 import { isAdminEmail } from '@/lib/places'
@@ -27,7 +27,32 @@ function buildRoles(role: UserRole, email: string | null | undefined): UserRole[
 
 // Returns the signed-in user. Validates signature + token_version + idle.
 export async function GET(req: NextRequest) {
-  const session = await getSession(req)
+  let session: Awaited<ReturnType<typeof getSession>>
+  try {
+    session = await getSession(req)
+  } catch (err) {
+    if (err instanceof SessionUnavailableError || isMcpUnavailable(err)) {
+      const cookie = classifyCookie(req.cookies.get(SESSION_COOKIE)?.value)
+      if (!cookie.ok) {
+        const res = NextResponse.json({ authed: false }, { status: 401 })
+        res.headers.set('Cache-Control', 'no-store')
+        return res
+      }
+      const res = NextResponse.json({
+        authed: true,
+        degraded: true,
+        user: {
+          id: cookie.payload.uid,
+          user_id: cookie.payload.uid,
+          email: cookie.payload.email ?? null,
+          role: cookie.payload.role ?? 'client',
+        },
+      }, { status: 503 })
+      res.headers.set('Cache-Control', 'no-store')
+      return res
+    }
+    throw err
+  }
   if (!session) {
     const res = NextResponse.json({ authed: false }, { status: 401 })
     res.headers.set('Cache-Control', 'no-store')

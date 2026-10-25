@@ -1,4 +1,5 @@
 import { cleanWeek } from '@/lib/hours'
+import { isPublished } from '@/lib/listingLifecycle'
 
 export const PLACE_CATEGORIES = ['market', 'restaurant', 'cafe', 'shop', 'pharmacy', 'hotel', 'clinic', 'attraction', 'other'] as const
 
@@ -46,7 +47,9 @@ export function toClientPlace(doc: Record<string, unknown>) {
     hours: typeof doc.hours === 'string' ? doc.hours : undefined,
     hours_week: cleanWeek(doc.hours_week) ?? undefined,
     confirmations_count: typeof doc.confirmations_count === 'number' ? doc.confirmations_count : 0,
-    views: typeof doc.views === 'number' ? doc.views : 0,
+    views: isPublished(doc)
+      ? (typeof doc.views_total === 'number' ? doc.views_total : typeof doc.views === 'number' ? doc.views : 0)
+      : 0,
     created_at: typeof doc.created_at === 'string' ? doc.created_at : undefined,
     rejection_reason: typeof doc.rejection_reason === 'string' ? doc.rejection_reason : undefined,
     phone: typeof doc.phone === 'string' && doc.phone ? doc.phone : undefined,
@@ -130,10 +133,9 @@ export async function writePlacePhotos(
   }
 }
 
-/** Visible on the public map: validated (or legacy rows without status) and not paused. */
+/** Visible on the public map: validated (legacy rows without status count as validated) and not paused. */
 export function isPublicPlace(doc: Record<string, unknown>): boolean {
-  const status = typeof doc.status === 'string' ? doc.status : 'validated'
-  return status === 'validated' && doc.paused !== true
+  return isPublished(doc)
 }
 
 function readAccess(value: unknown): { entrance: boolean; toilet: boolean; parking: boolean } | undefined {

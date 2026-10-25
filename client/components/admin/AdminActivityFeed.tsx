@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
+import { Avatar } from '@/components/ui/Avatar'
 import { EmptyState } from '@/components/admin/EmptyState'
 
 export type ActivityItem = {
@@ -165,11 +166,6 @@ function relativeTime(iso: string, lang: string): string {
   })
 }
 
-function actorInitial(actor: string): string {
-  const part = actor.split('@')[0] || actor
-  return (part[0] || '?').toUpperCase()
-}
-
 function shortActor(actor: string): string {
   if (!actor) return '—'
   if (actor.includes('@') && actor.length > 28) {
@@ -239,9 +235,7 @@ export function AdminActivityFeed({ items }: { items: ActivityItem[] }) {
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-[#6E5B50] dark:text-white/45">
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#E8672A]/15 text-[10px] font-semibold text-[#E8672A]">
-                        {actorInitial(a.actor)}
-                      </span>
+                      <Avatar name={shortActor(a.actor)} seed={a.actor} size="sm" />
                       <span className="truncate">{shortActor(a.actor)}</span>
                     </span>
                     <span aria-hidden className="text-black/20 dark:text-white/20">·</span>

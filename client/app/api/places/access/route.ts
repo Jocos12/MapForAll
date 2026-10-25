@@ -2,7 +2,52 @@ import { NextRequest, NextResponse } from 'next/server'
 import { extractDocs, isMcpUnavailable, mcpCall, mcpConnected } from '@/lib/mcp'
 import { getSession } from '@/lib/session'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
+const PLACES_KEY = process.env.GOOGLE_MAPS_SERVER_KEY ?? ''
+const ACCESS_TTL_MS = 10 * 60 * 1000
+
+type AccessibilityOptions = {
+  wheelchairAccessibleParking?: boolean
+  wheelchairAccessibleEntrance?: boolean
+  wheelchairAccessibleRestroom?: boolean
+  wheelchairAccessibleSeating?: boolean
+}
+
+const accessCache = new Map<string, { at: number; options: AccessibilityOptions | null }>()
+
+/** Places API (New) accessibilityOptions. Cached so opening a place twice does not refetch. */
+async function accessibilityFor(placeId: string): Promise<AccessibilityOptions | null> {
+  const hit = accessCache.get(placeId)
+  if (hit && Date.now() - hit.at < ACCESS_TTL_MS) return hit.options
+  if (!PLACES_KEY) {
+    accessCache.set(placeId, { at: Date.now(), options: null })
+    return null
+  }
+  const id = placeId.replace(/^places\//, '')
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`, {
+      headers: {
+        'X-Goog-Api-Key': PLACES_KEY,
+        'X-Goog-FieldMask': 'accessibilityOptions',
+      },
+    })
+    if (!res.ok) {
+      accessCache.set(placeId, { at: Date.now(), options: null })
+      return null
+    }
+    const data = await res.json() as { accessibilityOptions?: AccessibilityOptions }
+    const options = data.accessibilityOptions ?? null
+    accessCache.set(placeId, { at: Date.now(), options })
+    return options
+  } catch (err) {
+    console.warn('[places/access] Places accessibility lookup failed', err instanceof Error ? err.message : '')
+    accessCache.set(placeId, { at: Date.now(), options: null })
+    return null
+  }
+}
 
 function asPlaceId(value: unknown): string {
   const id = typeof value === 'string' ? value.trim() : ''
@@ -11,8 +56,14 @@ function asPlaceId(value: unknown): string {
 }
 
 export async function GET(req: NextRequest) {
-  const placeId = asPlaceId(req.nextUrl.searchParams.get('placeId'))
+  let placeId = ''
+  try {
+    placeId = asPlaceId(req.nextUrl.searchParams.get('placeId'))
+  } catch {
+    return NextResponse.json({ status: 'BAD_REQUEST', message: 'placeId required', error: 'placeId required' }, { status: 400 })
+  }
   const session = await getSession(req)
+  const accessibility = await accessibilityFor(placeId)
   try {
     const sid = await mcpConnected()
     const placeDocs = extractDocs(await mcpCall(sid, 'find', {
@@ -22,7 +73,7 @@ export async function GET(req: NextRequest) {
       limit: 1,
     }))
     if (!placeDocs.length) {
-      return NextResponse.json({ confirmations: 0, disputes: 0, mine: null })
+      return NextResponse.json({ confirmations: 0, disputes: 0, mine: null, accessibility })
     }
     const place = placeDocs[0]
     let mine: 'yes' | 'no' | null = null
@@ -40,13 +91,11 @@ export async function GET(req: NextRequest) {
       confirmations: typeof place.access_confirmations === 'number' ? place.access_confirmations : 0,
       disputes: typeof place.access_disputes === 'number' ? place.access_disputes : 0,
       mine,
+      accessibility,
     })
   } catch (err) {
-    if (err instanceof Error && err.message === 'placeId') {
-      return NextResponse.json({ error: 'placeId required' }, { status: 400 })
-    }
     console.error('[places/access GET]', err)
-    return NextResponse.json({ confirmations: 0, disputes: 0, mine: null })
+    return NextResponse.json({ confirmations: 0, disputes: 0, mine: null, accessibility })
   }
 }
 
@@ -71,7 +120,13 @@ export async function POST(req: NextRequest) {
       filter: { place_id: placeId },
       limit: 1,
     }))
-    if (!placeDocs.length) return NextResponse.json({ error: 'Place not found' }, { status: 404 })
+    if (!placeDocs.length) {
+      const accessibility = await accessibilityFor(placeId)
+      return NextResponse.json(
+        { status: 'NOT_IN_CATALOG', message: 'Place is not in the local catalog yet', error: 'Place is not in the local catalog yet', confirmations: 0, disputes: 0, mine: null, accessibility },
+        { status: 422 },
+      )
+    }
     const existing = extractDocs(await mcpCall(sid, 'find', {
       database: DB,
       collection: 'access_votes',

@@ -2,9 +2,11 @@
 
 import { useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { Bookmark, ExternalLink, MapPin, Navigation, Star } from 'lucide-react'
+import { Bookmark, MapPin, Navigation, Star } from 'lucide-react'
+import { MapsChooser } from './MapsChooser'
 import { PlaceBadges } from './PlaceBadges'
 import type { Place } from '@/lib/types'
+import { dedupePlaces, placeKey } from '@/lib/placeDedupe'
 import { PlaceImage } from './PlaceImage'
 import { DUR, EASE } from './ui/motion'
 
@@ -20,40 +22,31 @@ interface Props {
   onSave?: (place: Place) => void
   /** Explicit route-from-my-location — only runs when the user taps it. */
   onRouteFromMe?: (index: number) => void
+  onFocusPlace?: (place: Place) => void
   savedIds?: Set<string>
+  activePlaceId?: string | null
 }
 
-function mapsLink(place: Place): string | null {
-  if (place.maps_url) return place.maps_url
-  if (place.place_id && !place.place_id.startsWith('__')) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}&query_place_id=${encodeURIComponent(place.place_id)}`
-  }
-  if (place.coordinates) {
-    return `https://www.google.com/maps/search/?api=1&query=${place.coordinates.lat},${place.coordinates.lng}`
-  }
-  return null
-}
-
-export function PlaceListPanel({ places, activeIndex, onSelect, onShowDetails, onSave, onRouteFromMe, savedIds }: Props) {
+export function PlaceListPanel({ places, activeIndex, onSelect, onShowDetails, onSave, onRouteFromMe, onFocusPlace, savedIds, activePlaceId }: Props) {
   const reduced = useReducedMotion()
-  if (places.length === 0) return null
+  const unique = dedupePlaces(places)
+  if (unique.length === 0) return null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-border bg-surface/80 backdrop-blur-sm">
       <div className="shrink-0 px-3 py-2.5">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F56A00]/10 px-3 py-1 text-[11px] font-medium tracking-wide text-[#F56A00] dark:bg-[#F56A00]/15 dark:text-[#FF8C2F]">
           <MapPin className="h-3 w-3" />
-          Places · {places.length}
+          Places · {unique.length}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 scrollbar-hide">
         <ol className="space-y-3">
-          {places.map((place, i) => {
-            const isActive = activeIndex === i
-            const href = mapsLink(place)
+          {unique.map((place, i) => {
+            const isActive = activePlaceId ? place.place_id === activePlaceId : activeIndex === i
             return (
               <motion.li
-                key={`${place.place_id || place.name}-${i}`}
+                key={placeKey(place)}
                 // Pins dropping onto the map: rise + fade, staggered 40ms apart,
                 // capped so a long results list doesn't leave late cards lagging.
                 initial={reduced ? false : { opacity: 0, y: 8 }}
@@ -130,18 +123,11 @@ export function PlaceListPanel({ places, activeIndex, onSelect, onShowDetails, o
                         <Bookmark className={`h-3.5 w-3.5 ${savedIds?.has(place.place_id) ? 'fill-current' : ''}`} />
                       </button>
                     )}
-                    {href && (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="ml-auto inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-text2 transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Maps
-                      </a>
-                    )}
+                    <MapsChooser
+                      place={place}
+                      onViewInApp={onFocusPlace}
+                      buttonClassName="ml-auto inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-text2 transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
+                    />
                   </div>
                 </div>
               </motion.li>

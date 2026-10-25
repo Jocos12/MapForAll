@@ -24,9 +24,10 @@ export interface OwnerStats {
   histogram: number[]
   /** All-time views by origin: inside MapForAll (map, search, chat) or a shared link / QR code. */
   reach: { app: number; link: number }
+  actions?: { route: number; call: number; website: number; save: number; unique: number }
 }
 
-export const MODERATION_CHECKS = ['duplicate', 'spam', 'consistent', 'position'] as const
+export const MODERATION_CHECKS = ['name', 'category', 'pin', 'photos', 'duplicate', 'spam'] as const
 export type ModerationCheck = (typeof MODERATION_CHECKS)[number]
 
 export interface ListingTimeline {
@@ -47,6 +48,7 @@ export type PlaceLite = { place_id: string; name: string; categories: string[] }
 
 /** The signed-in owner's own account, from /api/account. */
 export interface OwnerAccount {
+  userId?: string
   name: string
   email: string
   phone: string

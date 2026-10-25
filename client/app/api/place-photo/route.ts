@@ -12,9 +12,14 @@ export async function GET(req: NextRequest) {
 
   const ref = req.nextUrl.searchParams.get('ref')
   const urlParam = req.nextUrl.searchParams.get('url')
+  const name = req.nextUrl.searchParams.get('name')
 
   let fetchUrl: string | null = null
-  if (ref) {
+  const headers: Record<string, string> = {}
+  if (name && /^places\/[^/?#]+\/photos\/[^/?#]+$/.test(name)) {
+    fetchUrl = `https://places.googleapis.com/v1/${name}/media?maxWidthPx=1200&maxHeightPx=800`
+    headers['X-Goog-Api-Key'] = KEY
+  } else if (ref) {
     fetchUrl =
       `https://maps.googleapis.com/maps/api/place/photo` +
       `?maxwidth=960&photo_reference=${encodeURIComponent(ref)}&key=${KEY}`
@@ -26,7 +31,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'ref or url required' }, { status: 400 })
   }
 
-  const res = await fetch(fetchUrl, { redirect: 'follow' })
+  const res = await fetch(fetchUrl, { redirect: 'follow', headers })
   if (!res.ok) {
     return NextResponse.json({ error: 'Photo unavailable' }, { status: res.status })
   }

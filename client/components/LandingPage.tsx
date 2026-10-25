@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from 'react'
 import dynamic from 'next/dynamic'
 import { MessageSquare, Mic } from 'lucide-react'
 import { ChatPanel } from '@/components/ChatPanel'
@@ -10,11 +10,13 @@ import { useI18n } from '@/components/I18nProvider'
 import { MapView, PlaceInfoCard, type RouteInfo } from '@/components/MapView'
 import { PlaceCardStrip } from '@/components/PlaceCardStrip'
 import { CollapsedReply } from '@/components/CollapsedReply'
-import { PlaceDetailsPanel } from '@/components/PlaceDetailsPanel'
+import { detailsExpandedPref, PlaceDetailsPanel, setDetailsExpandedPref } from '@/components/PlaceDetailsPanel'
 import { streamChat, fetchSessionState, ChatGateError } from '@/lib/stream'
 import { placesForAsk } from '@/lib/placeCategory'
 import { markPrioritized } from '@/lib/priority'
 import { fetchCatalogPlaces, mergeCatalogFirst } from '@/lib/catalogPlaces'
+import { dedupePlaces } from '@/lib/placeDedupe'
+import { getRouteSnapshot, subscribeRoute } from '@/lib/routeProgress'
 import { SCORING_DEFAULTS, type ScoringWeights } from '@/lib/scoringSettings'
 import Paywall, { type GateState } from '@/components/Paywall'
 import { VoiceOrb } from '@/components/VoiceOrb'
@@ -23,13 +25,16 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import {
   isValidCoord,
   type LatLng,
+  distanceKm,
   pinsFarFromUser,
   queryGeoPermission,
   requestUserLocationDetailed,
 } from '@/lib/geo'
 import {
   applyMapActions,
-  applyAnnotationActions,
+  placeTargetedByActions,
+  toActivePlace,
+  type ActivePlace,
   parseMapActions,
   shouldAttachGps,
   EMPTY_ANNOTATIONS,
@@ -49,7 +54,7 @@ import {
   resolvePlaceIndex,
 } from '@/lib/mapIntents'
 import { stripEmDashes } from '@/lib/text'
-import { speak, cancelSpeech, isSpeechOutputSupported } from '@/lib/voice'
+import { speak, enqueueSpeak, resetSpeakQueue, cancelSpeech, isSpeechOutputSupported } from '@/lib/voice'
 import { useVoice } from '@/hooks/useVoice'
 import { type ModelId } from '@/components/ModelSwitcher'
 import { useCommunityMapLayer } from '@/components/community/useCommunityMapLayer'
@@ -173,6 +178,10 @@ function isRouteAsk(text: string): boolean {
   return !!namedRoute(text) || /\b(itin[eé]raires?|routes?|chemins?|trac[eé]|directions?|jusqu['’]à|à pied|a pied|how do i get|comment aller)\b/i.test(text)
 }
 
+function isBareRouteFollowUp(text: string): boolean {
+  return /^\s*(show( me)?( the)? routes?|take me there|directions( there)?|how do i get there|comment y aller|njyana|nzira|inzira)\s*[?.!]?\s*$/i.test(text.trim())
+}
+
 /** Itinerary stops omit rating, photos and badges. Keep the copy the chat already has. */
 function enrichMapPlace(item: Place | ItineraryStop, memory: Map<string, Place>): Place {
   const known = item.place_id ? memory.get(item.place_id) : undefined
@@ -214,13 +223,23 @@ function selectedPlaceNote(place: Place): string {
   return `\n[Selected place on the map — the user just tapped this pin. Pronouns like "it", "ce lieu", "c'est loin", "c'est accessible" refer to this place unless they name a different one. ${bits.join('. ')}.]`
 }
 
+function askSharesToken(stored: string, current: string): boolean {
+  const stop = new Set(['want', 'find', 'near', 'place', 'places', 'kigali', 'with', 'that', 'this', 'your', 'from', 'have', 'some', 'show', 'please'])
+  const tokens = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9àâäéèêëïîôùûüç\s]/gi, ' ').split(/\s+/).filter((word) => word.length > 3 && !stop.has(word))
+  const known = new Set(tokens(stored))
+  return tokens(current).some((word) => known.has(word))
+}
+
 function parseCandidates(raw: unknown): Place[] | null {
   try {
     const str = typeof raw === 'string' ? raw : JSON.stringify(raw)
     const clean = str.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
     if (!clean || clean === '[]' || clean === '""') return null
     const parsed = JSON.parse(clean) as Place[]
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null
+    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    const unique = dedupePlaces(parsed)
+    return unique.length ? unique : null
   } catch {
     return null
   }
@@ -233,13 +252,7 @@ function parseItinerary(raw: unknown): Itinerary | null {
     if (!clean || clean === '""' || clean === '{}' || clean === '{"stops":[]}') return null
     const it = JSON.parse(clean) as Itinerary
     if (Array.isArray(it?.stops)) {
-      const seen = new Set<string>()
-      it.stops = it.stops.filter((s) => {
-        if (!s.place_id) return true
-        if (seen.has(s.place_id)) return false
-        seen.add(s.place_id)
-        return true
-      })
+      it.stops = dedupePlaces(it.stops)
     }
     if (it?.voice_summary) it.voice_summary = stripEmDashes(it.voice_summary)
     it?.stops?.forEach((s) => { if (s.rationale) s.rationale = stripEmDashes(s.rationale) })
@@ -292,6 +305,9 @@ export default function LandingPage() {
   const [places, setPlaces] = useState<Place[]>([])
   const [itinerary, setItinerary] = useState<Itinerary | null>(null)
   const [activeStop, setActiveStop] = useState<number | null>(null)
+  const [activePlace, setActivePlace] = useState<ActivePlace | null>(null)
+  const activePlaceRef = useRef<ActivePlace | null>(null)
+  const rememberActiveRef = useRef<(place: Place) => void>(() => {})
   const [mapVisible, setMapVisible] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [placesLoading, setPlacesLoading] = useState(false)
@@ -684,20 +700,49 @@ export default function LandingPage() {
 
   const reportRouteError = useCallback((message: string | null) => {
     if (!message || routePaintedRef.current || !pendingRouteClaim.current) return
-    commitRouteFailure()
-  }, [commitRouteFailure])
+    pendingRouteClaim.current = false
+    if (routeWatchRef.current != null) {
+      window.clearTimeout(routeWatchRef.current)
+      routeWatchRef.current = null
+    }
+    routeVerdictRef.current = message
+    setRouteError(message)
+    setMessages((prev) => replaceTurnAssistant(prev, turnAssistantIdRef.current, message))
+  }, [])
 
   const handleSend = useCallback(async (text: string, opts?: { speak?: boolean; display?: string; fromVoice?: boolean }) => {
     routeVerdictRef.current = null
     routePaintedRef.current = false
     pendingRouteClaim.current = false
+    if (isBareRouteFollowUp(text) && activePlaceRef.current) {
+      const target = activePlaceRef.current
+      const userMsg: ChatMessage = {
+        id: uid(),
+        role: 'user',
+        content: opts?.display ?? text,
+        fromVoice: opts?.fromVoice,
+      }
+      setMessages((prev) => [
+        ...prev,
+        userMsg,
+        { id: uid(), role: 'assistant', content: t('map.routingTo').replace('{name}', target.name) },
+      ])
+      setMapVisible(true)
+      setCustomRoute(null)
+      setRouteInfo(null)
+      setRouteError(null)
+      setMapZoomFocus(false)
+      setRouteFromUser(true)
+      return
+    }
     routeClaimAllowedRef.current = isRouteAsk(text)
     if (routeClaimAllowedRef.current) {
       setCustomRoute(null)
       setRouteFromUser(false)
     }
-    cancelSpeech()
+    resetSpeakQueue()
     const wantSpeak = !!opts?.speak
+    let progressiveSpoken = ''
 
     if (isNewSearchRequest(text)) soloPlaceModeRef.current = false
 
@@ -730,6 +775,23 @@ export default function LandingPage() {
     setMessages((prev) => [...prev, userMsg])
     const assistantId = uid()
     turnAssistantIdRef.current = assistantId
+    const knownPlace = findPlaceIndexInText(text, placesRef.current)
+    const showingKnown = knownPlace !== null && /\bshow me\b/i.test(text)
+    if (showingKnown) rememberActiveRef.current(placesRef.current[knownPlace])
+    if (
+      !showingKnown &&
+      !isBareRouteFollowUp(text) &&
+      /\b(find|show|where|near|hotel|tomato|tomate|market|restaurant|cafe|pharmacy|cherche|trouve|inyanya|isoko|supermarket)\b/i.test(text)
+    ) {
+      placesRef.current = []
+      setPlaces([])
+      activePlaceRef.current = null
+      setActivePlace(null)
+      setAnnotations(EMPTY_ANNOTATIONS)
+      setActiveStop(null)
+      setRouteFromUser(false)
+      setRouteInfo(null)
+    }
     setLoading(true)
     setThinkingSteps([])
     setStreamingStarted(false)
@@ -860,31 +922,30 @@ export default function LandingPage() {
     let earlyItinerarySet = false
     let pipelineRan = false
 
-    const publishPlaces = (agentPlaces: Place[]) => {
+    const publishPlaces = (agentPlaces: Place[], replaceEmpty = false) => {
       void catalogPromise.then((catalog) => {
         if (ctrl.signal.aborted || soloPlaceModeRef.current) return
-        const merged = placesForAsk(mergeCatalogFirst(catalog, agentPlaces), text)
-        if (!merged.length) return
+        const merged = dedupePlaces(placesForAsk(mergeCatalogFirst(catalog, agentPlaces), text))
+        if (!merged.length && !replaceEmpty) return
         const ranked = markPrioritized(merged, /prefer_local/i.test(text), scoringRef.current)
         placesRef.current = ranked
         setPlaces(ranked)
         setItinerary(null)
         setMapZoomFocus(false)
-        setMapVisible(true)
-        setActiveStop((prev) => prev ?? 0)
+        setMapVisible(ranked.length > 0)
+        setActiveStop(null)
         if (!routeRequest) { setRouteFromUser(false); setRouteInfo(null) }
         setMessages((prev) => {
-          const ri = [...prev].reverse().findIndex((m) => m.role === 'assistant')
-          if (ri === -1) {
+          const existing = prev.find((m) => m.id === assistantId)
+          if (!existing) {
             return [...prev, {
               id: assistantId,
               role: 'assistant' as const,
-              content: `Found ${ranked.length} place${ranked.length !== 1 ? 's' : ''} for you!`,
+              content: ranked.length ? `Found ${ranked.length} place${ranked.length !== 1 ? 's' : ''} for you!` : '',
               places: ranked,
             }]
           }
-          const ai = prev.length - 1 - ri
-          return prev.map((m, i) => i === ai ? { ...m, places: ranked, itinerary: undefined } : m)
+          return prev.map((m) => m.id === assistantId ? { ...m, places: ranked, itinerary: undefined } : m)
         })
       })
     }
@@ -905,15 +966,17 @@ export default function LandingPage() {
         intentType: typeof state.intent_type === 'string' ? state.intent_type : undefined,
       })
       applyMapEffects(effects)
+      const targeted = placeTargetedByActions(
+        actions,
+        placesRef.current,
+        [...placeMemoryRef.current.values()],
+      )
+      if (targeted) rememberActiveRef.current(targeted)
 
-      // AI-drawn map annotations (colors / circles / extra markers).
+      // Highlight and circle actions select activePlace. The map draws that
+      // one circle itself, so a leftover annotation cannot sit on another pin.
       if (actions.some((a) => a.op === 'highlight_place' || a.op === 'circle_place' || a.op === 'clear_annotations')) {
-        const stops = itineraryRef.current?.stops ?? []
-        const list: Place[] = placesRef.current.length
-          ? placesRef.current
-          : stops.map((s) => ({ ...s, categories: [] as string[] }))
-        const memory = [...placeMemoryRef.current.values()]
-        setAnnotations((prev) => applyAnnotationActions(actions, list, memory, prev))
+        setAnnotations(EMPTY_ANNOTATIONS)
         setMapVisible(true)
       }
     }
@@ -941,9 +1004,10 @@ export default function LandingPage() {
           })
         }
       }
-      if (!earlyItinerarySet && s.candidates && !soloPlaceModeRef.current) {
+      const placesQuery = typeof s.places_query === 'string' ? s.places_query : ''
+      if (!earlyItinerarySet && s.candidates && !soloPlaceModeRef.current && placesQuery && askSharesToken(placesQuery, text)) {
         const parsed = placesForAsk(parseCandidates(s.candidates) ?? [], text)
-        if (parsed.length) publishPlaces(parsed)
+        publishPlaces(parsed, true)
       }
       processSessionMapActions(s)
       if (s.suppress_gps_context === '1') setSuppressGpsContext(true)
@@ -960,6 +1024,12 @@ export default function LandingPage() {
           })
           continue
         }
+        if (chunk.type === 'places') {
+          pipelineRan = true
+          const list = dedupePlaces(placesForAsk(chunk.places, text))
+          publishPlaces(list, true)
+          continue
+        }
         if (chunk.type === 'thinking') {
           pipelineRan = true
           setThinkingSteps((prev) => [...prev, chunk.label])
@@ -974,17 +1044,32 @@ export default function LandingPage() {
             setStreamingStarted(true)
           }
           assistantText += chunk.text
+          const clean = routeVerdictRef.current ?? stripEmDashes(assistantText)
           setMessages((prev) => {
-            const clean = routeVerdictRef.current ?? stripEmDashes(assistantText)
             const existing = prev.find((m) => m.id === assistantId)
             if (existing) return prev.map((m) => m.id === assistantId ? { ...m, content: clean } : m)
             return [...prev, { id: assistantId, role: 'assistant', content: clean }]
           })
+          // Progressive TTS: speak completed sentences while the rest still streams.
+          if (wantSpeak && speakRepliesRef.current) {
+            const sentences = clean.match(/[^.!?]+[.!?]+/g) ?? []
+            if (sentences.length > 0) {
+              const complete = sentences.join(' ').trim()
+              if (complete.length > progressiveSpoken.length) {
+                const neu = complete.slice(progressiveSpoken.length).trim()
+                progressiveSpoken = complete
+                if (neu) void enqueueSpeak(neu)
+              }
+            }
+          }
         }
       }
 
       if (wantSpeak && speakRepliesRef.current && assistantText.trim()) {
-        speak(stripEmDashes(assistantText))
+        const full = stripEmDashes(assistantText)
+        const rest = full.slice(progressiveSpoken.length).trim()
+        if (rest) void enqueueSpeak(rest)
+        else if (!progressiveSpoken) void speak(full)
       }
 
       try {
@@ -1013,13 +1098,15 @@ export default function LandingPage() {
 
         if (!earlyItinerarySet) {
           const intent = state.intent_type as string | undefined
-          const parsedCandidates = state.candidates
+          const placesQuery = typeof state.places_query === 'string' ? state.places_query : ''
+          const queryMatches = Boolean(placesQuery) && askSharesToken(placesQuery, text)
+          const parsedCandidates = state.candidates && queryMatches
             ? placesForAsk(parseCandidates(state.candidates) ?? [], text)
             : null
           const parsedItinerary = state.itinerary ? parseItinerary(state.itinerary) : null
 
-          if (parsedCandidates?.length && (intent === 'LIST_DISCOVERY' || !parsedItinerary) && !soloPlaceModeRef.current) {
-            publishPlaces(parsedCandidates)
+          if (parsedCandidates && (intent === 'LIST_DISCOVERY' || !parsedItinerary) && !soloPlaceModeRef.current) {
+            publishPlaces(parsedCandidates, true)
           } else if (parsedItinerary && intent !== 'LIST_DISCOVERY') {
             setItinerary(parsedItinerary)
             placesRef.current = []
@@ -1149,8 +1236,20 @@ export default function LandingPage() {
     if (effects.mapExpanded !== undefined) setMapExpanded(effects.mapExpanded)
     if (effects.mapOpen === false) setMapExpanded(false)
     if (effects.mapZoomFocus !== undefined) setMapZoomFocus(effects.mapZoomFocus)
-    if (effects.activeStop !== undefined) setActiveStop(effects.activeStop)
-    if (effects.places !== undefined) setPlaces(effects.places)
+    if (effects.activeStop !== undefined) {
+      setActiveStop(effects.activeStop)
+      const focused = effects.activeStop !== null ? placesRef.current[effects.activeStop] : undefined
+      const active = focused ? toActivePlace(focused) : null
+      if (active) {
+        activePlaceRef.current = active
+        setActivePlace(active)
+      }
+    }
+    if (effects.places !== undefined) {
+      const nextPlaces = dedupePlaces(effects.places)
+      placesRef.current = nextPlaces
+      setPlaces(nextPlaces)
+    }
     if (effects.clearItinerary) setItinerary(null)
     if (effects.soloPlaceMode) soloPlaceModeRef.current = true
     if (effects.routeFromUser !== undefined) setRouteFromUser(effects.routeFromUser)
@@ -1171,11 +1270,14 @@ export default function LandingPage() {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return
     if (geoWatchIdRef.current != null) return
     geoWatchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => setUserLocation({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
-      }),
+      (pos) => {
+        const next = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        }
+        setUserLocation((prev) => (prev && distanceKm(prev, next) * 1000 < 5 ? prev : next))
+      },
       () => {},
       { enableHighAccuracy: true, maximumAge: 60_000 },
     )
@@ -1205,12 +1307,16 @@ export default function LandingPage() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (detailsPlace || addOpen || communityOpen || profileTarget || shareTarget || shareConversationId) return
+      if (placeCardOpen) {
+        setPlaceCardOpen(false)
+        return
+      }
       setMapExpanded(false)
       setChatCollapsed(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mapExpanded, detailsPlace, addOpen, communityOpen, profileTarget, shareTarget, shareConversationId])
+  }, [mapExpanded, detailsPlace, addOpen, communityOpen, profileTarget, shareTarget, shareConversationId, placeCardOpen])
 
   useEffect(() => {
     if (!routeInfo) return
@@ -1235,11 +1341,21 @@ export default function LandingPage() {
 
   const handleMarkerClick = useCallback((index: number) => {
     const place = mapPlacesRef.current[index]
-    if (place) clickedPlaceRef.current = place
-    setActiveStop(index)
-    setMapZoomFocus(true)
+    if (place && activePlaceRef.current?.place_id === place.place_id) {
+      setMapVisible(true)
+      setPlaceCardOpen(true)
+      return
+    }
+    if (!place) {
+      setMapVisible(true)
+      setPlaceCardOpen(true)
+      return
+    }
+    rememberActiveRef.current(place)
     setMapVisible(true)
     setPlaceCardOpen(true)
+    if (place && detailsExpandedPref()) setDetailsPlace(place)
+    else setDetailsPlace(null)
     if (isMobile) setChatSnap('collapsed')
   }, [isMobile])
 
@@ -1247,22 +1363,102 @@ export default function LandingPage() {
   // focuses that place's marker (the bubble gives full details); in compact mode
   // it opens the details panel as before.
   const handleGalleryCardClick = useCallback((place: Place) => {
+    if (activePlaceRef.current?.place_id === place.place_id) {
+      setPlaceCardOpen(true)
+      setMapVisible(true)
+      if (!mapExpanded) {
+        setDetailsExpandedPref(true)
+        setDetailsPlace(place)
+      }
+      return
+    }
+    rememberActiveRef.current(place)
     clickedPlaceRef.current = place
     if (mapExpanded) {
       const list = (itinerary?.stops ?? places) as Place[]
       const idx = list.findIndex((p) => p.place_id === place.place_id)
       if (idx >= 0) { handleMarkerClick(idx); return }
     }
+    setDetailsExpandedPref(true)
     setDetailsPlace(place)
   }, [mapExpanded, itinerary, places, handleMarkerClick])
 
-  const handleRouteFromMe = useCallback(async (index: number) => {
-    setActiveStop(index)
+  const focusPlaceOnMap = useCallback((place: Place) => {
+    if (activePlaceRef.current?.place_id === place.place_id) {
+      setPlaceCardOpen(true)
+      setMapVisible(true)
+      return
+    }
+    rememberActiveRef.current(place)
+    clickedPlaceRef.current = place
+    setMapVisible(true)
+    setMapExpanded(false)
+    setChatCollapsed(false)
+    setDetailsExpandedPref(true)
+    setDetailsPlace(place)
+    setPlaceCardOpen(true)
+    const list = (itinerary?.stops?.length ? itinerary.stops : places) as Place[]
+    let idx = list.findIndex((p) => p.place_id && p.place_id === place.place_id)
+    if (idx < 0) idx = list.findIndex((p) => p.name === place.name)
+    if (idx < 0) {
+      const next = dedupePlaces([place, ...places])
+      placesRef.current = next
+      setPlaces(next)
+      idx = next.findIndex((p) => p.place_id === place.place_id)
+      if (idx < 0) idx = 0
+    }
+    setActiveStop(idx)
+    if (isMobile) setChatSnap('collapsed')
+  }, [itinerary, places, isMobile])
+
+  rememberActiveRef.current = (place: Place) => {
+    const active = toActivePlace(place)
+    if (!active) return
+    activePlaceRef.current = active
+    setActivePlace(active)
+    clickedPlaceRef.current = place
+    setAnnotations(EMPTY_ANNOTATIONS)
     setCustomRoute(null)
-    setMapZoomFocus(false)
-    setRouteFromUser(true)
     setRouteInfo(null)
     setRouteError(null)
+    setMapZoomFocus(false)
+    setRouteFromUser(true)
+    setMapVisible(true)
+    setPlaceCardOpen(true)
+    const list = placesRef.current
+    let idx = list.findIndex((p) => p.place_id && p.place_id === place.place_id)
+    if (idx < 0) idx = list.findIndex((p) => p.name.toLowerCase() === place.name.toLowerCase())
+    if (idx < 0) {
+      const next = dedupePlaces([place, ...list])
+      placesRef.current = next
+      setPlaces(next)
+      idx = 0
+    }
+    setActiveStop(idx)
+    setMapZoomFocus(true)
+  }
+
+  const navigateToPlace = useCallback((place: Place) => {
+    rememberActiveRef.current(place)
+    setCustomRoute(null)
+    setRouteInfo(null)
+    setRouteError(null)
+    setMapZoomFocus(false)
+    setRouteFromUser(true)
+    setMapVisible(true)
+  }, [])
+
+  const endRoute = useCallback(() => {
+    setRouteFromUser(false)
+    setCustomRoute(null)
+    setRouteInfo(null)
+    setRouteError(null)
+  }, [])
+
+  const handleRouteFromMe = useCallback(async (index: number) => {
+    const place = mapPlacesRef.current[index]
+    if (place) rememberActiveRef.current(place)
+    else setActiveStop(index)
     setMapVisible(true)
     await ensureUserLocation()
   }, [ensureUserLocation])
@@ -1308,6 +1504,8 @@ export default function LandingPage() {
     try { localStorage.setItem('hodari_active_session', sessionId.current) } catch { /* ignore */ }
     placeMemoryRef.current.clear()
     clickedPlaceRef.current = null
+    activePlaceRef.current = null
+    setActivePlace(null)
     setPlaceCardOpen(false)
     setAnnotations(EMPTY_ANNOTATIONS)
     setMessages([])
@@ -1370,7 +1568,7 @@ export default function LandingPage() {
       setPlaces([])
       setActiveStop(0)
     } else if (message.places?.length) {
-      setPlaces(message.places)
+      setPlaces(dedupePlaces(message.places))
       setItinerary(null)
       setActiveStop(0)
     }
@@ -1685,6 +1883,7 @@ export default function LandingPage() {
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant') ?? null
   const itineraryStops = itinerary?.stops ?? null
   const mapPlaces = (itineraryStops ?? places).map((item) => enrichMapPlace(item, placeMemoryRef.current))
+  const chatResultPlaces = [...messages].reverse().find((message) => message.role === 'assistant' && message.places?.length)?.places ?? []
   mapPlacesRef.current = mapPlaces
   const mapItinerary: ItineraryStop[] | null = itineraryStops
     ? itineraryStops.map((stop, i) => ({ ...mapPlaces[i], ...stop }))
@@ -1701,7 +1900,8 @@ export default function LandingPage() {
   const routeActive = routeFromUser || !!customRoute
   const communityLayerHasData =
     communityLayerOn && (communityPins.length > 0 || communityFriends.length > 0)
-  const hasMapData = mapPlaces.length > 0 || communityLayerHasData
+  const heldRouteId = useSyncExternalStore(subscribeRoute, () => getRouteSnapshot().route?.id ?? 0, () => 0)
+  const hasMapData = mapPlaces.length > 0 || communityLayerHasData || heldRouteId > 0
 
   // ── Mobile sheet discipline ─────────────────────────────────────────────────
   // When the map (base layer) first appears, drop the chat to its peek so the
@@ -1749,7 +1949,7 @@ export default function LandingPage() {
     try {
       const res = await fetch('/api/places')
       const data = await res.json()
-      if (Array.isArray(data.places) && data.places.length) setPlaces(data.places)
+      if (Array.isArray(data.places) && data.places.length) setPlaces(dedupePlaces(data.places))
     } catch { /* form still works with GPS */ }
     finally { setPlacesLoading(false) }
   }, [locateDraft, places.length])
@@ -1769,7 +1969,7 @@ export default function LandingPage() {
       const res = await fetch(`/api/places?${params.toString()}`)
       const data = await res.json()
       if (Array.isArray(data.places)) {
-        const ranked = markPrioritized(data.places, nextLocal, scoringRef.current)
+        const ranked = dedupePlaces(markPrioritized(data.places, nextLocal, scoringRef.current))
         setPlaces(ranked)
         if (ranked.length) setMapVisible(true)
       }
@@ -1802,7 +2002,7 @@ export default function LandingPage() {
       const list = next
         ? all.filter((place) => (place.categories ?? []).includes('market'))
         : all
-      const ranked = markPrioritized(list, false, scoringRef.current)
+      const ranked = dedupePlaces(markPrioritized(list, false, scoringRef.current))
       setPlaces(ranked)
       if (next) {
         setMessages((prev) => [...prev, {
@@ -1850,6 +2050,8 @@ export default function LandingPage() {
       onOpenMapFromMessage={handleOpenMapFromMessage}
       onEditMessage={handleEditMessage}
       onPlaceDetails={handleGalleryCardClick}
+      onFocusPlace={focusPlaceOnMap}
+      activePlaceId={activePlace?.place_id}
       onToggleMapPanel={() => {
         setMapVisible((v) => {
           const next = !v
@@ -1973,15 +2175,19 @@ export default function LandingPage() {
                   locationPending={locationPending}
                   onRouteInfo={setRouteInfo}
                   onRouteError={reportRouteError}
+                  onEndRoute={endRoute}
                   placeCardOpen={placeCardOpen}
                   onPlaceCardClose={() => setPlaceCardOpen(false)}
                   zoomFocusOnActive={mapZoomFocus}
                   aiBusy={loading}
                   size="compact"
                   hideInlinePlaceCard
-                  onPlaceFullDetails={setDetailsPlace}
+                  onPlaceFullDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
                   onPlaceSave={handleSavePlace}
                   onPlaceRoute={handleRouteFromMe}
+                  onNavigatePlace={navigateToPlace}
+                  activePlace={activePlace}
+                  chatPlaces={chatResultPlaces}
                   onExpand={() => { setMapExpanded(true); setMapVisible(true); setChatCollapsed(false) }}
                   selectedPlace={selectedPlace}
                   routeInfo={routeInfo}
@@ -2014,7 +2220,10 @@ export default function LandingPage() {
       {/* Expanded full-screen map — `isolate` creates a stacking context so Google
           Maps' internal z-indices (up to ~1000002) don't escape and cover the chat */}
       {!isMobile && mapExpanded && (
-        <div className="absolute inset-0 isolate">
+        <div
+          className="absolute inset-y-0 right-0 isolate"
+          style={{ left: chatCollapsed ? 0 : chatWidth }}
+        >
           <MapView
             loading={placesLoading && mapPlaces.length === 0}
             places={mapPlaces as Place[]}
@@ -2035,15 +2244,19 @@ export default function LandingPage() {
             locationPending={locationPending}
             onRouteInfo={setRouteInfo}
             onRouteError={reportRouteError}
+            onEndRoute={endRoute}
             routeInfo={routeInfo}
             placeCardOpen={placeCardOpen}
             onPlaceCardClose={() => setPlaceCardOpen(false)}
             zoomFocusOnActive={mapZoomFocus}
             aiBusy={loading}
             onCollapse={() => { setMapExpanded(false); setChatCollapsed(false) }}
-            onPlaceFullDetails={setDetailsPlace}
+            onPlaceFullDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
             onPlaceSave={handleSavePlace}
             onPlaceRoute={handleRouteFromMe}
+            onNavigatePlace={navigateToPlace}
+            activePlace={activePlace}
+            chatPlaces={chatResultPlaces}
             savedPlaceIds={savedPlaceIds}
             communityPins={communityPins}
             communityFriends={communityFriends}
@@ -2077,20 +2290,34 @@ export default function LandingPage() {
             <PlaceCardStrip
               places={places}
               activeIndex={activeStop}
+              activePlaceId={activePlace?.place_id}
               onSelect={handleMarkerClick}
-              onShowDetails={setDetailsPlace}
+              onShowDetails={(place) => {
+                if (activePlaceRef.current?.place_id !== place.place_id) rememberActiveRef.current(place)
+                else setPlaceCardOpen(true)
+                setDetailsExpandedPref(true)
+                setDetailsPlace(place)
+              }}
               onRouteFromMe={handleRouteFromMe}
-              leftOffset={chatCollapsed ? 0 : chatWidth}
+              onFocusPlace={focusPlaceOnMap}
+              leftOffset={0}
             />
           )}
           {itineraryStops && itineraryStops.length > 0 && (
             <PlaceCardStrip
               places={itineraryStops.map((s) => ({ ...s, personalization_score: 0, categories: [] })) as Place[]}
               activeIndex={activeStop}
+              activePlaceId={activePlace?.place_id}
               onSelect={handleMarkerClick}
-              onShowDetails={(stop) => setDetailsPlace(stop)}
+              onShowDetails={(stop) => {
+                if (activePlaceRef.current?.place_id !== stop.place_id) rememberActiveRef.current(stop)
+                else setPlaceCardOpen(true)
+                setDetailsExpandedPref(true)
+                setDetailsPlace(stop)
+              }}
               onRouteFromMe={handleRouteFromMe}
-              leftOffset={chatCollapsed ? 0 : chatWidth}
+              onFocusPlace={focusPlaceOnMap}
+              leftOffset={0}
             />
           )}
         </div>
@@ -2099,6 +2326,7 @@ export default function LandingPage() {
       {/* Chat overlay on the expanded map — conversation stays reachable */}
       {!isMobile && mapExpanded && !chatCollapsed && (
         <div
+          data-map-pad="chat"
           className="absolute top-0 bottom-0 left-0 z-[200] flex flex-col bg-bg/95 backdrop-blur-md border-r border-border animate-slide-left"
           style={{ width: chatWidth }}
         >
@@ -2173,6 +2401,7 @@ export default function LandingPage() {
               locationPending={locationPending}
               onRouteInfo={setRouteInfo}
               onRouteError={reportRouteError}
+              onEndRoute={endRoute}
               routeInfo={routeInfo}
               placeCardOpen={placeCardOpen}
               onPlaceCardClose={() => setPlaceCardOpen(false)}
@@ -2180,9 +2409,12 @@ export default function LandingPage() {
               aiBusy={loading}
               onExpand={mapExpanded ? undefined : () => { setMapExpanded(true); setMapVisible(true); setChatSnap('collapsed') }}
               onCollapse={mapExpanded ? () => { setMapExpanded(false); setChatSnap('half') } : undefined}
-              onPlaceFullDetails={setDetailsPlace}
+              onPlaceFullDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
               onPlaceSave={handleSavePlace}
               onPlaceRoute={handleRouteFromMe}
+              onNavigatePlace={navigateToPlace}
+              activePlace={activePlace}
+              chatPlaces={chatResultPlaces}
               savedPlaceIds={savedPlaceIds}
               communityPins={communityPins}
               communityFriends={communityFriends}
@@ -2216,9 +2448,16 @@ export default function LandingPage() {
                 <PlaceCardStrip
                   places={places}
                   activeIndex={activeStop}
+                  activePlaceId={activePlace?.place_id}
                   onSelect={handleMarkerClick}
-                  onShowDetails={setDetailsPlace}
+                  onShowDetails={(place) => {
+                if (activePlaceRef.current?.place_id !== place.place_id) rememberActiveRef.current(place)
+                else setPlaceCardOpen(true)
+                setDetailsExpandedPref(true)
+                setDetailsPlace(place)
+              }}
                   onRouteFromMe={handleRouteFromMe}
+                  onFocusPlace={focusPlaceOnMap}
                   leftOffset={0}
                 />
               </div>
@@ -2228,9 +2467,16 @@ export default function LandingPage() {
                 <PlaceCardStrip
                   places={itineraryStops.map((s) => ({ ...s, personalization_score: 0, categories: [] })) as Place[]}
                   activeIndex={activeStop}
+                  activePlaceId={activePlace?.place_id}
                   onSelect={handleMarkerClick}
-                  onShowDetails={(stop) => setDetailsPlace(stop)}
+                  onShowDetails={(stop) => {
+                if (activePlaceRef.current?.place_id !== stop.place_id) rememberActiveRef.current(stop)
+                else setPlaceCardOpen(true)
+                setDetailsExpandedPref(true)
+                setDetailsPlace(stop)
+              }}
                   onRouteFromMe={handleRouteFromMe}
+                  onFocusPlace={focusPlaceOnMap}
                   leftOffset={0}
                 />
               </div>
@@ -2266,6 +2512,7 @@ export default function LandingPage() {
                   index={activeStop}
                   onClose={() => setPlaceCardOpen(false)}
                   onRoute={(index) => { void handleRouteFromMe(index) }}
+                  onDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
                 />
               </div>
             </div>
@@ -2282,7 +2529,14 @@ export default function LandingPage() {
           fallbackPlace={detailsPlace}
           userLocation={userLocation}
           onClose={() => setDetailsPlace(null)}
+          onViewInApp={focusPlaceOnMap}
           onShare={() => setShareTarget(detailsPlace)}
+          onWalk={() => { setRouteMode('WALK'); rememberActiveRef.current(detailsPlace) }}
+          onDrive={() => { setRouteMode('DRIVE'); rememberActiveRef.current(detailsPlace) }}
+          onSave={() => handleSavePlace(detailsPlace)}
+          saved={savedPlaceIds.has(detailsPlace.place_id)}
+          distance={routeInfo?.destinationName === detailsPlace.name ? routeInfo.distance : undefined}
+          duration={routeInfo?.destinationName === detailsPlace.name ? routeInfo.duration : undefined}
         />
       )}
 

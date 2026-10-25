@@ -32,24 +32,32 @@ function buildSearch(params: PlacesQueryState): string {
 }
 
 export function useAdminPlacesList(initial: PlacesQueryState) {
-  const [query, setQuery] = useState<PlacesQueryState>(initial)
+  const [query, setQuery] = useState<PlacesQueryState>({ ...initial, limit: initial.limit ?? 20 })
   const [data, setData] = useState<PlacesListResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [slow, setSlow] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
+    setSlow(false)
+    const slowTimer = window.setTimeout(() => setSlow(true), 8000)
+    const ctrl = new AbortController()
+    const abortTimer = window.setTimeout(() => ctrl.abort(), 12000)
     try {
-      const res = await fetch(`/api/admin/places?${buildSearch(query)}`, { credentials: 'include', cache: 'no-store' })
+      const res = await fetch(`/api/admin/places?${buildSearch(query)}`, { credentials: 'include', cache: 'no-store', signal: ctrl.signal })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(json.error ?? 'load_failed')
-        setData(null)
+        setError(typeof json.error === 'string' ? json.error : 'load_failed')
         return
       }
       setData(json as PlacesListResponse)
+    } catch {
+      setError('timeout')
     } finally {
+      window.clearTimeout(slowTimer)
+      window.clearTimeout(abortTimer)
       setLoading(false)
     }
   }, [query])
@@ -58,5 +66,5 @@ export function useAdminPlacesList(initial: PlacesQueryState) {
     void load()
   }, [load])
 
-  return { query, setQuery, data, loading, error, reload: load }
+  return { query, setQuery, data, loading, slow, error, reload: load, setData }
 }

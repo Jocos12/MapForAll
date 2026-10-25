@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { extractDocs, isMcpUnavailable, mcpCall, mcpConnected } from '@/lib/mcp'
+import { belongsToOwner } from '@/lib/ownership'
 import { findUserById, setOwnedPlaces, type HodariUser } from '@/lib/users'
 
 export const DB = process.env.MONGODB_DATABASE ?? 'hodari'
@@ -59,16 +60,22 @@ export async function resolveOwnedPlace(uid: string, requested: string | null = 
       collection: 'places',
       filter: {
         $or: [
-          { place_id: { $in: user.owned_place_ids } },
+          { owner_id: user.user_id },
+          { place_id: { $in: user.owned_place_ids.length ? user.owned_place_ids : ['__none__'] } },
           { added_by: user.user_id, claimed_by_owner: true },
         ],
       },
-      projection: { _id: 0, place_id: 1, name: 1, categories: 1, status: 1, paused: 1, added_by: 1, claimed_by_owner: 1, created_at: 1 },
+      projection: { _id: 0, place_id: 1, name: 1, categories: 1, status: 1, paused: 1, added_by: 1, owner_id: 1, claimed_by_owner: 1, created_at: 1 },
       limit: 20,
     }))
     const mine = rows.filter((row) =>
       typeof row.place_id === 'string' &&
-      (user.owned_place_ids.includes(row.place_id) || (row.added_by === user.user_id && row.claimed_by_owner === true)),
+      belongsToOwner(user.user_id, {
+        place_id: row.place_id,
+        owner_id: typeof row.owner_id === 'string' ? row.owner_id : null,
+        added_by: typeof row.added_by === 'string' ? row.added_by : null,
+        claimed_by_owner: row.claimed_by_owner === true,
+      }, user.owned_place_ids),
     )
     const order = (id: string) => {
       const index = user.owned_place_ids.indexOf(id)

@@ -1,5 +1,6 @@
 import type { Place } from '@/lib/types'
 import { requestedCategory } from '@/lib/placeCategory'
+import { dedupePlaces } from '@/lib/placeDedupe'
 
 /**
  * Fetch validated MapForAll listings that match the user ask.
@@ -22,14 +23,9 @@ export async function fetchCatalogPlaces(ask: string, signal?: AbortSignal): Pro
     .replace(/[?!.,]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 80)
-  // Name search when no category/filter chip alone — "Coffee Shop", "Ivuka Arts", etc.
-  if (q.length >= 2 && !category && !params.has('local_business') && !params.has('accessible')) {
-    params.set('q', q)
-  } else if (q.length >= 2 && category) {
-    // Still pass q when category is set so exact names within the category rank first.
-    params.set('q', q)
-  }
+    .slice(0, 120)
+  // Free-text q always — API matches name + description (+ synonyms). Exact names still win.
+  if (q.length >= 2) params.set('q', q)
 
   if (![...params.keys()].length) return []
 
@@ -43,15 +39,7 @@ export async function fetchCatalogPlaces(ask: string, signal?: AbortSignal): Pro
   }
 }
 
-/** Catalog (Mongo validated) first, then agent/Maps — same place_id kept once. */
+/** Catalog (Mongo validated) first, then agent/Maps. The same venue is kept once. */
 export function mergeCatalogFirst(catalog: Place[], agent: Place[]): Place[] {
-  const seen = new Set<string>()
-  const out: Place[] = []
-  for (const place of [...catalog, ...agent]) {
-    const id = place.place_id || place.name
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    out.push(place)
-  }
-  return out
+  return dedupePlaces([...catalog, ...agent])
 }

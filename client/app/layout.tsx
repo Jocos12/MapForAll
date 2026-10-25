@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
-import { I18nProvider } from '@/components/I18nProvider'
+import { cookies } from 'next/headers'
+import { I18nProvider, type Lang } from '@/components/I18nProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -20,9 +21,12 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const jar = await cookies()
+  const saved = jar.get('hodari_lang')?.value
+  const lang: Lang = saved === 'en' || saved === 'rw' || saved === 'fr' ? saved : 'fr'
   return (
-    <html lang="fr" suppressHydrationWarning>
+    <html lang={lang} suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -31,7 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-sans bg-bg text-text antialiased">
-        <I18nProvider>{children}</I18nProvider>
+        <I18nProvider initialLang={lang}>{children}</I18nProvider>
       </body>
     </html>
   )

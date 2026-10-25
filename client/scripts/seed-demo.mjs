@@ -233,7 +233,7 @@ async function main() {
       added_by: author.user_id,
       claimed_by_owner: i % 7 === 0,
       confirmations_count: Math.floor(Math.random() * 12),
-      views: Math.floor(Math.random() * 400) + (status === 'validated' ? 40 : 0),
+      views: status === 'validated' ? Math.floor(Math.random() * 400) + 40 : 0,
       photo_url: null,
       photos: [],
       rejection_reason: status === 'rejected' ? 'incomplete_info' : null,

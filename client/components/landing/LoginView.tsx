@@ -11,6 +11,7 @@ import { LiveProvider, NotificationBanner, PauseToggle, TalkingDevice, useLive }
 import { useTransitionLinks } from '@/components/landing/pageTransition'
 import { APPLE_EASE, BlurInWords, IntroIn } from '@/components/landing/scrollFx'
 import { useI18n } from '@/components/I18nProvider'
+import { clearLocalAuth } from '@/lib/authClient'
 import { OtpStep, type OtpChallenge } from '@/components/landing/OtpStep'
 
 /**
@@ -610,8 +611,8 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
   }
 
   function onVerified(target: string) {
-    // Let the check mark land before leaving the page.
-    window.setTimeout(() => { window.location.href = target }, reduced ? 0 : 450)
+    clearLocalAuth()
+    window.location.replace(target)
   }
 
   const roles = [

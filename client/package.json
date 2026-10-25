@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "node --experimental-strip-types --test lib/lifecycle.test.ts lib/sessionRules.test.ts lib/dashboardRules.test.ts lib/viewRules.test.ts",
     "seed:demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {

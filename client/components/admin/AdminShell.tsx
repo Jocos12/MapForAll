@@ -31,6 +31,7 @@ import {
   X,
 } from 'lucide-react'
 import { useI18n, type Lang } from '@/components/I18nProvider'
+import { Avatar } from '@/components/ui/Avatar'
 import { logoutAndRedirect } from '@/lib/authClient'
 import { ToastProvider } from '@/components/ui/Toast'
 import { AdminNavProgress } from '@/components/admin/AdminNavProgress'
@@ -91,6 +92,8 @@ export function AdminShell({
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [bellOpen, setBellOpen] = useState(false)
   const [avatarOpen, setAvatarOpen] = useState(false)
+  const [photo, setPhoto] = useState<string | null>(null)
+  const [displayName, setDisplayName] = useState(actor.name || '')
 
   const active = useMemo(
     () => ADMIN_NAV.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)) ?? ADMIN_NAV[0],
@@ -103,6 +106,29 @@ export function AdminShell({
       document.documentElement.classList.remove('admin-app')
       // Never leave body locked if a modal was mid-open during unmount.
       document.body.style.overflow = ''
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetch('/api/account', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        const profile = json?.profile
+        if (!profile) return
+        if (typeof profile.name === 'string') setDisplayName(profile.name)
+        if (typeof profile.avatar === 'string' || profile.avatar === null) setPhoto(profile.avatar)
+      })
+      .catch(() => {})
+    const onLocal = (event: Event) => setPhoto((event as CustomEvent<string | null>).detail)
+    window.addEventListener('hodari-avatar', onLocal)
+    let channel: BroadcastChannel | null = null
+    try {
+      channel = new BroadcastChannel('hodari-avatar')
+      channel.onmessage = (event) => setPhoto(event.data?.url ?? null)
+    } catch { /* unsupported */ }
+    return () => {
+      window.removeEventListener('hodari-avatar', onLocal)
+      channel?.close()
     }
   }, [])
 
@@ -159,7 +185,7 @@ export function AdminShell({
 
   const sidebar = (
     <aside
-      className={`flex h-full flex-col border-r border-black/[0.06] bg-[#141210] text-[#FBF3E7] transition-[width] duration-300 ${collapsed ? 'w-[72px]' : 'w-[248px]'}`}
+      className={`flex h-full flex-col border-r border-black/[0.06] bg-[#141210] text-[#FBF3E7] transition-[width] duration-200 ${collapsed ? 'w-[72px]' : 'w-[248px]'}`}
     >
       <div className={`flex items-center gap-3 px-4 py-5 ${collapsed ? 'justify-center' : ''}`}>
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E8672A] text-[11px] font-bold text-white">MF</span>
@@ -221,7 +247,7 @@ export function AdminShell({
               initial={reduced ? false : { x: -260 }}
               animate={{ x: 0 }}
               exit={reduced ? undefined : { x: -260 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              transition={{ duration: reduced ? 0 : 0.2 }}
             >
               {sidebar}
             </motion.div>
@@ -315,10 +341,10 @@ export function AdminShell({
             <button
               type="button"
               onClick={() => { setAvatarOpen((v) => !v); setBellOpen(false) }}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#E8672A]/15 text-[12px] font-semibold text-[#E8672A]"
+              className="flex h-11 w-11 items-center justify-center rounded-full"
               aria-label={t('admin.shell.account')}
             >
-              {(actor.name || actor.email).slice(0, 1).toUpperCase()}
+              <Avatar src={photo} name={displayName || actor.email} seed={actor.email} size="md" />
             </button>
             <AnimatePresence>
               {avatarOpen && (
@@ -329,7 +355,7 @@ export function AdminShell({
                   className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-black/10 bg-white py-1 shadow-xl dark:border-white/10 dark:bg-[#1A1614]"
                 >
                   <div className="border-b border-black/5 px-3 py-2 dark:border-white/10">
-                    <p className="truncate text-[13px] font-medium">{actor.name || actor.email}</p>
+                    <p className="truncate text-[13px] font-medium">{displayName || actor.email}</p>
                     <p className="truncate text-[11px] text-[#6E5B50]">{actor.role}</p>
                   </div>
                   <Link href="/admin/settings" onClick={() => setAvatarOpen(false)} className="flex items-center gap-2 px-3 py-2 text-[13px] hover:bg-black/[0.04] dark:hover:bg-white/5">
@@ -350,7 +376,7 @@ export function AdminShell({
 
         <main className="admin-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6">
           <ToastProvider>
-            <AnimatePresence mode="wait">
+            <AnimatePresence>
               <motion.div
                 key={pathname}
                 initial={reduced ? false : { opacity: 0, y: 6 }}
@@ -375,6 +401,7 @@ export function AdminShell({
               initial={reduced ? false : { opacity: 0, y: 12, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={reduced ? undefined : { opacity: 0, y: 8 }}
+              transition={{ duration: reduced ? 0 : 0.2 }}
               className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-[#1A1614]"
             >
               <div className="flex items-center gap-2 border-b border-black/5 px-3 dark:border-white/10">

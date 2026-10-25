@@ -275,7 +275,9 @@ def _make_tools(planner_url: str, explorer_url: str, itinerary_url: str):
             return text
         if not ok:
             logger.warning("explorer returned unvalidated CandidateSet; passing through best effort")
-        return text or "[]"
+        from hodari.tools.place_dedupe import rewrite_candidates_json
+
+        return rewrite_candidates_json(text, limit=10) or text or "[]"
 
     def call_itinerary(plan_json: str, candidates_json: str) -> str:
         """Call the remote Itinerary service to build a routed itinerary.
@@ -297,7 +299,9 @@ def _make_tools(planner_url: str, explorer_url: str, itinerary_url: str):
             return text
         if not ok:
             logger.warning("itinerary returned too few stops after retry; passing through best effort")
-        return text or '{"error": "itinerary returned empty response"}'
+        from hodari.tools.place_dedupe import rewrite_itinerary_json
+
+        return rewrite_itinerary_json(text) or text or '{"error": "itinerary returned empty response"}'
 
     return call_planner, call_explorer, call_itinerary
 
@@ -398,8 +402,10 @@ For refinements ("cheaper option", "only 2 hours", "add one more stop"):
 Keep answers concise — users are on mobile near a stadium.
 """
 
+    from hodari.llm import on_model_error_callback, resolve_agent_model
+
     return LlmAgent(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        model=resolve_agent_model(),
         name="hodari",
         description="MapForAll (Ikarita ya Bose) — guide for accessible places and local businesses",
         instruction=REMOTE_ORCHESTRATOR_INSTRUCTION,
@@ -410,4 +416,5 @@ Keep answers concise — users are on mobile near a stadium.
             call_explorer,
             call_itinerary,
         ],
+        on_model_error_callback=on_model_error_callback,
     )

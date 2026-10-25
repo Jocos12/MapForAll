@@ -23,6 +23,12 @@ from .place_schema import with_place_defaults
 
 logger = logging.getLogger(__name__)
 
+_EMBED_TTL_S = 600
+_PROFILE_TTL_S = 60
+_embed_cache: dict[str, tuple[float, list[float]]] = {}
+_profile_cache: dict[str, tuple[float, dict]] = {}
+_memory_cache_lock = threading.Lock()
+
 MDB_MCP_URL = os.getenv("MONGODB_MCP_URL", "http://localhost:3100/mcp")
 HODARI_DB = os.getenv("MONGODB_DATABASE", "hodari")
 
@@ -159,6 +165,13 @@ def _embed(text: str) -> list[float]:
     import google.auth
     import google.auth.transport.requests as _tr
 
+    key = " ".join((text or "").lower().split())
+    now = time.monotonic()
+    with _memory_cache_lock:
+        hit = _embed_cache.get(key)
+        if hit and now < hit[0]:
+            return list(hit[1])
+
     started = time.perf_counter()
     creds, detected_project = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
@@ -183,7 +196,10 @@ def _embed(text: str) -> list[float]:
     )
     resp.raise_for_status()
     _record_substep("vertex_embed:text-embedding-004", started)
-    return resp.json()["predictions"][0]["embeddings"]["values"]
+    values = list(resp.json()["predictions"][0]["embeddings"]["values"])
+    with _memory_cache_lock:
+        _embed_cache[key] = (time.monotonic() + _EMBED_TTL_S, values)
+    return list(values)
 
 
 # ── ADK tool helpers ─────────────────────────────────────────────────────────
@@ -230,6 +246,12 @@ def load_user_profile(tool_context: ToolContext) -> dict:
     cached = tool_context.state.get("user_profile")
     if isinstance(cached, dict) and cached.get("user_id") == uid:
         return cached
+    now = time.monotonic()
+    with _memory_cache_lock:
+        hit = _profile_cache.get(uid)
+        if hit and now < hit[0]:
+            tool_context.state["user_profile"] = hit[1]
+            return dict(hit[1])
     try:
         result = _mcp_tool("find", {
             "database": HODARI_DB,
@@ -241,9 +263,13 @@ def load_user_profile(tool_context: ToolContext) -> dict:
         if docs:
             doc = {k: v for k, v in docs[0].items() if k != "_id"}
             tool_context.state["user_profile"] = doc
+            with _memory_cache_lock:
+                _profile_cache[uid] = (time.monotonic() + _PROFILE_TTL_S, doc)
             return doc
         profile = {"user_id": uid, "new_user": True}
         tool_context.state["user_profile"] = profile
+        with _memory_cache_lock:
+            _profile_cache[uid] = (time.monotonic() + _PROFILE_TTL_S, profile)
         return profile
     except Exception as exc:
         logger.warning("load_user_profile failed: %s", exc)
@@ -663,6 +689,40 @@ def submit_community_place(
         return {"ok": False, "error": "invalid coordinates"}
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         return {"ok": False, "error": "coordinates out of range"}
+
+    try:
+        from .place_dedupe import find_duplicate, normalize_name
+
+        tokens = [word for word in normalize_name(clean_name).split() if len(word) >= 3]
+        token = max(tokens, key=len) if tokens else ""
+        existing: list[dict] = []
+        if token:
+            found = _mcp_tool(
+                "find",
+                {
+                    "database": HODARI_DB,
+                    "collection": "places",
+                    "filter": {"name": {"$regex": re.escape(token), "$options": "i"}},
+                    "projection": {"embedding": 0, "photos": 0},
+                    "limit": 40,
+                },
+            )
+            existing = _parse_docs(found)
+        duplicate = find_duplicate(
+            {
+                "name": clean_name,
+                "coordinates": {"lat": lat, "lng": lng},
+            },
+            existing,
+        )
+        if duplicate:
+            return {
+                "ok": False,
+                "error": "duplicate",
+                "place_id": duplicate.get("place_id"),
+            }
+    except Exception as exc:
+        logger.info("duplicate check skipped: %s", exc)
 
     place_id = f"user_{uuid.uuid4().hex[:12]}"
     doc = with_place_defaults(
