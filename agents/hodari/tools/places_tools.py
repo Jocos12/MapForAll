@@ -79,15 +79,15 @@ def find_places_by_vector(
         tool_context: Injected by ADK.
     """
     canonical_city = _normalize_city(city)
-    if canonical_city not in SEEDED_CITIES:
-        if "kigali" in (city or "").lower():
-            logger.info("VECTOR_SEARCH not used for Kigali; a geo query on the user coordinates runs instead")
-        else:
-            logger.info(
-                "VECTOR_SEARCH skipped: city=%r -> canonical=%r (not in seeded host cities)",
-                city,
-                canonical_city,
-            )
+    local_city = "kigali" in (city or "").lower() or canonical_city.lower() == "kigali"
+    if local_city:
+        canonical_city = "Kigali"
+    elif canonical_city not in SEEDED_CITIES:
+        logger.info(
+            "VECTOR_SEARCH skipped: city=%r -> canonical=%r (not in seeded host cities)",
+            city,
+            canonical_city,
+        )
         return []
 
     try:

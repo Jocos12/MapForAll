@@ -282,6 +282,57 @@ export default function AdminCategoriesPage() {
           ))}
         </ul>
       </section>
+
+      <ExpansionEditor />
     </div>
+  )
+}
+
+function ExpansionEditor() {
+  const { toast } = useToast()
+  const [text, setText] = useState('')
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    void fetch('/api/admin/search-expansions', { credentials: 'include', cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.expansions) setText(JSON.stringify(json.expansions, null, 2))
+      })
+      .finally(() => setReady(true))
+  }, [])
+
+  const save = async () => {
+    let expansions: unknown
+    try { expansions = JSON.parse(text) } catch {
+      toast({ title: 'The expansions are not valid JSON.', tone: 'danger' })
+      return
+    }
+    const res = await fetch('/api/admin/search-expansions', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expansions }),
+    })
+    toast({ title: res.ok ? 'Search words saved.' : 'Could not save search words.', tone: res.ok ? 'success' : 'danger' })
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-lg font-semibold">Search words</h2>
+      <p className="text-[13px] text-[#6E5B50]">
+        Related words in English, French, and Kinyarwanda. A place must match one of these to appear.
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={!ready}
+        rows={12}
+        className="w-full rounded-xl border border-black/10 bg-white p-3 font-mono text-[12px] dark:border-white/10 dark:bg-white/5"
+      />
+      <button type="button" onClick={() => void save()} className="rounded-xl bg-[#E8672A] px-3 py-2 text-[13px] text-white">
+        Save search words
+      </button>
+    </section>
   )
 }

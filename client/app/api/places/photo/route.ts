@@ -8,7 +8,7 @@ const DB = process.env.MONGODB_DATABASE ?? 'hodari'
 export async function GET(req: NextRequest) {
   const placeId = (req.nextUrl.searchParams.get('placeId') ?? '').trim()
   const index = Number(req.nextUrl.searchParams.get('i') ?? '0')
-  if (!/^user_[a-z0-9]{6,32}$/i.test(placeId) || !Number.isInteger(index) || index < 0 || index > 7) {
+  if (!/^[A-Za-z0-9_:-]{3,80}$/.test(placeId) || placeId.includes('..') || !Number.isInteger(index) || index < 0 || index > 7) {
     return new NextResponse(null, { status: 400 })
   }
   try {

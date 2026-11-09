@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/Toast'
 type ReviewItem = {
   key: string
   placeId: string
+  placeName?: string
   rating: number
   comment: string
   firstName: string
@@ -138,7 +139,11 @@ export default function AdminReviewsPage() {
 
       <div className="overflow-hidden rounded-2xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
         {loading ? (
-          <p className="p-6 text-[13px]">{t('admin.moderation.loading')}</p>
+          <div className="space-y-2 p-4" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-16 animate-pulse rounded-xl bg-black/5 dark:bg-white/10" />
+            ))}
+          </div>
         ) : tab === 'reviews' ? (
           items.length === 0 ? (
             <EmptyState title={t('admin.reviews.empty')} />
@@ -156,8 +161,8 @@ export default function AdminReviewsPage() {
                         <span className="ml-2 rounded bg-[#E8672A]/15 px-1.5 text-[10px] text-[#E8672A]">{r.flag}</span>
                       )}
                     </p>
-                    <p className="mt-1 text-[12px] text-[#6E5B50]">{r.placeId}</p>
-                    <p className="mt-2 text-[13px]">{r.comment || '—'}</p>
+                    <p className="mt-1 text-[12px] text-[#6E5B50]">{r.placeName || '—'}</p>
+                    <p className="mt-2 text-[13px]">{r.comment.trim() ? r.comment : '—'}</p>
                   </div>
                   <div className="mt-2 flex gap-2 md:mt-0">
                     <button

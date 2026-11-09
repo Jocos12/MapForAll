@@ -3,8 +3,7 @@ import { asId, getSession } from '@/lib/session'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
 import { consume, refund, isUnlimited, unlimitedEntitlement, type Identity } from '@/lib/billing'
 import { adkAuthHeaders } from '@/lib/gcpAuth'
-import { failoverAfterGemini, adkFailureIsRetryable } from '@/lib/ai/providers'
-import { detectMessageLang } from '@/lib/detectLang'
+import { adkFailureIsRetryable } from '@/lib/ai/providers'
 import { logSearchQuery } from '@/lib/searchLogs'
 
 // Full pipeline (Planner → Explorer → Itinerary) can exceed 2 minutes locally.
@@ -14,7 +13,7 @@ export const runtime = 'nodejs'
 const ADK_BASE = process.env.ADK_BASE_URL ?? 'http://localhost:8000'
 const APP_NAME = process.env.ADK_APP_NAME ?? 'hodari'
 const MAX_USER_TURNS = 6
-const REPLY_CACHE_TTL_MS = 30 * 60_000
+const REPLY_CACHE_TTL_MS = 5 * 60_000
 
 type AdkEvent = {
   author?: string
@@ -24,7 +23,12 @@ type AdkEvent = {
 const replyCache = new Map<string, { at: number; body: Uint8Array }>()
 
 function normalizeMessage(message: string): string {
-  return message.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 280)
+  const rounded = message.replace(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/g, (_match, lat, lng) => {
+    const step = 0.0027
+    const bucket = (value: string) => (Math.round(Number(value) / step) * step).toFixed(4)
+    return `${bucket(lat)},${bucket(lng)}`
+  })
+  return rounded.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 280)
 }
 
 function skipReplyCache(message: string): boolean {
@@ -218,28 +222,19 @@ export async function POST(req: NextRequest) {
         : (await adkRes.text().catch(() => '')).slice(0, 300)
     const status = adkRes?.status ?? 0
     if (adkFailureIsRetryable(status, detail)) {
-      try {
-        const fallback = await failoverAfterGemini(message, detectMessageLang(message))
-        if (fallback) {
-          console.error(`[ai] Gemini agent unavailable (${status}); answered with ${fallback.provider}`)
-          const payload = JSON.stringify({
-            author: 'hodari',
-            content: { parts: [{ text: fallback.text }] },
-          })
-          return new Response(`data: ${payload}\n\n`, {
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache, no-transform',
-              'X-Accel-Buffering': 'no',
-              'X-Hodari-Provider': fallback.provider,
-              'X-Hodari-Free-Remaining': String(spend.entitlement.freeRemaining),
-              'X-Hodari-Credits': String(spend.entitlement.credits),
-            },
-          })
-        }
-      } catch (err) {
-        console.error('[ai] fallback failed', err)
-      }
+      const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
+      console.error(`[ai] status=${status} model=${model} attempt=1 detail=${detail.slice(0, 180)}`)
+      const text = 'Nos assistants sont temporairement surchargés, réessaie dans un instant. Our assistants are temporarily overloaded, please try again in a moment.'
+      const payload = JSON.stringify({ author: 'hodari', content: { parts: [{ text }] } })
+      return new Response(`data: ${payload}\n\n`, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Accel-Buffering': 'no',
+          'X-Hodari-Free-Remaining': String(spend.entitlement.freeRemaining),
+          'X-Hodari-Credits': String(spend.entitlement.credits),
+        },
+      })
     }
     // The run never started — give the generation back (unless we failed open
     // or this is an owner who never spent one).

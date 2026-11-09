@@ -60,7 +60,11 @@ def test_tomates_kigali_matches_every_tomato_query():
     assert listing_is_public(place) is True
     assert listing_is_public({"status": "pending", "name": "Tomates Kigali"}) is False
     assert listing_is_public({"status": "validated", "paused": True}) is False
-    assert equity_bonus({"local_business": True}, prefer_local=False) == BONUS_CAP
+    assert equity_bonus({"local_business": True}, prefer_local=False) == 0.25
+    typo = extract_search_intent("tomatoe")
+    assert typo.category == "market"
+    assert is_relevant(place, typo) is True
+    assert BONUS_CAP == 0.5
 
 
 def test_bonus_cannot_admit_or_outrank_an_irrelevant_place():
@@ -142,9 +146,29 @@ def test_google_place_types_pass_the_category_gate():
     assert is_relevant(lodging, market_intent) is False
 
 
+def test_small_talk_is_not_a_place_search():
+    intent = extract_search_intent("how are you")
+    assert intent.category is None
+    assert intent.keywords == []
+    assert intent.maps_query == ""
+
+
 def test_empty_live_search_offers_a_wider_radius():
     text = draft_reply([], "where can i find the Hotel?", widen=True)
+    assert "hotel" in text.lower()
+    assert "where can i find" not in text.lower()
     assert "widen" in text.lower()
+
+
+def test_few_matches_say_so():
+    text = draft_reply(
+        [{"name": "Kigali Phone Shop"}],
+        "where can I find an iPhone",
+    )
+    assert "Kigali Phone Shop" in text
+    assert "where can i find" not in text.lower()
+    assert "coffee" not in text.lower()
+    assert "widen" not in text.lower()
 
 
 def test_draft_names_only_the_list():

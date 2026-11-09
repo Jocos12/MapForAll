@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { Clock, Eye, MapPin, Phone, Star } from 'lucide-react'
 import { useI18n } from '@/components/I18nProvider'
-import { CategoryIcon } from '@/components/CategoryIcon'
 import { PlaceBadges } from '@/components/PlaceBadges'
+import { PlaceImage } from '@/components/PlaceImage'
 import { PlaceDetailsPanel } from '@/components/PlaceDetailsPanel'
 import { formatAverage } from '@/components/business/StatCards'
 import { useBizTheme } from '@/components/business/theme'
@@ -35,14 +35,16 @@ export function ListingPreview({ data }: { data: OwnerDashboard }) {
 
       <div className="mt-4 grid gap-4 md:grid-cols-[300px_1fr]">
         <div className="biz-native rounded-xl bg-white p-3 text-gray-900 shadow-[0_10px_28px_rgba(0,0,0,0.12)] ring-1 ring-black/5">
-          {place.photo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={place.photo_url} alt="" className="mb-2 h-32 w-full rounded-lg object-cover" />
-          ) : (
-            <div className="mb-2 flex h-32 w-full items-center justify-center rounded-lg bg-[#F4F4F5] text-[#71717A]">
-              <CategoryIcon categories={place.categories} className="h-8 w-8" />
-            </div>
-          )}
+          <div className="mb-2 h-32 overflow-hidden rounded-lg">
+            <PlaceImage
+              place={previewPlace}
+              width={300}
+              height={128}
+              className="h-full w-full"
+              allowAddPhotos={!place.photo_url && !(place.photos?.length)}
+              addPhotosHref="/business/dashboard#biz-photos"
+            />
+          </div>
           <p className="text-[14px] font-semibold leading-snug">{place.name}</p>
           {category && <p className="mt-0.5 text-[12px] text-gray-600">{t(`categories.${category}`)}</p>}
           <PlaceBadges place={previewPlace} className="mt-1" />

@@ -11,7 +11,7 @@ const ListQuery = z.object({
   hidden: z.enum(['all', '0', '1']).optional().default('all'),
   q: z.string().max(120).optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
-  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+  limit: z.coerce.number().int().min(1).max(200).optional().default(20),
 })
 
 export async function GET(req: NextRequest) {
@@ -27,8 +27,9 @@ export async function GET(req: NextRequest) {
         database: DB,
         collection: 'reviews',
         filter: {},
-        sort: { updatedAt: -1 },
-        limit: 2000,
+        sort: { createdAt: -1 },
+        limit: 100,
+        projection: { _id: 0 },
       }),
     )
     let rows = raw.map(toAdminReview).filter((r): r is NonNullable<typeof r> => !!r)
@@ -46,7 +47,24 @@ export async function GET(req: NextRequest) {
     }
     const flagged = rows.filter((r) => r.flag !== 'none').length
     const start = (q.page - 1) * q.limit
-    const items = rows.slice(start, start + q.limit)
+    const pageRows = rows.slice(start, start + q.limit)
+    const ids = [...new Set(pageRows.map((row) => row.placeId).filter(Boolean))]
+    const nameById = new Map<string, string>()
+    if (ids.length) {
+      const places = extractDocs(await mcpCall(sid, 'find', {
+        database: DB,
+        collection: 'places',
+        filter: { place_id: { $in: ids } },
+        projection: { _id: 0, place_id: 1, name: 1 },
+        limit: ids.length,
+      }))
+      for (const place of places) {
+        const id = typeof place.place_id === 'string' ? place.place_id : ''
+        const name = typeof place.name === 'string' ? place.name : ''
+        if (id && name) nameById.set(id, name)
+      }
+    }
+    const items = pageRows.map((row) => ({ ...row, placeName: nameById.get(row.placeId) ?? '' }))
     return withSessionRefresh(
       NextResponse.json({
         items,

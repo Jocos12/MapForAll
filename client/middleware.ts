@@ -72,13 +72,14 @@ export function middleware(req: NextRequest) {
   const headers = new Headers()
   headers.set('RateLimit-Limit', String(result.limitPerMin))
   headers.set('RateLimit-Remaining', String(result.remaining))
-  // Let short-lived private caching on admin aggregates (set in the route)
-  // survive; everything else stays uncached.
-  const allowShortPrivateCache =
+  // Let routes that set their own Cache-Control survive. Admin aggregates use a
+  // short private cache; place photos use a public day-long cache.
+  const routeSetsCache =
     path === '/api/admin/stats'
     || path === '/api/admin/places'
     || path === '/api/admin/users'
-  if (!allowShortPrivateCache) {
+    || path === '/api/place-photo'
+  if (!routeSetsCache) {
     headers.set('Cache-Control', 'no-store')
   }
 

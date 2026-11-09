@@ -56,6 +56,7 @@ interface Props {
   thinkingSteps: string[]
   streamingStarted: boolean
   onSend: (text: string) => void
+  onRetry?: () => void
   /** Quick inclusion filters. The parent fetches places and sends the agent tokens. */
   onInclusionFilter?: (mode: 'local' | 'accessible') => void
   onMarketFilter?: () => void
@@ -143,6 +144,7 @@ export function ChatPanel({
   thinkingSteps,
   streamingStarted,
   onSend,
+  onRetry,
   onInclusionFilter,
   onMarketFilter,
   inclusionLocal = false,
@@ -256,7 +258,8 @@ export function ChatPanel({
   const voiceActive = voiceState !== 'idle'
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
   const lastMsgId = messages[messages.length - 1]?.id
-  const showThinking = loading && !streamingStarted
+  const lastMessage = messages[messages.length - 1]
+  const showThinking = loading && !streamingStarted && !(lastMessage?.role === 'assistant' && lastMessage.content)
   const showWriting = streaming
   const isEmpty = messages.length === 0 && !loading
 
@@ -710,6 +713,15 @@ export function ChatPanel({
                   ) : msg.places?.length ? (
                     <InlinePlaceGallery places={msg.places} onDetails={onPlaceDetails} onFocusPlace={onFocusPlace} activePlaceId={activePlaceId} />
                   ) : null}
+                  {onRetry && msg.role === 'assistant' && msg.id === lastMsgId && /surcharg|overloaded|try again in a moment/i.test(msg.content) && (
+                    <button
+                      type="button"
+                      onClick={onRetry}
+                      className="mt-2 rounded-full border border-[#E8672A] px-3 py-1.5 text-[12px] font-medium text-[#E8672A]"
+                    >
+                      {t('composer.retry')}
+                    </button>
+                  )}
                   {msg.calendarEvents?.length ? (
                     <div className="mt-2.5 flex flex-wrap gap-2">
                       {msg.calendarEvents.map((ev, i) => (

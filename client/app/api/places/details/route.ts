@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { proxyPhotoUrl, validatePhotoRef } from '@/lib/placePhoto'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -114,8 +115,8 @@ export async function GET(req: NextRequest) {
   const photoUrls = photos.slice(0, 5).flatMap((photo) => {
     if (!photo || typeof photo !== 'object' || !('name' in photo)) return []
     const name = String((photo as { name?: string }).name || '')
-    if (!/^places\/[^/?#]+\/photos\/[^/?#]+$/.test(name)) return []
-    return [`/api/place-photo?name=${encodeURIComponent(name)}`]
+    if (!name.startsWith('places/') || validatePhotoRef(name) !== 'ok') return []
+    return [proxyPhotoUrl(name, placeId, 1200)]
   })
   const regular = (data.regularOpeningHours ?? {}) as { weekdayDescriptions?: unknown; openNow?: unknown }
   const current = (data.currentOpeningHours ?? {}) as { weekdayDescriptions?: unknown; openNow?: unknown }

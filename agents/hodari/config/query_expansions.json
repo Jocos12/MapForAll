@@ -1,0 +1,7 @@
+{
+  "phone": ["iphone", "apple", "smartphone", "mobile phone", "phone shop", "telephone", "electronics", "phone repair", "phone"],
+  "market": ["tomatoes", "tomates", "inyanya", "vegetables", "legumes", "greengrocer", "grocery", "market", "supermarket"],
+  "hotel": ["hotel", "lodging", "guest house", "auberge", "hostel"],
+  "cafe": ["coffee", "cafe", "café", "espresso"],
+  "restaurant": ["restaurant", "resto", "dining"]
+}

@@ -15,9 +15,11 @@ import { GoogleGenAI } from '@google/genai'
 const API_KEY = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT
 const VERTEX_FLAG = process.env.GOOGLE_GENAI_USE_VERTEXAI
+// Vertex (ADC / GOOGLE_APPLICATION_CREDENTIALS) is the project default.
+// A developer API key is used only when Vertex is not requested and a key exists.
 const USE_VERTEX =
   VERTEX_FLAG === undefined || VERTEX_FLAG === ''
-    ? !!PROJECT
+    ? !!PROJECT || !API_KEY
     : /^true$/i.test(VERTEX_FLAG)
 // Voice uses Gemini 2.5 models (STT + TTS), which are served from REGIONAL
 // endpoints — unlike the agents' Gemini 3.x (global-only). So default to a
@@ -35,9 +37,10 @@ export function genaiConfigured(): boolean {
 
 /** Human-readable hint for the 501 response when not configured. */
 export function genaiMissingHint(): string {
-  return USE_VERTEX
-    ? 'GOOGLE_GENAI_USE_VERTEXAI=TRUE but GOOGLE_CLOUD_PROJECT is not set (and ADC must be available)'
-    : 'GEMINI_API_KEY is not set'
+  if (USE_VERTEX && !PROJECT) {
+    return 'Set GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS (or run gcloud auth application-default login). GEMINI_API_KEY is optional.'
+  }
+  return 'Set GOOGLE_CLOUD_PROJECT for Vertex AI, or GEMINI_API_KEY for the developer API.'
 }
 
 let _client: GoogleGenAI | null = null

@@ -414,6 +414,15 @@ export function OverviewSection({ data, go, jump }: { data: OwnerDashboard; go: 
   return (
     <div className="flex flex-col gap-5">
       <QuickActions go={go} jump={jump} />
+      {data.form.photos.length === 0 && (
+        <button
+          type="button"
+          onClick={() => jump('biz-photos')}
+          className="rounded-xl border border-[#E8672A]/40 bg-[#FDE8DC] px-4 py-3 text-left text-[13px] font-medium text-[#9A3412]"
+        >
+          {t('biz.checklist.items.photos').replace('{n}', '3')} This listing has no photo yet.
+        </button>
+      )}
       <CompletionCard data={data} jump={jump} style={at(0)} />
       <StatCards stats={data.stats} published={published} onOpen={go} delay={STAGGER} />
 

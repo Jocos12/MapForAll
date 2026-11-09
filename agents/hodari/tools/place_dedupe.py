@@ -140,7 +140,7 @@ def _richness(place: dict[str, Any]) -> int:
     place_id = str(place.get("place_id") or "")
     if source in {"owner_claimed", "user_submitted"} or place.get("claimed_by_owner") is True or place_id.startswith("user_"):
         score += 8
-    if place.get("photo_url") or place.get("photos"):
+    if place.get("photo_url") or place.get("photos") or place.get("photo_reference"):
         score += 3
     if _rating(place) is not None:
         score += 2

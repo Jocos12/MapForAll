@@ -10,9 +10,11 @@
 const STOP = new Set([
   'the', 'a', 'an', 'in', 'at', 'near', 'of', 'for', 'to', 'and', 'or', 'with', 'from',
   'find', 'show', 'me', 'please', 'looking', 'search', 'places', 'place', 'spot', 'endroit',
+  'where', 'can', 'how', 'are', 'you', 'buy', 'want', 'need', 'there', 'this', 'that',
   'kigali', 'rwanda', 'best', 'good', 'top', 'some', 'any', 'un', 'une', 'des', 'du', 'de',
   'la', 'le', 'les', 'dans', 'pour', 'avec', 'sur', 'cherche', 'montre', 'moi', 'svp',
   'qui', 'que', 'où', 'ou', 'est', 'sont', 'ideal', 'idéal', 'ideale', 'idéale',
+  'veux', 'acheter', 'bonjour', 'salut', 'merci', 'pres', 'près',
 ])
 
 /** Synonym groups — any term in a group matches any other (FR/EN). */
@@ -24,6 +26,9 @@ const SYN_GROUPS: string[][] = [
   ['accessible', 'fauteuil', 'wheelchair', 'stepfree', 'step-free', 'pmr'],
   ['local', 'locaux', 'informel', 'neighbourhood', 'neighborhood', 'quartier'],
   ['pascher', 'abordable', 'cheap', 'budget', 'affordable', 'inexpensive'],
+  ['tomato', 'tomatoes', 'tomate', 'tomates', 'inyanya', 'vegetable', 'vegetables', 'legume', 'legumes', 'greengrocer', 'grocery', 'market', 'supermarket'],
+  ['iphone', 'apple', 'smartphone', 'telephone', 'electronics', 'phone'],
+  ['hotel', 'lodging', 'auberge', 'hostel'],
 ]
 
 const GROUP_OF = new Map<string, string[]>()
@@ -64,10 +69,9 @@ function escapeRegex(value: string): string {
 export function buildTextMatchOr(q: string): Record<string, unknown>[] {
   const tokens = queryTokens(q)
   const clauses: Record<string, unknown>[] = []
-  const phrase = q.trim()
+  const phrase = tokens.join(' ')
   if (phrase.length >= 2) {
     const escaped = escapeRegex(phrase)
-    // Exact / phrase name match — keeps "Coffee Shop" working as before.
     clauses.push({ name: { $regex: escaped, $options: 'i' } })
   }
   const seen = new Set<string>()
@@ -161,8 +165,9 @@ export function textRelevance(
     else score += 1
   }
 
-  // Descriptive queries need enough signal; single-token name lookups stay easy.
-  const minMatched = tokens.length >= 3 ? 2 : 1
+  // OR across keywords. AND only when the user named a multi-word product.
+  const phraseAnd = /phone shop|guest house|mobile phone/i.test(q)
+  const minMatched = phraseAnd && tokens.length > 1 ? tokens.length : 1
   if (matchedTokens < minMatched && score < 10) return 0
   return score
 }

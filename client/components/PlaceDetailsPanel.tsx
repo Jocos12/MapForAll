@@ -9,6 +9,8 @@ import { StillThere } from '@/components/StillThere'
 import { PlaceRatePopover, PlaceReviews } from '@/components/PlaceReviews'
 import { useI18n } from '@/components/I18nProvider'
 import type { Place } from '@/lib/types'
+import { placePhotoError } from './PlaceImage'
+import { placePhotoList } from '@/lib/placePhoto'
 import { WEEK_DAYS, type WeekHours } from '@/lib/hours'
 import { trackPlace } from '@/lib/trackPlace'
 
@@ -132,14 +134,7 @@ function isCommunityPlaceId(placeId: string): boolean {
 }
 
 function photoList(place: Place): string[] {
-  const urls: string[] = []
-  const push = (value?: string) => {
-    if (!value) return
-    if (value.startsWith('data:image/') || value.startsWith('/api/') || value.startsWith('http')) urls.push(value)
-  }
-  push(place.photo_url)
-  for (const photo of place.photos ?? []) push(photo)
-  return [...new Set(urls)]
+  return placePhotoList(place, 800)
 }
 
 function filled(value?: string | null): string | undefined {
@@ -436,7 +431,7 @@ export function PlaceDetailsPanel({
                 className="absolute inset-0 h-full w-full cursor-zoom-in object-cover"
                 loading="lazy"
                 onClick={() => openLightbox(Math.min(gallery, data.photoUrls.length - 1))}
-                onError={(event) => { event.currentTarget.style.display = 'none' }}
+                onError={placePhotoError}
                 onTouchStart={(event) => { (event.currentTarget as HTMLImageElement).dataset.x = String(event.changedTouches[0]?.clientX ?? 0) }}
                 onTouchEnd={(event) => {
                   const start = Number((event.currentTarget as HTMLImageElement).dataset.x || 0)
@@ -484,6 +479,7 @@ export function PlaceDetailsPanel({
                 alt={`${displayName} photo ${i + 1}`}
                 className="h-14 w-20 shrink-0 cursor-zoom-in rounded-lg object-cover transition-opacity hover:opacity-80"
                 loading="lazy"
+                onError={placePhotoError}
                 onClick={() => openLightbox(i)}
               />
             ))}
@@ -776,6 +772,7 @@ export function PlaceDetailsPanel({
               alt={`${displayName} photo ${lbIndex + 1} of ${data.photoUrls.length}`}
               className="max-h-[70dvh] max-w-full object-contain motion-reduce:transition-none"
               draggable={false}
+              onError={placePhotoError}
             />
           </div>
 
@@ -858,6 +855,7 @@ export function PlaceDetailsPanel({
                       : 'opacity-50 hover:opacity-80'
                   }`}
                   loading="lazy"
+                  onError={placePhotoError}
                 />
               ))}
             </div>

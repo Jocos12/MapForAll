@@ -164,28 +164,33 @@ _PLACES_FIELD_MASK = ",".join(
 )
 
 
-async def _photo_uri(photo_name: str) -> str | None:
-    """Resolve a Places photo resource to a public image URL. The key stays on the server."""
-    key = _places_api_key()
-    if not photo_name or not key:
-        return None
-    try:
-        response = await _shared_http_client().get(
-            f"https://places.googleapis.com/v1/{photo_name}/media",
-            params={"maxHeightPx": "480", "skipHttpRedirect": "true"},
-            headers={"X-Goog-Api-Key": key, "Referer": _places_referer()},
-            timeout=4.0,
-        )
-    except Exception as exc:
-        logger.info("Places photo lookup failed: %s", exc)
-        return None
-    if response.status_code != 200:
-        return None
-    try:
-        uri = response.json().get("photoUri")
-    except Exception:
-        return None
-    return uri if isinstance(uri, str) and uri.startswith("https://") else None
+def _photo_names(place: dict[str, Any]) -> list[str]:
+    """Places API (New) photo resource names, then any legacy reference. CDN URLs are dropped."""
+    names: list[str] = []
+
+    def add(value: object) -> None:
+        if not isinstance(value, str):
+            return
+        token = value.strip()
+        if not token or token.startswith(("http://", "https://", "/api/", "/landing/")):
+            return
+        if token not in names:
+            names.append(token)
+
+    add(place.get("photo_reference"))
+    photos = place.get("photos")
+    if isinstance(photos, list):
+        for photo in photos:
+            if isinstance(photo, dict):
+                add(photo.get("name") or photo.get("photo_reference") or photo.get("photoReference"))
+            else:
+                add(photo)
+    return names[:5]
+
+
+def _photo_reference(place: dict[str, Any]) -> str | None:
+    names = _photo_names(place)
+    return names[0] if names else None
 
 
 async def search_text_places(
@@ -262,19 +267,13 @@ async def search_text_places(
     if not isinstance(raw_places, list):
         return [], status
 
-    normalized = [_normalize_place(item) for item in raw_places if isinstance(item, dict)]
-    photo_names: list[str] = []
-    for item, place in zip(raw_places, normalized):
-        photos = item.get("photos") if isinstance(item, dict) else None
-        photo_name = ""
-        if isinstance(photos, list) and photos and isinstance(photos[0], dict):
-            photo_name = str(photos[0].get("name") or "")
-        photo_names.append(photo_name)
+    normalized = []
+    for item in raw_places:
+        if not isinstance(item, dict):
+            continue
+        place = _normalize_place(item)
         place["source"] = "places_api"
-    uris = await asyncio.gather(*(_photo_uri(name) for name in photo_names[:8]))
-    for place, uri in zip(normalized, uris):
-        if uri:
-            place["photo_url"] = uri
+        normalized.append(place)
     logger.info("Places API searchText HTTP %s returned %d places", status, len(normalized))
     return [place for place in normalized if place.get("name")], status
 
@@ -343,7 +342,15 @@ def _normalize_place(place: dict[str, Any]) -> dict[str, Any]:
     if open_now is None and isinstance(place.get("open_now"), bool):
         open_now = place.get("open_now")
 
-    return {
+    photo_url = place.get("photo_url") or None
+    if isinstance(photo_url, str) and (
+        "googleusercontent.com" in photo_url
+        or "maps.googleapis.com/maps/api/place/photo" in photo_url
+        or "places.googleapis.com/v1/" in photo_url
+    ):
+        photo_url = None
+
+    normalized = {
         "place_id": place_ref,
         "name": _name_from_attribution(place),
         "address": place.get("address") or place.get("formattedAddress") or "",
@@ -377,8 +384,13 @@ def _normalize_place(place: dict[str, Any]) -> dict[str, Any]:
         "accessible": bool(place.get("accessible")),
         "status": place.get("status") or "validated",
         "source": place.get("source") or "official",
-        "photo_url": place.get("photo_url") or None,
+        "photo_url": photo_url,
         "user_ratings_total": place.get("user_ratings_total") or place.get("userRatingCount"),
         "google_place_id": place_ref or None,
         "confirmations_count": place.get("confirmations_count") or 0,
     }
+    photo_names = _photo_names(place)
+    if photo_names:
+        normalized["photo_reference"] = photo_names[0]
+        normalized["photos"] = photo_names
+    return normalized

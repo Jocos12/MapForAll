@@ -94,15 +94,21 @@ def _configured_backups() -> list[Any]:
 
 
 def _wrap_gemini_primary(model_name: str):
-    """Gemini delegate that respects cooldown and records 429s for the next turn."""
-    from google.adk.models.registry import LLMRegistry
+    """Primary Gemini model, then one lighter model. Retries live only here."""
+    import asyncio
+
     from google.adk.models.base_llm import BaseLlm
+    from google.adk.models.registry import LLMRegistry
     from google.genai.errors import APIError
     from typing_extensions import override
 
-    inner = LLMRegistry.new_llm(model_name)
+    from .retry import MAX_RETRIES, RequestBudget, log_failure_once, retryable_status, status_of
 
-    class _CooldownAwareGemini(BaseLlm):
+    fallback_name = _env("GEMINI_FALLBACK_MODEL") or "gemini-2.0-flash"
+    inner = LLMRegistry.new_llm(model_name)
+    fallback = LLMRegistry.new_llm(fallback_name) if fallback_name and fallback_name != model_name else None
+
+    class _BudgetedGemini(BaseLlm):
         model: str = model_name
 
         @property
@@ -115,15 +121,42 @@ def _wrap_gemini_primary(model_name: str):
             if gemini_in_cooldown():
                 logger.info("[llm] skipping Gemini (cooldown active)")
                 raise APIError(429, {"error": {"message": "Gemini cooldown after RESOURCE_EXHAUSTED"}})
-            try:
-                async for chunk in inner.generate_content_async(llm_request, stream=stream):
-                    yield chunk
-            except Exception as error:
-                code = getattr(error, "code", None) or getattr(error, "status_code", None)
-                detail = str(error).lower()
-                if code == 429 or "resource_exhausted" in detail or "quota" in detail:
-                    mark_gemini_cooldown()
-                raise
+            budget = RequestBudget()
+            logged: dict[str, bool] = {}
+            chain = [(model_name, inner, MAX_RETRIES + 1), (fallback_name, fallback, 1)]
+            last_error: BaseException | None = None
+            attempt = 0
+            for name, llm, tries in chain:
+                if llm is None:
+                    continue
+                for index in range(tries):
+                    if budget.expired():
+                        break
+                    attempt += 1
+                    try:
+                        async for chunk in llm.generate_content_async(llm_request, stream=stream):
+                            yield chunk
+                        return
+                    except Exception as error:
+                        last_error = error
+                        code = status_of(error)
+                        log_failure_once(
+                            logged,
+                            status=code,
+                            model=name,
+                            attempt=attempt,
+                            detail=str(error),
+                        )
+                        if not retryable_status(code) or index >= tries - 1:
+                            break
+                        wait = budget.wait(index + 1, error)
+                        if wait is None:
+                            break
+                        await asyncio.sleep(wait)
+            mark_gemini_cooldown()
+            if last_error is not None:
+                raise last_error
+            raise APIError(503, {"error": {"message": "Gemini unavailable"}})
 
         @override
         async def connect(self, llm_request):
@@ -131,37 +164,25 @@ def _wrap_gemini_primary(model_name: str):
                 raise APIError(429, {"error": {"message": "Gemini cooldown after RESOURCE_EXHAUSTED"}})
             return await inner.connect(llm_request)
 
-    return _CooldownAwareGemini(model=model_name)
+    return _BudgetedGemini(model=model_name)
 
 
 def resolve_agent_model():
-    """Return Gemini, or FallbackModel(Gemini → Groq → Claude → OpenAI).
-
-    Safe to call at import time for every LlmAgent. If no backup keys are set,
-    returns the plain Gemini model string (unchanged behaviour).
-    """
+    """Gemini with at most two retries, then one lighter model. No second retry loop."""
     primary_name = _env("GEMINI_MODEL") or "gemini-3.5-flash"
-    backups = _configured_backups()
-    if not backups:
-        logger.info("[llm] No backup providers configured — Gemini only (%s)", primary_name)
-        return primary_name
-
-    try:
-        from google.adk.features import FeatureName, override_feature_enabled
-        from google.adk.models import FallbackModel
-
-        override_feature_enabled(FeatureName.FALLBACK_MODEL, True)
-    except Exception as exc:
-        logger.warning("[llm] FallbackModel unavailable (%s) — Gemini only", exc)
-        return primary_name
-
-    primary = _wrap_gemini_primary(primary_name)
-    chain = [primary, *backups]
+    region = _env("GOOGLE_CLOUD_LOCATION") or "global"
+    fallback_name = _env("GEMINI_FALLBACK_MODEL") or "gemini-2.0-flash"
     logger.info(
-        "[llm] Fallback chain: %s",
-        " → ".join(getattr(m, "model", type(m).__name__) for m in chain),
+        "[llm] quota/health model=%s region=%s fallback=%s",
+        primary_name,
+        region,
+        fallback_name,
     )
-    return FallbackModel(models=chain)
+    try:
+        return _wrap_gemini_primary(primary_name)
+    except Exception as exc:
+        logger.warning("[llm] model wrapper unavailable (%s) — using %s", exc, primary_name)
+        return primary_name
 
 
 def friendly_overload_text() -> str:

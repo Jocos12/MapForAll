@@ -9,14 +9,14 @@ export function PlaceBadges({
   place,
   className = '',
 }: {
-  place: Pick<Place, 'local_business' | 'accessible' | 'access' | 'access_confirmations' | 'status' | 'prioritized'>
+  place: Pick<Place, 'local_business' | 'accessible' | 'access' | 'access_confirmations' | 'status' | 'prioritized' | 'claimed_by_owner'>
   className?: string
 }) {
   const { t } = useI18n()
   const detail = accessDetail(place)
   const accessible = hasStepFreeEntrance(place)
   const pending = place.status === 'pending'
-  if (!place.local_business && !accessible && !place.prioritized && !pending) return null
+  if (!place.local_business && !accessible && !place.prioritized && !pending && !place.claimed_by_owner) return null
   const bits = [
     detail.entrance ? t('access.entrance') : '',
     detail.toilet ? t('access.toilet') : '',
@@ -29,6 +29,11 @@ export function PlaceBadges({
         <span className="inline-flex items-center gap-1 rounded-full bg-terracotta/15 px-1.5 py-0.5 text-[10px] font-medium text-terracotta dark:text-[#FF8C2F]">
           <Store className="h-3 w-3" aria-hidden />
           {t('badges.local')}
+        </span>
+      )}
+      {place.claimed_by_owner && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-[#1A73E8]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#1A73E8]">
+          {t('badges.owner')}
         </span>
       )}
       {accessible && (

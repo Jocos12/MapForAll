@@ -153,7 +153,8 @@
   },
   "badges": {
     "local": "Commerce local",
-    "accessible": "Accessible",
+    "accessible": "Accessible vérifié",
+    "owner": "Revendiqué par le propriétaire",
     "prioritized": "Priorisé",
     "pending": "En attente de vérification"
   },

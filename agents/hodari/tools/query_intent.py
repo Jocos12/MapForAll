@@ -6,14 +6,32 @@ bonuses never run until a place has passed this gate.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 MIN_VECTOR_SCORE = float(os.getenv("MIN_VECTOR_SCORE", "0.6"))
-BONUS_CAP = 0.25
+BONUS_CAP = 0.5
+_EXPANSIONS_PATH = Path(__file__).resolve().parents[1] / "config" / "query_expansions.json"
+
+
+def load_expansions() -> dict[str, list[str]]:
+    """en/fr/rw query expansions. Admins edit config/query_expansions.json."""
+    try:
+        data = json.loads(_EXPANSIONS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for key, value in data.items():
+        if isinstance(key, str) and isinstance(value, list):
+            out[key] = [str(item) for item in value if isinstance(item, str) and item.strip()]
+    return out
 
 # (category, trigger words, extra search keywords). First match wins.
 _GROUPS: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
@@ -50,8 +68,8 @@ _GROUPS: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
     ),
     (
         "hotel",
-        ("hotel", "hotels", "hôtel", "hôtels", "hoteli", "lodging", "hebergement", "hébergement"),
-        ("hotel", "lodging"),
+        ("hotel", "hotels", "hôtel", "hôtels", "hoteli", "lodging", "auberge", "guest house", "hebergement", "hébergement"),
+        ("hotel", "lodging", "auberge"),
     ),
     (
         "cafe",
@@ -64,6 +82,11 @@ _GROUPS: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
         ("restaurant", "burger"),
     ),
     (
+        "phone",
+        ("iphone", "smartphone", "telephone", "phone", "electronics", "mobile"),
+        ("iphone", "smartphone", "electronics", "phone"),
+    ),
+    (
         "shop",
         ("shop", "shops", "boutique", "boutiques", "magasin", "magasins", "iduka"),
         ("shop",),
@@ -74,7 +97,8 @@ _CATEGORY_SIGNALS: dict[str, tuple[str, ...]] = {
     "market": ("market", "marché", "marche", "marches", "supermarket", "supermarché", "supermarche", "grocery", "épicerie", "epicerie", "vegetable", "legume", "légume", "greengrocer", "tomato", "tomate", "inyanya", "grocery_store", "grocery_or_supermarket"),
     "pharmacy": ("pharmacy", "pharmacie", "drugstore"),
     "clinic": ("clinic", "clinique", "hospital", "hôpital", "hopital", "dispensaire"),
-    "hotel": ("hotel", "hôtel", "lodging", "hostel", "inn"),
+    "hotel": ("hotel", "hôtel", "lodging", "hostel", "inn", "auberge", "guest"),
+    "phone": ("phone", "iphone", "smartphone", "telephone", "electronics", "mobile"),
     "cafe": ("cafe", "café", "coffee", "coffee_shop"),
     "restaurant": ("restaurant", "resto", "dining", "hamburger", "burger"),
     "shop": ("shop", "boutique", "magasin", "store"),
@@ -138,7 +162,12 @@ def search_terms(text: str, intent: SearchIntent | None = None) -> list[str]:
     raw.extend(re.findall(r"[A-Za-zÀ-ÿ0-9']{3,}", text or ""))
     out: list[str] = []
     seen: set[str] = set()
-    stop = {"the", "and", "for", "near", "with", "want", "need", "like", "find", "show", "kigali", "rwanda", "please", "looking"}
+    stop = {
+        "the", "and", "for", "near", "with", "want", "need", "like", "find", "show",
+        "kigali", "rwanda", "please", "looking", "where", "can", "how", "are", "you",
+        "buy", "there", "this", "that", "cherche", "veux", "acheter",
+        "des", "une", "pour", "pres", "moi", "est", "les", "dans",
+    }
     for token in raw:
         if _fold(token) in stop:
             continue
@@ -175,6 +204,8 @@ class SearchIntent:
     vector_query: str = ""
     open_query: bool = False
     product_terms: list[str] = field(default_factory=list)
+    # Words the user actually used, plus the same word in en/fr/rw. Broader expansions stay in product_terms.
+    query_terms: list[str] = field(default_factory=list)
 
 
 def _fold(text: str) -> str:
@@ -221,13 +252,29 @@ def rejection_reason(
     return "below vector floor"
 
 
+def _edit_distance(left: str, right: str) -> int:
+    if abs(len(left) - len(right)) > 2:
+        return 3
+    prev = list(range(len(right) + 1))
+    for i, ca in enumerate(left, start=1):
+        curr = [i]
+        for j, cb in enumerate(right, start=1):
+            curr.append(min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = curr
+    return prev[-1]
+
+
 def _triggered(words: set[str], folded: str, trigger: str) -> bool:
     token = _fold(trigger)
     if not token:
         return False
     if " " in token:
         return token in folded
-    return token in words
+    if token in words:
+        return True
+    if len(token) <= 4:
+        return False
+    return any(len(word) > 4 and _edit_distance(token, word) <= 2 for word in words)
 
 
 def extract_search_intent(text: str) -> SearchIntent:
@@ -243,12 +290,21 @@ def extract_search_intent(text: str) -> SearchIntent:
         if fired:
             keywords = list(dict.fromkeys([*triggers[:4], *extras]))
             joined = " ".join(extras)
-            product: list[str] = []
+            product = [_fold(word) for word in (*triggers, *extras)]
+            query_terms = [_fold(word) for word in fired]
             if category == "market":
-                fired_folded = {_fold(trigger) for trigger in fired}
-                for group in _SYNONYM_GROUPS[:2]:
-                    if fired_folded & {_fold(word) for word in group}:
-                        product.extend(_fold(word) for word in group)
+                fired_folded = set(query_terms)
+                tomatoish = {"tomato", "tomatoes", "tomate", "tomates", "inyanya"}
+                groups = _SYNONYM_GROUPS if fired_folded & tomatoish else _SYNONYM_GROUPS[:2]
+                for group in groups:
+                    folded_group = [_fold(word) for word in group]
+                    if groups is _SYNONYM_GROUPS or fired_folded & set(folded_group):
+                        query_terms.extend(folded_group)
+                        product.extend(folded_group)
+            if category == "phone":
+                query_terms.extend(["iphone", "smartphone", "telephone"])
+            for extra in load_expansions().get(category, []):
+                product.append(_fold(extra))
             return SearchIntent(
                 category=category,
                 keywords=keywords,
@@ -256,8 +312,23 @@ def extract_search_intent(text: str) -> SearchIntent:
                 vector_query=joined,
                 open_query=False,
                 product_terms=list(dict.fromkeys(product)),
+                query_terms=list(dict.fromkeys(query_terms)),
             )
-    return SearchIntent(open_query=True, maps_query=text, vector_query=text)
+    stop = {
+        "the", "and", "for", "near", "with", "want", "need", "like", "find", "show",
+        "kigali", "rwanda", "please", "looking", "where", "can", "how", "are", "you",
+        "buy", "there", "this", "that", "cherche", "veux", "acheter",
+        "des", "une", "pour", "pres", "moi", "est", "les", "dans",
+    }
+    content = [word for word in re.findall(r"[a-z0-9']{3,}", folded) if word not in stop]
+    joined = " ".join(content)
+    return SearchIntent(
+        open_query=True,
+        maps_query=joined,
+        vector_query=joined,
+        keywords=content,
+        query_terms=content,
+    )
 
 
 def _blob(place: dict[str, Any]) -> str:
@@ -293,6 +364,12 @@ def relevance_score(place: dict[str, Any], intent: SearchIntent, vector_score: f
 
     blob = _blob(place)
     name = _fold(str(place.get("name") or ""))
+    exact_terms = [term for term in intent.query_terms if len(term) >= 4]
+    if any(term in name or term in blob for term in exact_terms):
+        return 1.0
+    related_terms = [term for term in intent.product_terms if len(term) >= 4 and term not in exact_terms]
+    if any(_has_signal(blob, term) or term in blob for term in related_terms):
+        return 0.72
     if intent.product_terms:
         if any(len(term) >= 4 and term in name for term in intent.product_terms):
             return 1.0
@@ -318,6 +395,20 @@ def relevance_score(place: dict[str, Any], intent: SearchIntent, vector_score: f
                 return 0.0
     if vector_score is not None and vector_score >= MIN_VECTOR_SCORE:
         return float(vector_score)
+    source = str(place.get("source") or "")
+    if source in {"places_api", "maps", "google", "google_maps"}:
+        type_blob = _fold(
+            " ".join(
+                [
+                    name,
+                    " ".join(str(item) for item in (place.get("types") or []) if isinstance(item, str)),
+                    " ".join(str(item) for item in (place.get("categories") or []) if isinstance(item, str)),
+                ]
+            )
+        )
+        expanded = [*(intent.query_terms or []), *(intent.product_terms or [])]
+        if any(len(term) >= 4 and term in type_blob for term in expanded):
+            return 0.7
     return 0.0
 
 
@@ -326,16 +417,51 @@ def is_relevant(place: dict[str, Any], intent: SearchIntent, vector_score: float
 
 
 def equity_bonus(place: dict[str, Any], *, prefer_local: bool) -> float:
-    """Small re-rank bonus. Never larger than +0.25, and only applied after relevance."""
+    """Re-rank bonus after relevance. Capped at +0.5 so it cannot admit a miss."""
+    del prefer_local
     raw = 0.0
-    if place.get("local_business") is True:
+    if place.get("local_business") is True or place.get("is_local") is True or place.get("is_informal") is True:
         raw += 0.25
     if place.get("accessible") is True:
         raw += 0.10
-    score = place.get("personalization_score")
-    if isinstance(score, (int, float)) and score > 0:
-        raw += min(0.08, float(score) * 0.08)
+    completeness = place.get("completeness")
+    if isinstance(completeness, (int, float)) and float(completeness) >= 0.7:
+        raw += 0.05
+    if place.get("photo_url") or place.get("photos"):
+        raw += 0.05
+    confirmed = place.get("confirmations_count")
+    if place.get("recently_confirmed") is True or (isinstance(confirmed, int) and confirmed > 0):
+        raw += 0.05
+    if place.get("open_now") is True:
+        raw += 0.05
     return min(BONUS_CAP, raw)
+
+
+def why_line(place: dict[str, Any], intent: SearchIntent) -> str:
+    """One line explaining the match, using only words that are actually in the listing."""
+    blob = _blob(place)
+    name = _fold(str(place.get("name") or ""))
+    km = place.get("_distance_km")
+    if isinstance(km, (int, float)) and float(km) * 1000 < 20:
+        distance = "Here"
+    elif isinstance(km, (int, float)) and float(km) < 1:
+        distance = f"{int(float(km) * 1000)} m"
+    elif isinstance(km, (int, float)):
+        distance = f"{float(km):.1f} km"
+    else:
+        distance = ""
+    exact = next((term for term in intent.query_terms if len(term) >= 4 and term in blob), "")
+    if exact and exact in name:
+        label = name.split(exact)[0].strip() or exact
+        return f"{exact} — {distance}".strip(" —") if distance else exact
+    if exact:
+        return f"Mentions {exact} in its description" + (f" — {distance}" if distance else "")
+    related = next((term for term in intent.product_terms if len(term) >= 4 and term in blob), "")
+    if related and distance:
+        return f"{related} — {distance}"
+    if related:
+        return related
+    return distance
 
 
 def proximity_factor(place: dict[str, Any]) -> float:
@@ -374,19 +500,39 @@ def detect_lang(text: str) -> str:
     return "en"
 
 
+def extracted_keyword(text: str) -> str:
+    """The product word the user typed, after filler is removed. Never the raw sentence."""
+    intent = extract_search_intent(text)
+    stop = {
+        "the", "and", "for", "near", "with", "want", "need", "like", "find", "show",
+        "please", "looking", "where", "can", "how", "are", "you", "buy",
+        "cherche", "veux", "acheter", "des", "une", "pour", "pres", "moi",
+    }
+    for word in re.findall(r"[a-z0-9']{3,}", _fold(text)):
+        if word in stop:
+            continue
+        if any(word == term or word in term or term in word for term in intent.query_terms):
+            return word
+    for term in intent.query_terms:
+        if len(term) >= 4:
+            return term
+    return "that"
+
+
 def draft_reply(places: list[dict[str, Any]], request: str, *, widen: bool = False) -> str:
     """Short reply that names only places in the list, in the user's language."""
     lang = detect_lang(request)
+    keyword = extracted_keyword(request)
     if not places:
         empty = {
-            "en": "I couldn't find a matching place for that near you.",
-            "fr": "Je n'ai pas trouvé de lieu qui correspond près de toi.",
-            "rw": "Sinabonye ahantu bijyanye na ibyo ushaka hafi yawe.",
+            "en": f"I couldn't find places for '{keyword}' near you.",
+            "fr": f"Je n'ai pas trouvé de lieu pour '{keyword}' près de toi.",
+            "rw": f"Sinabonye ahantu ku '{keyword}' hafi yawe.",
         }
         if widen:
             offer = {
-                "en": " I can widen the radius if you want.",
-                "fr": " Je peux élargir le rayon si tu veux.",
+                "en": " I can widen the area if you want.",
+                "fr": " Je peux élargir la zone si tu veux.",
                 "rw": " Nshobora kongera umupaka niba ubishaka.",
             }
             return empty[lang] + offer[lang]

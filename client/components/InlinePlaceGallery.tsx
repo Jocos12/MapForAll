@@ -7,6 +7,7 @@ import { dedupePlaces, placeKey } from '@/lib/placeDedupe'
 import { MapsChooser } from './MapsChooser'
 import { PlaceBadges } from './PlaceBadges'
 import { PlaceImage } from './PlaceImage'
+import { placePhotoList } from '@/lib/placePhoto'
 
 interface Props {
   places: Place[]
@@ -55,6 +56,16 @@ export function InlinePlaceGallery({ places, onDetails, onFocusPlace, activePlac
                 <p className="line-clamp-1 text-[13px] font-medium leading-snug text-[var(--text-primary)]">
                   {place.name}
                 </p>
+                {(place.description || place.summary) && (
+                  <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--text-secondary)]">
+                    {(place.description || place.summary || '').slice(0, 90)}
+                  </p>
+                )}
+                {(place.distance || place.why) && (
+                  <p className="mt-0.5 line-clamp-2 text-[10px] text-[var(--text-secondary)]">
+                    {[place.distance, place.why].filter(Boolean).join(' · ')}
+                  </p>
+                )}
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   {place.rating != null && (
                     <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
@@ -105,7 +116,7 @@ export function InlinePlaceGallery({ places, onDetails, onFocusPlace, activePlac
 }
 
 function GalleryPhoto({ place }: { place: Place }) {
-  const urls = (place.photos?.length ? place.photos : place.photo_url ? [place.photo_url] : []).slice(0, 4)
+  const urls = placePhotoList(place, 440).slice(0, 4)
   const [open, setOpen] = useState<number | null>(null)
 
   if (urls.length === 0) {
@@ -130,8 +141,7 @@ function GalleryPhoto({ place }: { place: Place }) {
             className="relative h-24 overflow-hidden bg-black/5 dark:bg-white/5"
             aria-label={`${place.name} photo ${i + 1}`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={url} alt="" className="h-full w-full object-cover" />
+            <PlaceImage place={place} src={url} width={440} height={240} className="h-full w-full" />
           </button>
         ))}
       </div>
@@ -150,13 +160,9 @@ function GalleryPhoto({ place }: { place: Place }) {
           >
             <X className="h-5 w-5" />
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={urls[open]}
-            alt={place.name}
-            className="max-h-[80vh] max-w-full rounded-xl object-contain"
-            onClick={(event) => event.stopPropagation()}
-          />
+          <div className="max-h-[80vh] max-w-full" onClick={(event) => event.stopPropagation()}>
+            <PlaceImage place={place} src={urls[open]} width={1200} height={800} className="max-h-[80vh] w-full" />
+          </div>
         </div>
       )}
     </>
@@ -188,8 +194,7 @@ export function PhotoGallery({
             className="relative aspect-[4/3] overflow-hidden rounded-xl bg-black/5 dark:bg-white/5"
             aria-label={`${placeName} photo ${i + 1}`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={url} alt="" className="h-full w-full object-cover" />
+            <PlaceImage place={{ name: placeName, photo_url: url }} src={url} width={640} height={480} className="h-full w-full" />
           </button>
         ))}
       </div>
@@ -211,13 +216,9 @@ export function PhotoGallery({
           >
             <X className="h-5 w-5" />
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={urls[open]}
-            alt={placeName}
-            className="max-h-[80vh] max-w-full rounded-xl object-contain"
-            onClick={(event) => event.stopPropagation()}
-          />
+          <div className="max-h-[80vh] max-w-full" onClick={(event) => event.stopPropagation()}>
+            <PlaceImage place={{ name: placeName, photo_url: urls[open] }} src={urls[open]} width={1200} height={800} className="max-h-[80vh] w-full" />
+          </div>
         </div>
       )}
     </div>

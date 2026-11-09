@@ -37,6 +37,8 @@ from .query_intent import (
     relevance_score,
     search_terms,
     term_variants,
+    why_line,
+    _fold,
 )
 from .response_cache import get_response_cache
 
@@ -63,7 +65,9 @@ _PUBLIC_STATUS = {
 _STOP_WORDS = {
     "the", "a", "an", "in", "at", "near", "of", "for", "to", "and", "or", "with", "from",
     "find", "show", "me", "please", "looking", "search", "places", "place", "spot", "endroit",
+    "where", "can", "how", "are", "you", "buy", "there", "this", "that", "just",
     "kigali", "rwanda", "best", "good", "top", "some", "any", "want", "need", "like",
+    "veux", "cherche", "acheter", "bonjour", "salut", "merci",
     "le", "la", "les", "un", "une", "des", "du", "de", "dans", "près", "pres",
     "pour", "avec", "sur", "cherche", "montre", "moi", "svp", "commerces",
     "commerce", "locaux", "local", "accessible", "accessibles",
@@ -145,7 +149,9 @@ def _text_relevance(place: dict[str, Any], request: str) -> float:
             score += 3.5 if local else 1.5
         else:
             score += 1.0
-    min_matched = 2 if len(tokens) >= 3 else 1
+    # One keyword is enough. AND is only for a multi-word product name ("phone shop").
+    phrase_and = any(phrase in (request or "").lower() for phrase in ("phone shop", "guest house", "mobile phone"))
+    min_matched = len(tokens) if phrase_and and len(tokens) > 1 else 1
     if matched < min_matched and score < 10:
         return 0.0
     return score
@@ -223,18 +229,25 @@ def rank_places(
 
     indexed = list(enumerate(pool))
     intent = extract_search_intent(request)
+    for _, place in indexed:
+        rel = place.get("_relevance")
+        if not isinstance(rel, (int, float)):
+            rel = relevance_score(place, intent)
+            place["_relevance"] = rel
+        place["match_type"] = "exact" if float(rel) >= 0.95 else "related"
 
     def base_key(item: tuple[int, dict[str, Any]]) -> tuple[float, int]:
         index, place = item
         rating = float(place.get("rating") or 0.0)
         return (-(rating + _budget_boost(place.get("price_level"), request)), index)
 
-    def boost_key(item: tuple[int, dict[str, Any]]) -> tuple[float, int]:
+    def boost_key(item: tuple[int, dict[str, Any]]) -> tuple[int, float, int]:
         index, place = item
-        # Relevance is the gate. Equity and personalization only nudge, capped at +0.25.
+        # Bonuses only order places that already matched. Exact matches stay above related ones.
         score = final_score(place, intent, prefer_local=prefer)
         score += _budget_boost(place.get("price_level"), request) * 0.01
-        return (-score, index)
+        exact = 0 if place.get("match_type") == "exact" else 1
+        return (exact, -score, index)
 
     base_rank = {
         id(place): rank
@@ -252,21 +265,38 @@ def rank_places(
         extra = inclusion_bonus(place, prefer_local=prefer)
         moved = rank < base_rank.get(id(place), rank)
         copy = dict(place)
+        rel = copy.get("_relevance")
+        if not isinstance(rel, (int, float)):
+            rel = relevance_score(copy, intent)
+            copy["_relevance"] = rel
+        copy["match_type"] = "exact" if float(rel) >= 0.95 else "related"
         copy["prioritized"] = extra > 0 and moved
+        copy["why"] = why_line(place, intent)
         ranked.append(copy)
         if len(ranked) >= limit:
             break
     return _promote_relevant_local(ranked)
 
 
+def _near_local(place: dict[str, Any]) -> bool:
+    if place.get("local_business") is not True:
+        return False
+    km = place.get("_distance_km")
+    return not isinstance(km, (int, float)) or float(km) <= 3
+
+
 def _promote_relevant_local(ranked: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """A relevant local business is kept inside the first three results."""
-    index = next((i for i, place in enumerate(ranked) if place.get("local_business") is True), None)
-    if index is None or index < 3:
+    """Keep up to two nearby local businesses inside the first three results."""
+    already = sum(1 for place in ranked[:3] if _near_local(place))
+    needed = 2 - already
+    if needed <= 0:
         return ranked
-    place = ranked.pop(index)
-    ranked.insert(2, place)
-    return ranked
+    outside = [place for place in ranked[3:] if _near_local(place)][:needed]
+    if not outside:
+        return ranked
+    rest = [place for place in ranked if place not in outside]
+    head = rest[: 3 - len(outside)] + outside
+    return head + rest[3 - len(outside):]
 
 
 def _doc_to_candidate(doc: dict[str, Any], fallback_category: str | None = None) -> dict[str, Any] | None:
@@ -283,14 +313,25 @@ def _doc_to_candidate(doc: dict[str, Any], fallback_category: str | None = None)
     photo_url = doc.get("photo_url")
     if isinstance(photo_url, str) and photo_url.startswith("data:image/"):
         photo_url = f"/api/places/photo?placeId={quote(place_id)}&i=0"
+    elif isinstance(photo_url, str) and (
+        "googleusercontent.com" in photo_url
+        or "maps.googleapis.com/maps/api/place/photo" in photo_url
+        or "places.googleapis.com/v1/" in photo_url
+    ):
+        # Google CDN links expire after a few days. The client refreshes via place id.
+        photo_url = None
+    photo_reference = doc.get("photo_reference") if isinstance(doc.get("photo_reference"), str) else None
     photo_count = doc.get("photo_count")
     if not isinstance(photo_count, int):
         photos_raw = doc.get("photos")
         photo_count = len(photos_raw) if isinstance(photos_raw, list) else (1 if photo_url else 0)
+    start = 0 if not (isinstance(photo_url, str) and photo_url) else 1
     photos = [
         f"/api/places/photo?placeId={quote(place_id)}&i={i}"
-        for i in range(1, max(0, min(photo_count, 4)))
+        for i in range(start, max(start, min(photo_count, 5)))
     ]
+    if not photo_url and photos:
+        photo_url = photos[0]
     categories = doc.get("categories") or ([fallback_category] if fallback_category else [])
     if not isinstance(categories, list):
         categories = [fallback_category] if fallback_category else []
@@ -310,6 +351,7 @@ def _doc_to_candidate(doc: dict[str, Any], fallback_category: str | None = None)
         "description": description or summary or "",
         "maps_url": doc.get("maps_url"),
         "photo_url": photo_url if isinstance(photo_url, str) and photo_url else None,
+        "photo_reference": photo_reference,
         "photos": photos,
         "hours": doc.get("hours") if isinstance(doc.get("hours"), str) else None,
         "hours_week": doc.get("hours_week") if isinstance(doc.get("hours_week"), dict) else None,
@@ -335,6 +377,8 @@ def _doc_to_candidate(doc: dict[str, Any], fallback_category: str | None = None)
 def _format_distance(meters: Any) -> str | None:
     if not isinstance(meters, (int, float)):
         return None
+    if meters < 20:
+        return "Here"
     if meters >= 1000:
         return f"{meters / 1000.0:.1f} km"
     return f"{int(meters)} m"
@@ -440,10 +484,11 @@ def _catalog_by_text(request: str) -> list[dict[str, Any]]:
         if len(hits) >= 30:
             break
 
-    scored = [(p, _text_relevance(p, request)) for p in hits]
-    scored = [(p, s) for p, s in scored if s > 0]
-    scored.sort(key=lambda row: (-row[1], 0 if row[0].get("local_business") else 1))
-    return [p for p, _ in scored[:20]]
+    hits.sort(key=lambda place: (
+        0 if place.get("local_business") else 1,
+        float(place.get("_distance_km") or 1e9),
+    ))
+    return hits[:20]
 
 
 def _merge_candidates(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -490,6 +535,7 @@ def _geo_near(lat: float, lng: float, radius_m: int, extra: dict[str, Any], *, l
             }
         },
         {"$limit": limit},
+        {"$addFields": {"photo_count": {"$size": {"$ifNull": ["$photos", []]}}}},
         {"$project": {"photos": 0, "embedding": 0}},
     ]
     result = _mcp_tool("aggregate", {"database": HODARI_DB, "collection": "places", "pipeline": pipeline})
@@ -513,7 +559,7 @@ def _catalog_by_geo(lat: float, lng: float, terms: list[str], category: str | No
             if pid:
                 found.setdefault(pid, row)
         used = f"geo:{radius}"
-        if len(found) >= 3:
+        if len(found) >= 5:
             break
     logger.info("db path=%s terms=%s hits=%d", used, ",".join(terms[:8]), len(found))
     return list(found.values()), used
@@ -554,9 +600,7 @@ def _vector_for_intent(query: str, tool_context: ToolContext) -> list[dict[str, 
             vector_score = float(score) if score is not None else None
         except (TypeError, ValueError):
             vector_score = None
-        if vector_score is None or vector_score < MIN_VECTOR_SCORE:
-            continue
-        row["_relevance"] = vector_score
+        row["_relevance"] = vector_score if vector_score is not None else 0.0
         row["sources"] = ["vector"]
         kept.append(row)
     return kept
@@ -596,15 +640,16 @@ def _write_last(state: Any, intent: Any, lat: float, lng: float, shown: list[str
 
 def _places_text_query(intent: Any, request: str) -> str:
     folded = request.lower()
+    keywords = [term for term in (getattr(intent, "query_terms", None) or []) if len(term) >= 4]
     if intent.category == "restaurant" and "burger" in folded:
         return "burger"
     if intent.category == "clinic":
         return "hospital"
-    if intent.category == "market":
-        return "supermarket" if "supermarket" in folded else "market"
+    if keywords:
+        return " ".join(keywords[:3])
     if intent.category:
         return str(intent.category)
-    return str(intent.maps_query or request or "places")[:120]
+    return str(intent.maps_query or "places")[:120]
 
 
 def _partition(places: list[dict[str, Any]], intent: Any) -> tuple[list[dict[str, Any]], list[str]]:
@@ -620,6 +665,22 @@ def _partition(places: list[dict[str, Any]], intent: Any) -> tuple[list[dict[str
         except (TypeError, ValueError):
             vector_value = None
         score = relevance_score(place, intent, vector_value)
+        if score <= 0 and str(place.get("source") or "") in {"places_api", "maps", "google", "google_maps"}:
+            blob = _fold(
+                " ".join(
+                    [
+                        str(place.get("name") or ""),
+                        str(place.get("summary") or ""),
+                        str(place.get("description") or ""),
+                        " ".join(str(item) for item in (place.get("types") or []) if isinstance(item, str)),
+                        " ".join(str(item) for item in (place.get("categories") or []) if isinstance(item, str)),
+                    ]
+                )
+            )
+            terms = [*(getattr(intent, "query_terms", None) or []), *(getattr(intent, "product_terms", None) or [])]
+            if any(len(term) >= 4 and term in blob for term in terms):
+                score = 0.7
+                logger.info("google kept on expanded keyword %s", name)
         if score <= 0:
             rejected.append(f"{name}: {rejection_reason(place, intent, vector_value) or 'not relevant'}")
             continue
@@ -680,11 +741,15 @@ async def _live_places(
     """Places API (New) text search: 3000 m, then 8000 m when that circle is empty."""
     query = _places_text_query(intent, request)
     included = INCLUDED_TYPE.get(intent.category or "")
+    # A product word ("tomatoes", "iphone") must not be locked to one Google type.
+    if getattr(intent, "query_terms", None) and intent.category in {"market", "phone", "shop"}:
+        included = None
     open_now = modifier == "open_now"
     page_size = 20 if modifier == "more" else 10
-    radii = (1500.0, 3000.0) if modifier == "closer" else (3000.0, 8000.0)
+    radii = (1500.0, 3000.0) if modifier == "closer" else (3000.0, 8000.0, 15000.0)
     statuses: list[str] = []
     found: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for radius in radii:
         rows, status = await search_text_places(
             query, lat, lng, radius,
@@ -697,8 +762,12 @@ async def _live_places(
                 included_type=None, open_now=open_now, page_size=page_size,
             )
             statuses.append(f"{int(radius)}:{status}")
-        if rows:
-            found = rows
+        for row in rows:
+            pid = str(row.get("place_id") or row.get("name") or "")
+            if pid and pid not in seen:
+                seen.add(pid)
+                found.append(row)
+        if len(found) >= 8:
             break
     return found, ",".join(statuses)
 
@@ -731,9 +800,12 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         if loc:
             search_request += f"\n[User location: {loc[0]}, {loc[1]}]"
 
-    limit = extract_place_limit(search_request)
+    limit = extract_place_limit(search_request, default=8)
     prefer_local, require_accessible = inclusion_flags(request)
     intent = extract_search_intent(search_request)
+    if intent.open_query and not intent.keywords and not intent.query_terms:
+        logger.info("LIST_DISCOVERY skipped small talk request=%r", request[:120])
+        return _clarify_payload(request)
     category = intent.category or requested_category(search_request)
     coords = parse_user_location(request)
     if coords is None and last and last.get("lat") is not None and last.get("lng") is not None:
@@ -776,21 +848,20 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
     catalog_s = time.perf_counter() - catalog_started
 
     db_merged = _merge_candidates(catalog, vector_rows)
-    db_relevant, rejected = _partition(db_merged, intent)
+    rejected: list[str] = []
     maps_places: list[dict[str, Any]] = []
     live_places: list[dict[str, Any]] = []
     places_http = "skipped"
     maps_s = 0.0
     maps_query = intent.maps_query or (category_search_query(category) if category else search_request)
-    if not db_relevant:
-        maps_started = time.perf_counter()
-        try:
-            live_places, places_http = await _live_places(intent, search_request, lat, lng, modifier)
-        except Exception as exc:
-            logger.info("Places API search skipped: %s", exc)
-            live_places, places_http = [], "error"
-        maps_s = time.perf_counter() - maps_started
-    elif len(db_relevant) < 3:
+    maps_started = time.perf_counter()
+    try:
+        live_places, places_http = await _live_places(intent, search_request, lat, lng, modifier)
+    except Exception as exc:
+        logger.info("Places API search skipped: %s", exc)
+        live_places, places_http = [], "error"
+    maps_s = time.perf_counter() - maps_started
+    if len(db_merged) + len(live_places) < 5:
         maps_started = time.perf_counter()
         try:
             maps_places = await _maps_for_intent(maps_query)
@@ -799,13 +870,7 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
             maps_places = []
         maps_s = time.perf_counter() - maps_started
 
-    live_kept, live_rejected = _partition(live_places, intent)
-    maps_kept, maps_rejected = _partition(maps_places, intent)
-    rejected.extend(live_rejected)
-    rejected.extend(maps_rejected)
-    pooled = _merge_candidates(db_relevant, maps_kept, live_kept)
-    if category and not intent.open_query:
-        pooled = [place for place in pooled if is_relevant(place, intent)]
+    pooled = _merge_candidates(db_merged, maps_places, live_places)
 
     shown = set(str(item) for item in (last or {}).get("shown") or []) if modifier == "more" else set()
     if shown:
@@ -815,21 +880,29 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         ]
 
     rank_started = time.perf_counter()
-    candidates = rank_places(
-        pooled,
-        search_request,
-        max(limit, len(pooled)) or limit,
-        prefer_local=prefer_local,
-        require_accessible=require_accessible,
-    )
-    candidates = dedupe_places(candidates, limit=min(limit, 10))
-    candidates = [place for place in candidates if float(place.get("_relevance") or 0) > 0 or is_relevant(place, intent)]
+
+    def _distance_key(place: dict[str, Any]) -> float:
+        dist = place.get("_distance_km")
+        try:
+            return float(dist)
+        except (TypeError, ValueError):
+            return 1e9
+
+    pooled.sort(key=lambda place: (0 if place.get("local_business") is True else 1, _distance_key(place)))
+    candidates = dedupe_places(pooled, limit=min(limit, 10))
     if modifier == "cheaper":
         candidates.sort(key=lambda place: _PRICE_RANK.get(str(place.get("price_level") or ""), 9))
     if modifier == "open_now":
         open_rows = [place for place in candidates if place.get("open_now") is not False]
         if open_rows:
             candidates = open_rows
+    logger.info(
+        "search top %s",
+        [
+            f"{place.get('name')}:{place.get('match_type')}:{float(place.get('_relevance') or 0):.2f}"
+            for place in candidates[:10]
+        ],
+    )
     for place in candidates:
         place.pop("_relevance", None)
         place.pop("_distance_km", None)
@@ -860,7 +933,7 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         catalog_s, maps_s, rank_s, total_s, len(candidates),
     )
 
-    say = draft_reply(candidates, request, widen=not candidates and places_http != "skipped")
+    say = draft_reply(candidates, request, widen=not candidates)
     if not candidates:
         payload: dict[str, Any] = {
             "intent_type": LIST_DISCOVERY,

@@ -40,6 +40,9 @@ let currentCaption = ''
 let outputMeterStop: (() => void) | null = null
 /** After Gemini TTS fails once, skip remote TTS for this page session. */
 let geminiTtsAvailable: boolean | null = null
+let ttsUnavailableUntil = 0
+let ttsFallbackLogged = false
+let rwVoiceNoticeSent = false
 
 /** Subscribe to voice activity (state + 0..1 audio level). Returns unsubscribe. */
 export function subscribeVoiceActivity(cb: ActivityListener): () => void {
@@ -164,6 +167,12 @@ export function speechRecognitionTag(lang: AppLang): { tag: string; rwFallback: 
 
 /** Last language asked of the recognizer — browser TTS uses the same tag. */
 let speechLangTag = 'fr-FR'
+let speechAppLang: AppLang = 'fr'
+
+export function setSpeechLanguage(lang: AppLang): void {
+  speechAppLang = lang
+  speechLangTag = speechRecognitionTag(lang).tag
+}
 
 export type VoiceDiag = {
   appLang: AppLang
@@ -182,11 +191,23 @@ export function subscribeVoiceDiag(listener: (diag: VoiceDiag) => void): () => v
 }
 
 function publishVoiceDiag(diag: VoiceDiag): void {
+  const changed = !lastVoiceDiag
+    || lastVoiceDiag.recognitionLang !== diag.recognitionLang
+    || lastVoiceDiag.appLang !== diag.appLang
+    || lastVoiceDiag.engine !== diag.engine
   lastVoiceDiag = diag
-  console.info(
-    `[voice] recognition.lang=${diag.recognitionLang} appLang=${diag.appLang} engine=${diag.engine}`,
-  )
+  if (changed) {
+    console.info(
+      `[voice] recognition.lang=${diag.recognitionLang} appLang=${diag.appLang} engine=${diag.engine}`,
+    )
+  }
   voiceDiagListeners.forEach((listener) => listener(diag))
+}
+
+function noteKinyarwandaFallback(lang: AppLang): void {
+  if (lang !== 'rw' || rwVoiceNoticeSent) return
+  rwVoiceNoticeSent = true
+  emitVoiceAlert('voiceRwFallback', 'warning')
 }
 
 type BrowserSpeechRecognition = {
@@ -244,7 +265,8 @@ async function startBrowserSpeechRecording(lang: AppLang = 'fr'): Promise<Record
 
   let transcript = ''
   let done = false
-  const { tag } = speechRecognitionTag(lang)
+  const { tag, rwFallback } = speechRecognitionTag(lang)
+  if (rwFallback) noteKinyarwandaFallback(lang)
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   startMicMeter(stream)
@@ -357,11 +379,21 @@ async function startGeminiRecording(lang: AppLang = 'fr'): Promise<Recorder> {
   }
 }
 
+function pickBrowserVoice(tag: string): SpeechSynthesisVoice | undefined {
+  const voices = window.speechSynthesis?.getVoices?.() ?? []
+  const want = tag.toLowerCase().slice(0, 2)
+  const match = (prefix: string) => voices.find((voice) => voice.lang.toLowerCase().startsWith(prefix))
+  return match(want) ?? match('fr') ?? match('en') ?? voices[0]
+}
+
 async function speakWithBrowser(text: string): Promise<boolean> {
   if (!('speechSynthesis' in window)) return false
+  noteKinyarwandaFallback(speechAppLang)
   return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = speechLangTag
+    const voice = pickBrowserVoice(speechLangTag)
+    if (voice) utterance.voice = voice
     utterance.rate = 1
     let settled = false
     const finish = (ok: boolean) => {
@@ -412,7 +444,8 @@ function pickMimeType(): string | undefined {
  */
 export async function startRecording(opts?: { preferBrowser?: boolean; lang?: AppLang }): Promise<Recorder> {
   const lang = opts?.lang ?? 'fr'
-  speechLangTag = speechRecognitionTag(lang).tag
+  setSpeechLanguage(lang)
+  noteKinyarwandaFallback(lang)
   if (opts?.preferBrowser && createBrowserRecognizer()) {
     try {
       return await startBrowserSpeechRecording(lang)
@@ -546,8 +579,26 @@ export async function speakReply(userText: string, assistantMarkdown: string): P
   return speak(formatSpokenReply(userText, assistantMarkdown))
 }
 
+function ttsSkipped(): boolean {
+  if (Date.now() >= ttsUnavailableUntil) {
+    if (geminiTtsAvailable === false) geminiTtsAvailable = null
+    return false
+  }
+  return true
+}
+
+function rememberTtsUnavailable(): void {
+  geminiTtsAvailable = false
+  ttsUnavailableUntil = Date.now() + 10 * 60 * 1000
+  if (!ttsFallbackLogged) {
+    ttsFallbackLogged = true
+    console.info('[voice] TTS unavailable, using browser speech for 10 minutes')
+    emitVoiceAlert('ttsBrowserFallback', 'warning')
+  }
+}
+
 async function playGeminiChunks(text: string): Promise<boolean> {
-  if (geminiTtsAvailable === false) return false
+  if (ttsSkipped()) return false
   const chunks = chunkSpeakableText(text)
   let spoken = ''
   let playedAny = false
@@ -558,17 +609,8 @@ async function playGeminiChunks(text: string): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: chunk }),
     })
-    if (!res.ok) {
-      geminiTtsAvailable = false
-      try {
-        const body = (await res.json()) as { hint?: string; fallback?: string }
-        console.warn(
-          '[voice] Vertex/Gemini TTS unavailable → browser fallback',
-          body.hint ?? res.status,
-        )
-      } catch {
-        console.warn('[voice] Vertex/Gemini TTS unavailable → browser fallback', res.status)
-      }
+    if (res.status === 204 || res.headers.get('x-tts') === 'unavailable' || !res.ok) {
+      rememberTtsUnavailable()
       break
     }
     const buf = await res.arrayBuffer()
@@ -603,18 +645,15 @@ export async function speak(markdown: string): Promise<void> {
     if (speechCancelled) return
     if (playedGemini) return
 
-    console.warn('[voice] using browser SpeechSynthesis fallback')
-    emitVoiceAlert('ttsBrowserFallback', 'warning')
+    if (!ttsFallbackLogged) emitVoiceAlert('ttsBrowserFallback', 'warning')
     const ok = await speakWithBrowser(text)
     if (!ok && !speechCancelled) {
       console.error('[voice] browser SpeechSynthesis also failed')
       emitVoiceAlert('ttsUnavailable', 'error')
     }
   } catch (err) {
-    console.warn('[voice] TTS request failed:', err)
     if (speechCancelled) return
-    console.warn('[voice] using browser SpeechSynthesis fallback after error')
-    emitVoiceAlert('ttsBrowserFallback', 'warning')
+    if (!ttsFallbackLogged) emitVoiceAlert('ttsBrowserFallback', 'warning')
     const ok = await speakWithBrowser(text)
     if (!ok && !speechCancelled) emitVoiceAlert('ttsUnavailable', 'error')
   } finally {
@@ -638,8 +677,7 @@ export function enqueueSpeak(markdown: string): Promise<void> {
     try {
       const playedGemini = await playGeminiChunks(text)
       if (speechCancelled || playedGemini) return
-      console.warn('[voice] enqueueSpeak → browser SpeechSynthesis fallback')
-      emitVoiceAlert('ttsBrowserFallback', 'warning')
+      if (!ttsFallbackLogged) emitVoiceAlert('ttsBrowserFallback', 'warning')
       const ok = await speakWithBrowser(text)
       if (!ok && !speechCancelled) emitVoiceAlert('ttsUnavailable', 'error')
     } catch (err) {

@@ -97,6 +97,7 @@ export async function* streamChat(
   let buffer = ''
   const seenSteps = new Set<string>()
   let streamedText = false
+  let sentPlaces = false
   let pipelineStartedAt: number | null = null
   let nextMilestoneIdx = 0
 
@@ -208,10 +209,17 @@ export async function* streamChat(
           const response = part?.functionResponse ?? part?.function_response
           if (response && (response.name === 'hodari_pipeline' || response.name === 'discover_places')) {
             const places = placesFromToolResponse(response.response)
-            if (places !== null) yield { type: 'places', places }
+            if (places !== null) {
+              if (places.length === 0 && sentPlaces) continue
+              if (places.length > 0) sentPlaces = true
+              yield { type: 'places', places }
+            }
             continue
           }
           if (part.text) {
+            if (sentPlaces && /couldn'?t find|could not find|n'ai pas trouv|sinabonye|no places found/i.test(part.text)) {
+              continue
+            }
             if (event?.partial === true) {
               streamedText = true
               yield { type: 'text', text: part.text }

@@ -279,7 +279,7 @@ async function fallbackDrawnRoute(
 async function runDrawnRoute(origin: LatLng, destination: LatLng, mode: TravelMode, liveOrigin: boolean, signal?: AbortSignal): Promise<RouteDraw> {
   const from = liveOrigin ? await browserOrigin(origin) : origin
   const to = destination
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NEXT_PUBLIC_DEBUG === '1') {
     console.info('[directions] origin', { lat: from.lat, lng: from.lng }, 'destination', { lat: to.lat, lng: to.lng })
   }
   if (!isValidCoord(from) || !isValidCoord(to)) {
@@ -762,17 +762,18 @@ let autoFrame = true
 let fittingCamera = false
 let followOwnsCamera = false
 
-const cameraLog: number[] = []
-
-function noteCamera(reason: string) {
-  if (process.env.NODE_ENV === 'production') return
-  const now = Date.now()
-  cameraLog.push(now)
-  while (cameraLog.length && now - cameraLog[0] > 2000) cameraLog.shift()
-  if (cameraLog.length > 2) {
-    console.warn(`[map] fitBounds/panTo called ${cameraLog.length} times in 2s (${reason})`)
-  }
+type PendingFit = {
+  map: google.maps.Map
+  bounds: google.maps.LatLngBounds
+  reason: string
+  key: string
 }
+
+let fitTimer = 0
+let fitLocked = false
+let pendingFit: PendingFit | null = null
+let lastFitKey = ''
+const warnedFitKeys = new Set<string>()
 
 export function requestRouteRefit(force = false) {
   if (typeof window === 'undefined') return
@@ -817,10 +818,20 @@ function ensureFrameOverlay(map: google.maps.Map) {
   return overlay
 }
 
-function warnIfOffscreen(map: google.maps.Map, bounds: google.maps.LatLngBounds, pad: MapPadding, reason: string) {
-  if (process.env.NODE_ENV === 'production') return
+function roundedBoundsKey(bounds: google.maps.LatLngBounds, reason: string): string {
+  const ne = bounds.getNorthEast()
+  const sw = bounds.getSouthWest()
+  const n = (value: number) => value.toFixed(4)
+  return `${reason}:${n(ne.lat())},${n(ne.lng())}:${n(sw.lat())},${n(sw.lng())}`
+}
+
+function cornersOutside(
+  map: google.maps.Map,
+  bounds: google.maps.LatLngBounds,
+  pad: MapPadding,
+): boolean {
   const projection = ensureFrameOverlay(map).getProjection()
-  if (!projection) return
+  if (!projection) return false
   const div = map.getDiv()
   const width = div.clientWidth
   const height = div.clientHeight
@@ -832,15 +843,78 @@ function warnIfOffscreen(map: google.maps.Map, bounds: google.maps.LatLngBounds,
     { lat: sw.lat(), lng: ne.lng() },
     { lat: sw.lat(), lng: sw.lng() },
   ]
-  const outside = corners.some((corner) => {
+  return corners.some((corner) => {
     const pixel = projection.fromLatLngToContainerPixel(new google.maps.LatLng(corner.lat, corner.lng))
     if (!pixel) return false
     return pixel.x < pad.left - 12 || pixel.x > width - pad.right + 12 || pixel.y < pad.top - 12 || pixel.y > height - pad.bottom + 12
   })
-  if (outside) console.warn(`[map] route still outside the visible area after fit (${reason})`)
 }
 
-/** The only framing call. Padding is the free area left by the real overlay rectangles. */
+function moveCameraToFreeArea(map: google.maps.Map, bounds: google.maps.LatLngBounds, pad: MapPadding) {
+  const div = map.getDiv()
+  const ne = bounds.getNorthEast()
+  const sw = bounds.getSouthWest()
+  const center = { lat: (ne.lat() + sw.lat()) / 2, lng: (ne.lng() + sw.lng()) / 2 }
+  const zoom = map.getZoom() ?? 14
+  const metersPerPixel = (156543.03392 * Math.cos((center.lat * Math.PI) / 180)) / 2 ** zoom
+  const freeCx = pad.left + (div.clientWidth - pad.left - pad.right) / 2
+  const freeCy = pad.top + (div.clientHeight - pad.top - pad.bottom) / 2
+  const offsetX = freeCx - div.clientWidth / 2
+  const offsetY = freeCy - div.clientHeight / 2
+  const cos = Math.max(0.2, Math.cos((center.lat * Math.PI) / 180))
+  const shifted = {
+    lat: center.lat + (offsetY * metersPerPixel) / 111_320,
+    lng: center.lng - (offsetX * metersPerPixel) / (111_320 * cos),
+  }
+  if (typeof map.moveCamera === 'function') map.moveCamera({ center: shifted, zoom })
+  else map.setCenter(shifted)
+}
+
+function runPendingFit() {
+  const job = pendingFit
+  if (!job || fitLocked) return
+  if (job.key === lastFitKey) {
+    pendingFit = null
+    return
+  }
+  pendingFit = null
+  fitLocked = true
+  lastFitKey = job.key
+  const pad = paddingFromChrome(job.map.getDiv())
+  cancelCameraMotion(job.map)
+  fittingCamera = true
+  ensureFrameOverlay(job.map)
+  job.map.fitBounds(job.bounds, pad)
+  let settled = false
+  const finish = () => {
+    if (settled) return
+    settled = true
+    fittingCamera = false
+    fitLocked = false
+    if (cornersOutside(job.map, job.bounds, pad)) {
+      moveCameraToFreeArea(job.map, job.bounds, pad)
+      window.setTimeout(() => {
+        if (!cornersOutside(job.map, job.bounds, pad) || warnedFitKeys.has(job.key)) return
+        warnedFitKeys.add(job.key)
+        if (process.env.NODE_ENV === 'production') return
+        const div = job.map.getDiv()
+        const ne = job.bounds.getNorthEast()
+        const sw = job.bounds.getSouthWest()
+        console.warn(
+          `[map] fit still outside the free area (${job.reason})`,
+          `bounds=${sw.lat().toFixed(4)},${sw.lng().toFixed(4)}..${ne.lat().toFixed(4)},${ne.lng().toFixed(4)}`,
+          `padding=${pad.top},${pad.right},${pad.bottom},${pad.left}`,
+          `container=${div.clientWidth}x${div.clientHeight}`,
+        )
+      }, 400)
+    }
+    if (pendingFit) runPendingFit()
+  }
+  google.maps.event.addListenerOnce(job.map, 'idle', finish)
+  window.setTimeout(finish, 900)
+}
+
+/** The only framing call. Later requests for the same bounds are ignored. */
 function fitToVisibleArea(
   map: google.maps.Map,
   area: google.maps.LatLngBounds | LatLng,
@@ -850,16 +924,11 @@ function fitToVisibleArea(
   if (typeof google === 'undefined') return
   const bounds = isLatLngBounds(area) ? area : boundsAround(area, aroundMeters)
   if (bounds.isEmpty()) return
-  const pad = paddingFromChrome(map.getDiv())
-  noteCamera(reason)
-  cancelCameraMotion(map)
-  fittingCamera = true
-  ensureFrameOverlay(map)
-  map.fitBounds(bounds, pad)
-  window.setTimeout(() => { fittingCamera = false }, 700)
-  google.maps.event.addListenerOnce(map, 'idle', () => {
-    warnIfOffscreen(map, bounds, pad, reason)
-  })
+  const key = roundedBoundsKey(bounds, reason)
+  if (key === lastFitKey) return
+  pendingFit = { map, bounds, reason, key }
+  window.clearTimeout(fitTimer)
+  fitTimer = window.setTimeout(runPendingFit, 300)
 }
 
 function routeBounds(route: { path: google.maps.LatLngLiteral[]; origin?: LatLng | null; destination?: LatLng | null }) {
@@ -882,8 +951,6 @@ function paddingFromChrome(mapDiv: HTMLElement): { top: number; right: number; b
     const overlapX = Math.min(rect.right, mapRect.right) - Math.max(rect.left, mapRect.left)
     const overlapY = Math.min(rect.bottom, mapRect.bottom) - Math.max(rect.top, mapRect.top)
     if (overlapX < 8 || overlapY < 8 || rect.width < 2 || rect.height < 2) return
-    const kind = node.dataset.mapPad
-    if (kind === 'popup') return
     const fromLeft = Math.max(0, rect.left - mapRect.left)
     const fromRight = Math.max(0, mapRect.right - rect.right)
     const fromTop = Math.max(0, rect.top - mapRect.top)
@@ -898,8 +965,8 @@ function paddingFromChrome(mapDiv: HTMLElement): { top: number; right: number; b
     if (touchTop) top = Math.max(top, rect.bottom - mapRect.top + 16)
     if (touchBottom) bottom = Math.max(bottom, mapRect.bottom - rect.top + 16)
   })
-  const maxW = Math.max(48, mapRect.width - 96)
-  const maxH = Math.max(48, mapRect.height - 96)
+  const maxW = Math.max(48, mapRect.width * 0.6)
+  const maxH = Math.max(48, mapRect.height * 0.6)
   if (left + right > maxW) {
     if (right >= left) left = Math.max(16, maxW - right)
     else right = Math.max(16, maxW - left)
@@ -2115,10 +2182,7 @@ function FollowCamera({ enabled, tilted, fallback }: { enabled: boolean; tilted:
       if (moved < 5 && (map.getZoom() ?? 0) >= 16.5) return
       last.lat = point.lat
       last.lng = point.lng
-      noteCamera('follow')
-      map.panTo({ lat: point.lat, lng: point.lng })
-      if ((map.getZoom() ?? 0) < 16.5) map.setZoom(17)
-      if (tilted && point.heading != null) map.setHeading(point.heading)
+      fitToVisibleArea(map, { lat: point.lat, lng: point.lng }, 'follow', 180)
     }
     const fix = getNavFix()
     const start = fallbackRef.current
@@ -2209,9 +2273,7 @@ function MapMarkers({
             collisionBehavior={collision(false)}
             onClick={() => {
               if (!map) return
-              noteCamera('cluster')
-              map.panTo({ lat, lng })
-              map.setZoom(Math.min(18, (map.getZoom() ?? zoom) + 2))
+              fitToVisibleArea(map, { lat, lng }, 'cluster', 160)
             }}
           >
             <span className="hodari-cluster">{bucket.length}</span>
@@ -2505,27 +2567,13 @@ export const PlaceInfoCard = memo(function PlaceInfoCard({
   className?: string
 }) {
   const { t } = useI18n()
-  const photoUrl = place.photo_url ?? place.photos?.[0] ?? (place.photo_reference ? `/api/place-photo?ref=${encodeURIComponent(place.photo_reference)}` : null)
   const rating = reviewSummary?.average ?? place.rating
   const ratingCount = reviewSummary?.count || place.user_ratings_total || 0
 
   return (
     <div data-map-pad="popup" className={`place-card-in relative w-[min(280px,calc(100vw-2rem))] text-gray-900 ${className}`}>
       <div className="relative mb-2 w-full shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-white/10" style={{ aspectRatio: '16 / 9', maxHeight: 158 }}>
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-200 text-[11px] text-gray-400 dark:bg-white/10">{t('placeCard.photo')}</div>
-        {photoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={photoUrl}
-            alt=""
-            width={560}
-            height={315}
-            loading="lazy"
-            decoding="async"
-            className="absolute inset-0 h-full w-full object-cover"
-            onError={(event) => { event.currentTarget.style.display = 'none' }}
-          />
-        ) : null}
+        <PlaceImage place={place} width={560} height={315} className="absolute inset-0 h-full w-full" />
       </div>
       <button
         type="button"

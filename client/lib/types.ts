@@ -15,6 +15,11 @@ export interface Place {
   rating?: number
   price_level?: string
   summary?: string
+  description?: string
+  /** One-line explanation of why this listing matched the request. */
+  why?: string
+  /** Distance from the user, already formatted. */
+  distance?: string
   maps_url?: string
   /** The place's own website (restaurant/hotel site), when known. */
   website?: string

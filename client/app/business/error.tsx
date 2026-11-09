@@ -1,11 +1,16 @@
 'use client'
 
-import { useEffect } from 'react'
-import { ServiceUnavailable } from '@/components/ServiceUnavailable'
-
-export default function BusinessError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
-  useEffect(() => {
-    console.error('[session] business page error', error)
-  }, [error])
-  return <ServiceUnavailable onRetry={reset} />
+export default function BusinessError({ reset }: { error: Error; reset: () => void }) {
+  return (
+    <div className="rounded-2xl border border-black/10 bg-white p-6">
+      <p className="text-[15px] font-medium">This page could not be loaded.</p>
+      <button
+        type="button"
+        onClick={() => reset()}
+        className="mt-4 rounded-xl bg-[#E8672A] px-4 py-2 text-[13px] font-medium text-white"
+      >
+        Retry
+      </button>
+    </div>
+  )
 }

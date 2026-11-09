@@ -36,6 +36,17 @@ class HodariPipelineTool(AgentTool):
         tool_context: ToolContext,
     ) -> Any:
         request = args.get("request", "")
+        if tool_context.state.get("pipeline_once") == request:
+            logger.info("hodari_pipeline skipped: already ran for this message")
+            stored = tool_context.state.get("pipeline_result")
+            if stored:
+                return stored
+            return json.dumps({
+                "intent_type": LIST_DISCOVERY,
+                "candidates": [],
+                "say": "Search already running for this message.",
+            })
+        tool_context.state["pipeline_once"] = request
         intent = classify_intent(request)
         record_intent(intent)
         tool_context.state["intent_type"] = intent
@@ -50,7 +61,10 @@ class HodariPipelineTool(AgentTool):
             })
 
         if intent == LIST_DISCOVERY:
-            return await discover_places(request, tool_context)
+            result = await discover_places(request, tool_context)
+            tool_context.state["pipeline_once"] = request
+            tool_context.state["pipeline_result"] = result
+            return result
 
         tool_context.state["candidates"] = "[]"
         tool_context.state["places_query"] = request
@@ -68,4 +82,5 @@ class HodariPipelineTool(AgentTool):
                 enqueue_preference_saves(_user_id(tool_context), stops)
         except Exception as exc:
             logger.warning("Failed to enqueue background preference saves: %s", exc)
+        tool_context.state["pipeline_result"] = result
         return result

@@ -42,15 +42,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!genaiConfigured()) {
-    console.warn('[voice/speak] Vertex/Gemini TTS unavailable —', genaiMissingHint(), '→ client should use browser SpeechSynthesis')
-    return NextResponse.json(
-      {
-        error: 'TTS not configured',
-        fallback: 'browser',
-        hint: genaiMissingHint(),
-      },
-      { status: 503 },
-    )
+    return ttsUnavailable(genaiMissingHint())
   }
   let body: { text?: string; voice?: string }
   try {
@@ -77,8 +69,7 @@ export async function POST(req: NextRequest) {
 
     const audio = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData
     if (!audio?.data) {
-      console.warn('[voice/speak] No audio in Gemini response → fallback: browser')
-      return NextResponse.json({ error: 'No audio returned', fallback: 'browser' }, { status: 502 })
+      return ttsUnavailable('no audio in Gemini response')
     }
     const pcm = Buffer.from(audio.data, 'base64')
     const wav = pcmToWav(pcm, rateFromMime(audio.mimeType ?? undefined))
@@ -90,15 +81,21 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (e) {
-    console.error('[voice/speak] Vertex/Gemini TTS failed → fallback: browser —', e)
-    return NextResponse.json(
-      {
-        error: 'Speech synthesis failed',
-        fallback: 'browser',
-        hint:
-          'Set GOOGLE_GENAI_USE_VERTEXAI=TRUE, GOOGLE_CLOUD_PROJECT, and run: gcloud auth application-default login',
-      },
-      { status: 503 },
-    )
+    const message = e instanceof Error ? e.message : 'speech synthesis failed'
+    return ttsUnavailable(message)
   }
+}
+
+let unavailableLogged = false
+
+/** Browser speech takes over. 204 keeps this off the console's red network list. */
+function ttsUnavailable(reason: string) {
+  if (!unavailableLogged) {
+    unavailableLogged = true
+    console.info('[voice/speak] TTS unavailable, browser speech will be used.', reason)
+  }
+  return new NextResponse(null, {
+    status: 204,
+    headers: { 'x-tts': 'unavailable', 'Cache-Control': 'no-store' },
+  })
 }

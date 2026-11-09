@@ -206,8 +206,15 @@ function richness(place: PlaceLike): number {
   return score
 }
 
+function isOwnerListing(place: PlaceLike): boolean {
+  const id = place.place_id || ''
+  return place.local_business === true || id.startsWith('user_') || id.startsWith('kgl_')
+}
+
 function mergePlaces<T extends PlaceLike>(left: T, right: T): T {
-  const primary = richness(left) >= richness(right) ? left : right
+  const primary = isOwnerListing(left) !== isOwnerListing(right)
+    ? (isOwnerListing(left) ? left : right)
+    : richness(left) >= richness(right) ? left : right
   const secondary = primary === left ? right : left
   const merged: T = { ...primary }
   const bag = merged as Record<string, unknown>

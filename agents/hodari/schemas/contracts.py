@@ -40,6 +40,7 @@ class Place(BaseModel):
     status: Optional[str] = None
     source: Optional[str] = None
     photo_url: Optional[str] = None
+    photo_reference: Optional[str] = None
     confirmations_count: int = 0
 
 

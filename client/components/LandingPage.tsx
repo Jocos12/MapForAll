@@ -12,7 +12,7 @@ import { PlaceCardStrip } from '@/components/PlaceCardStrip'
 import { CollapsedReply } from '@/components/CollapsedReply'
 import { detailsExpandedPref, PlaceDetailsPanel, setDetailsExpandedPref } from '@/components/PlaceDetailsPanel'
 import { streamChat, fetchSessionState, ChatGateError } from '@/lib/stream'
-import { placesForAsk } from '@/lib/placeCategory'
+import { placesForAsk, replyFromPlaces, requestedCategory } from '@/lib/placeCategory'
 import { markPrioritized } from '@/lib/priority'
 import { fetchCatalogPlaces, mergeCatalogFirst } from '@/lib/catalogPlaces'
 import { dedupePlaces } from '@/lib/placeDedupe'
@@ -54,7 +54,7 @@ import {
   resolvePlaceIndex,
 } from '@/lib/mapIntents'
 import { stripEmDashes } from '@/lib/text'
-import { speak, enqueueSpeak, resetSpeakQueue, cancelSpeech, isSpeechOutputSupported } from '@/lib/voice'
+import { speak, enqueueSpeak, resetSpeakQueue, cancelSpeech, isSpeechOutputSupported, setSpeechLanguage } from '@/lib/voice'
 import { useVoice } from '@/hooks/useVoice'
 import { type ModelId } from '@/components/ModelSwitcher'
 import { useCommunityMapLayer } from '@/components/community/useCommunityMapLayer'
@@ -192,6 +192,7 @@ function enrichMapPlace(item: Place | ItineraryStop, memory: Map<string, Place>)
     categories: known?.categories?.length ? known.categories : fromItem,
     photo_url: ('photo_url' in item && item.photo_url) || known?.photo_url,
     photos: ('photos' in item && item.photos?.length ? item.photos : known?.photos),
+    photo_reference: ('photo_reference' in item && item.photo_reference) || known?.photo_reference,
     rating: ('rating' in item && item.rating != null ? item.rating : known?.rating),
     local_business: ('local_business' in item && item.local_business) || known?.local_business,
     accessible: ('accessible' in item && item.accessible) || known?.accessible,
@@ -276,7 +277,8 @@ interface HistoryItem {
 }
 
 export default function LandingPage() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  useEffect(() => { setSpeechLanguage(lang) }, [lang])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [gate, setGate] = useState<GateState | null>(null)
 
@@ -385,6 +387,7 @@ export default function LandingPage() {
   const soloPlaceModeRef = useRef(false)
   const appliedMapActionsRef = useRef('')
   const placesRef = useRef(places)
+  const fullPlacesRef = useRef<Place[]>([])
   const itineraryRef = useRef(itinerary)
   const activeStopRef = useRef(activeStop)
   const fetchedPhotoIdsRef = useRef(new Set<string>())
@@ -565,18 +568,23 @@ export default function LandingPage() {
   const messagesRef = useRef<ChatMessage[]>([])
   messagesRef.current = messages
   const replyCacheRef = useRef(new Map<string, { at: number; content: string; places?: Place[] }>())
+  const sendLockRef = useRef(false)
+  const recentSendRef = useRef<{ key: string; at: number } | null>(null)
+  const retriedRef = useRef(false)
+  const lastUserTextRef = useRef('')
+  const hasOwnPhoto = (p: Place) => Boolean(p.photo_url || p.photos?.length || p.photo_reference)
   const placePhotoKey = places
-    .map((p) => `${p.place_id}:${p.photo_url || p.photos?.length ? 1 : 0}`)
+    .map((p) => `${p.place_id}:${hasOwnPhoto(p) ? 1 : 0}`)
     .join(',')
   useEffect(() => {
     const applyCached = (list: Place[]) =>
       list.map((p) => {
-        if (p.photo_url || p.photos?.length) return p
+        if (hasOwnPhoto(p)) return p
         const urls = photoCacheRef.current.get(p.place_id)
         return urls?.length ? { ...p, photo_url: urls[0], photos: urls } : p
       })
 
-    if (places.some((p) => !p.photo_url && !p.photos?.length && photoCacheRef.current.has(p.place_id))) {
+    if (places.some((p) => !hasOwnPhoto(p) && photoCacheRef.current.has(p.place_id))) {
       setPlaces((prev) => applyCached(prev))
     }
 
@@ -589,7 +597,7 @@ export default function LandingPage() {
         if (!m.places?.length) return m
         let msgChanged = false
         const patched = m.places.map((p) => {
-          if (p.photo_url || p.photos?.length) return p
+          if (p.photo_url || p.photos?.length || p.photo_reference) return p
           const urls = photoCacheRef.current.get(p.place_id)
           if (urls?.length) { msgChanged = true; return { ...p, photo_url: urls[0], photos: urls } }
           return p
@@ -601,7 +609,7 @@ export default function LandingPage() {
     })
 
     const toFetch = places.filter(
-      (p) => p.place_id && !p.place_id.startsWith('__') && !p.photo_url && !p.photos?.length && !fetchedPhotoIdsRef.current.has(p.place_id),
+      (p) => p.place_id && !p.place_id.startsWith('__') && !hasOwnPhoto(p) && !fetchedPhotoIdsRef.current.has(p.place_id),
     )
     if (!toFetch.length) return
     toFetch.forEach((place) => {
@@ -618,33 +626,18 @@ export default function LandingPage() {
           }
           if (typeof data.isOpen === 'boolean') patch.open_now = data.isOpen
           if (Object.keys(patch).length === 0) return
-          setPlaces((prev) =>
-            prev.map((p) => (p.place_id === place.place_id ? { ...p, ...patch } : p)),
-          )
+          const applyPatch = (p: Place) => (p.place_id === place.place_id ? { ...p, ...patch } : p)
+          setPlaces((prev) => prev.map(applyPatch))
+          setMessages((prev) => prev.map((m) => (
+            m.places?.some((p) => p.place_id === place.place_id)
+              ? { ...m, places: m.places.map(applyPatch) }
+              : m
+          )))
         })
         .catch(() => {})
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placePhotoKey])
-
-  // Warm the browser cache for every place photo as soon as its URL is known,
-  // so cards and detail panels render their image instantly instead of
-  // downloading on first view.
-  const preloadedPhotoSrcsRef = useRef(new Set<string>())
-  useEffect(() => {
-    for (const p of places) {
-      const refSrc = p.photo_reference
-        ? `/api/place-photo?ref=${encodeURIComponent(p.photo_reference)}`
-        : null
-      const srcs = [p.photo_url, ...(p.photos ?? []), refSrc].filter(Boolean).slice(0, 3) as string[]
-      for (const src of srcs) {
-        if (preloadedPhotoSrcsRef.current.has(src)) continue
-        preloadedPhotoSrcsRef.current.add(src)
-        const img = new Image()
-        img.src = src
-      }
-    }
-  }, [places])
 
   const handleSavePlace = useCallback(
     (place: Place) => {
@@ -710,7 +703,17 @@ export default function LandingPage() {
     setMessages((prev) => replaceTurnAssistant(prev, turnAssistantIdRef.current, message))
   }, [])
 
-  const handleSend = useCallback(async (text: string, opts?: { speak?: boolean; display?: string; fromVoice?: boolean }) => {
+  const handleSend = useCallback(async (text: string, opts?: { speak?: boolean; display?: string; fromVoice?: boolean; retry?: boolean }) => {
+    const displayText = (opts?.display ?? text).trim()
+    if (sendLockRef.current) return
+    if (!opts?.retry) {
+      const key = displayText.toLowerCase()
+      const recent = recentSendRef.current
+      if (recent && recent.key === key && Date.now() - recent.at < 3000) return
+      recentSendRef.current = { key, at: Date.now() }
+      retriedRef.current = false
+      lastUserTextRef.current = displayText
+    }
     routeVerdictRef.current = null
     routePaintedRef.current = false
     pendingRouteClaim.current = false
@@ -792,6 +795,7 @@ export default function LandingPage() {
       setRouteFromUser(false)
       setRouteInfo(null)
     }
+    sendLockRef.current = true
     setLoading(true)
     setThinkingSteps([])
     setStreamingStarted(false)
@@ -922,30 +926,41 @@ export default function LandingPage() {
     let earlyItinerarySet = false
     let pipelineRan = false
 
+    let placeReply = ''
+    let keptPlaces: Place[] | null = null
+    const noResultsText = (value: string) => /couldn'?t find|could not find|n'ai pas trouv|sinabonye|no places found/i.test(value)
     const publishPlaces = (agentPlaces: Place[], replaceEmpty = false) => {
+      if (keptPlaces) return
+      if (agentPlaces.length > 0) keptPlaces = agentPlaces
       void catalogPromise.then((catalog) => {
         if (ctrl.signal.aborted || soloPlaceModeRef.current) return
-        const merged = dedupePlaces(placesForAsk(mergeCatalogFirst(catalog, agentPlaces), text))
-        if (!merged.length && !replaceEmpty) return
-        const ranked = markPrioritized(merged, /prefer_local/i.test(text), scoringRef.current)
+        if (keptPlaces && agentPlaces.length === 0) return
+        const merged = dedupePlaces([...agentPlaces, ...catalog]).slice(0, 8)
+        const placeAsk = merged.length > 0 || requestedCategory(text) != null
+        if (!merged.length && !replaceEmpty && !placeAsk) return
+        if (!merged.length && keptPlaces) return
+        const ranked = merged
         placesRef.current = ranked
+        fullPlacesRef.current = ranked
         setPlaces(ranked)
         setItinerary(null)
         setMapZoomFocus(false)
         setMapVisible(ranked.length > 0)
         setActiveStop(null)
         if (!routeRequest) { setRouteFromUser(false); setRouteInfo(null) }
+        if (placeAsk) placeReply = replyFromPlaces(ranked, text)
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === assistantId)
+          const content = placeReply || existing?.content || ''
           if (!existing) {
             return [...prev, {
               id: assistantId,
               role: 'assistant' as const,
-              content: ranked.length ? `Found ${ranked.length} place${ranked.length !== 1 ? 's' : ''} for you!` : '',
+              content,
               places: ranked,
             }]
           }
-          return prev.map((m) => m.id === assistantId ? { ...m, places: ranked, itinerary: undefined } : m)
+          return prev.map((m) => m.id === assistantId ? { ...m, content: placeReply || m.content, places: ranked, itinerary: undefined } : m)
         })
       })
     }
@@ -1006,7 +1021,7 @@ export default function LandingPage() {
       }
       const placesQuery = typeof s.places_query === 'string' ? s.places_query : ''
       if (!earlyItinerarySet && s.candidates && !soloPlaceModeRef.current && placesQuery && askSharesToken(placesQuery, text)) {
-        const parsed = placesForAsk(parseCandidates(s.candidates) ?? [], text)
+        const parsed = parseCandidates(s.candidates) ?? []
         publishPlaces(parsed, true)
       }
       processSessionMapActions(s)
@@ -1026,7 +1041,7 @@ export default function LandingPage() {
         }
         if (chunk.type === 'places') {
           pipelineRan = true
-          const list = dedupePlaces(placesForAsk(chunk.places, text))
+          const list = dedupePlaces(chunk.places)
           publishPlaces(list, true)
           continue
         }
@@ -1038,7 +1053,8 @@ export default function LandingPage() {
               .then((s) => applySessionSnapshot(s))
               .catch(() => {})
           }
-        } else {
+        } else if (!placeReply) {
+          if (keptPlaces && noResultsText(chunk.text)) continue
           if (!streamingStartedRef.current) {
             streamingStartedRef.current = true
             setStreamingStarted(true)
@@ -1047,6 +1063,7 @@ export default function LandingPage() {
           const clean = routeVerdictRef.current ?? stripEmDashes(assistantText)
           setMessages((prev) => {
             const existing = prev.find((m) => m.id === assistantId)
+            if (existing?.places?.length && noResultsText(clean)) return prev
             if (existing) return prev.map((m) => m.id === assistantId ? { ...m, content: clean } : m)
             return [...prev, { id: assistantId, role: 'assistant', content: clean }]
           })
@@ -1101,7 +1118,7 @@ export default function LandingPage() {
           const placesQuery = typeof state.places_query === 'string' ? state.places_query : ''
           const queryMatches = Boolean(placesQuery) && askSharesToken(placesQuery, text)
           const parsedCandidates = state.candidates && queryMatches
-            ? placesForAsk(parseCandidates(state.candidates) ?? [], text)
+            ? (parseCandidates(state.candidates) ?? [])
             : null
           const parsedItinerary = state.itinerary ? parseItinerary(state.itinerary) : null
 
@@ -1214,6 +1231,7 @@ export default function LandingPage() {
         ])
       }
     } finally {
+      sendLockRef.current = false
       abortRef.current = null
       setLoading(false)
       setStreamingStarted(false)
@@ -1228,6 +1246,14 @@ export default function LandingPage() {
       }
     }
   }, [userLocation, manualCity, places, itinerary, activeStop, suppressGpsContext, t, beginRouteClaim, commitRouteFailure]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const retryLastMessage = useCallback(() => {
+    if (retriedRef.current || sendLockRef.current) return
+    const again = lastUserTextRef.current
+    if (!again) return
+    retriedRef.current = true
+    void handleSend(again, { retry: true })
+  }, [handleSend])
 
   const applyMapEffects = useCallback((effects: MapActionEffects) => {
     if (effects.showUserOnMap !== undefined) setShowUserOnMap(effects.showUserOnMap)
@@ -1961,29 +1987,33 @@ export default function LandingPage() {
     setRequireAccessible(nextAccess)
     setMarketOnly(false)
     setMapVisible(true)
-    setPlacesLoading(true)
-    const params = new URLSearchParams()
-    if (nextLocal) params.set('local_business', '1')
-    if (nextAccess) params.set('accessible', '1')
-    try {
-      const res = await fetch(`/api/places?${params.toString()}`)
-      const data = await res.json()
-      if (Array.isArray(data.places)) {
-        const ranked = dedupePlaces(markPrioritized(data.places, nextLocal, scoringRef.current))
-        setPlaces(ranked)
-        if (ranked.length) setMapVisible(true)
-      }
-    } catch { /* chips still reach the agent */ }
-    finally { setPlacesLoading(false) }
-    const tokens = [
-      nextLocal ? 'prefer_local:' : '',
-      nextAccess ? 'require_accessible:' : '',
-    ].filter(Boolean)
-    if (tokens.length) {
-      const label = [nextLocal ? t('filters.local') : '', nextAccess ? t('filters.accessible') : ''].filter(Boolean).join(' · ')
-      handleSend(`${tokens.join(' ')} places in Kigali`, { display: label })
+    const source = fullPlacesRef.current.length ? fullPlacesRef.current : placesRef.current
+    const filtered = source.filter((place) => {
+      if (nextLocal && !place.local_business) return false
+      if (nextAccess && !place.accessible) return false
+      return true
+    })
+    setPlaces(filtered)
+    setMessages((prev) => prev.map((m) => (
+      m.places?.length ? { ...m, places: m.places.filter((place) => filtered.some((item) => item.place_id === place.place_id)) } : m
+    )))
+    if (!source.length) {
+      setPlacesLoading(true)
+      const params = new URLSearchParams()
+      if (nextLocal) params.set('local_business', '1')
+      if (nextAccess) params.set('accessible', '1')
+      try {
+        const res = await fetch(`/api/places?${params.toString()}`)
+        const data = await res.json()
+        if (Array.isArray(data.places)) {
+          const ranked = placesForAsk(dedupePlaces(data.places), '')
+          setPlaces(ranked)
+          if (ranked.length) setMapVisible(true)
+        }
+      } catch { /* the chip still shows the current list */ }
+      finally { setPlacesLoading(false) }
     }
-  }, [preferLocal, requireAccessible, handleSend, t])
+  }, [preferLocal, requireAccessible])
 
   const applyMarkets = useCallback(async () => {
     const next = !marketOnly
@@ -2023,6 +2053,7 @@ export default function LandingPage() {
       thinkingSteps={thinkingSteps}
       streamingStarted={streamingStarted}
       onSend={handleSend}
+      onRetry={retryLastMessage}
       onInclusionFilter={applyInclusion}
       onMarketFilter={() => { void applyMarkets() }}
       onAddPlace={() => { void openAddPlace() }}

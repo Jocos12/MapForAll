@@ -83,6 +83,7 @@ export function useVoice({ onTranscript, disabled, autoResumeAfterSpeak = true, 
     const msg =
       key === 'ttsUnavailable' ? tRef.current('composer.ttsUnavailable')
       : key === 'ttsBrowserFallback' ? tRef.current('composer.ttsBrowserFallback')
+      : key === 'voiceRwFallback' ? tRef.current('composer.voiceRwFallback')
       : key
     setWarning(msg)
   }), [])

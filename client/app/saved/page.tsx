@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ArrowLeft, Bookmark, Calendar, CalendarPlus, Check, Star, Trash2 } from 'lucide-react'
 import { CategoryIcon } from '@/components/CategoryIcon'
 import { PlaceBadges } from '@/components/PlaceBadges'
+import { PlaceImage } from '@/components/PlaceImage'
 import { useI18n } from '@/components/I18nProvider'
 import { googleCalendarUrl } from '@/lib/calendar'
 import type { Place } from '@/lib/types'
@@ -104,12 +105,11 @@ function PlaceThumb({
   categories?: string[]
   size?: 'lg' | 'sm'
 }) {
-  const [broken, setBroken] = useState(false)
   const box = size === 'lg' ? 'h-24 w-24 rounded-xl' : 'h-12 w-12 rounded-lg'
   return (
-    <div className={`flex shrink-0 items-center justify-center overflow-hidden bg-neutral-100 dark:bg-white/5 ${box}`}>
-      {photo && !broken ? (
-        <img src={photo} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+    <div className={`relative flex shrink-0 items-center justify-center overflow-hidden bg-neutral-100 dark:bg-white/5 ${box}`}>
+      {photo ? (
+        <PlaceImage place={{ name, photo_url: photo }} width={256} height={256} className="absolute inset-0 h-full w-full" />
       ) : (
         <CategoryIcon categories={categories} className={size === 'lg' ? 'h-6 w-6 text-neutral-400' : 'h-4 w-4 text-neutral-400'} />
       )}

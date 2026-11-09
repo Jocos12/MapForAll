@@ -79,6 +79,7 @@ from .sub_agents.itinerary import itinerary_loop
 from .tools.map_control import map_control
 from .tools.maps_mcp import create_maps_toolset
 from .llm import on_model_error_callback, resolve_agent_model
+from .llm.fast_path import route_before_model
 from .tools.community_mcp import community_mcp_enabled, create_community_toolset
 from .tools.fixtures import world_cup_venues
 from .tools.mongo_tools import load_user_profile, list_saved_places, plan_visit, save_place
@@ -512,12 +513,26 @@ if community_mcp_enabled():
     except Exception as exc:  # pragma: no cover — defensive
         print(f"[hodari] community MCP disabled (toolset init failed): {exc}")
 
+async def _before_tool(tool, args, tool_context):  # noqa: ANN001
+    """One pipeline call per message, and no web search on a place search."""
+    name = getattr(tool, "name", "") or ""
+    if name == "web_search" and tool_context.state.get("intent_type") == "LIST_DISCOVERY":
+        return {"skipped": "place search does not use web search"}
+    if name in {"hodari_pipeline", "discover_places"}:
+        request = str((args or {}).get("request") or "")
+        if tool_context.state.get("pipeline_once") == request and tool_context.state.get("pipeline_result"):
+            return {"result": tool_context.state.get("pipeline_result")}
+    return None
+
+
 root_agent = LlmAgent(
     model=resolve_agent_model(),
     name="hodari",
     description="MapForAll (Ikarita ya Bose) — guide for accessible places and local businesses",
     instruction=_instruction,
     tools=_tools,
+    before_model_callback=route_before_model,
+    before_tool_callback=_before_tool,
     on_model_error_callback=on_model_error_callback,
 )
 

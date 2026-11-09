@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractDocs, mcpCall, mcpConnected } from '@/lib/mcp'
+import { proxyPhotoUrl } from '@/lib/placePhoto'
+import { googlePhotosNear, photosAreFresh } from '@/lib/googlePlacePhotos'
 
 const DB = process.env.MONGODB_DATABASE ?? 'hodari'
 
@@ -110,14 +112,43 @@ async function photosForName(query: string): Promise<{ photoUrls: string[]; attr
       `&key=${KEY}`,
   ).then((r) => r.json()).catch(() => null)
   const photos = (details?.status === 'OK' ? details.result?.photos : null) ?? hit.photos
-  return photoFields(photos)
+  const placeId = typeof hit.place_id === 'string' ? hit.place_id : ''
+  const fresh = placeId ? await newPhotoUrls(placeId) : []
+  if (fresh.length) return { photoUrls: fresh, attribution: '' }
+  return photoFields(photos, placeId)
 }
 
-function photoFields(photos: PhotoRef[] | undefined) {
+function photoFields(photos: PhotoRef[] | undefined, placeId?: string) {
   const refs = (photos ?? []).filter((p) => p.photo_reference).slice(0, 4)
-  const photoUrls = refs.map((p) => `/api/place-photo?ref=${encodeURIComponent(p.photo_reference as string)}`)
+  const photoUrls = refs.map((p) => proxyPhotoUrl(p.photo_reference as string, placeId, 600))
   const attribution = stripTags(refs.flatMap((p) => p.html_attributions ?? []).find(Boolean) ?? '')
   return { photoUrls, attribution }
+}
+
+/** Places API (New) photo resource names. Legacy photo_reference is only a fallback. */
+async function newPhotoUrls(placeId: string): Promise<string[]> {
+  if (!KEY || !placeId || isCatalogId(placeId)) return []
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+      headers: {
+        'X-Goog-Api-Key': KEY,
+        'X-Goog-FieldMask': 'photos',
+      },
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { photos?: Array<{ name?: string }> }
+    const urls: string[] = []
+    for (const photo of data.photos ?? []) {
+      const name = typeof photo?.name === 'string' ? photo.name : ''
+      if (!name.startsWith('places/')) continue
+      urls.push(proxyPhotoUrl(name, placeId, 600))
+      if (urls.length >= 4) break
+    }
+    return urls
+  } catch {
+    return []
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -160,7 +191,11 @@ export async function GET(req: NextRequest) {
         `&key=${KEY}`,
     ).then((r) => r.json()).catch(() => null)
     const photos = (details?.status === 'OK' ? details.result?.photos : null) ?? hit.photos
-    const { photoUrls, attribution } = photoFields(photos)
+    const hitId = typeof hit.place_id === 'string' ? hit.place_id : ''
+    const fresh = hitId ? await newPhotoUrls(hitId) : []
+    const legacy = photoFields(photos, hitId)
+    const photoUrls = fresh.length ? fresh : legacy.photoUrls
+    const attribution = legacy.attribution
     const loc = hit.geometry?.location
     const payload = {
       name: hit.name,
@@ -198,12 +233,37 @@ export async function GET(req: NextRequest) {
       const name = doc && typeof doc.name === 'string' ? doc.name : humanizeId(placeId)
       let photoUrls = doc ? storedPhotoUrls(doc) : []
       let attribution = ''
-      if (!photoUrls.length && KEY) {
-        const looked = await photosForName(`${name} Kigali`)
-        photoUrls = looked.photoUrls
-        attribution = looked.attribution
-        if (photoUrls.length && doc) {
-          try { await rememberCatalogPhotos(placeId, photoUrls) } catch { /* the response still carries the photos */ }
+      const cachedNames = doc && Array.isArray(doc.google_photo_names) ? doc.google_photo_names.filter((item): item is string => typeof item === 'string') : []
+      const cachedPid = doc && typeof doc.google_place_id === 'string' ? doc.google_place_id : ''
+      if (!photoUrls.length && cachedNames.length && photosAreFresh(doc?.google_photos_at)) {
+        photoUrls = cachedNames.map((photoName) => proxyPhotoUrl(photoName, cachedPid, 600))
+        attribution = 'Photo: Google'
+      }
+      if (!photoUrls.length && KEY && doc) {
+        const coords = (doc.location as { coordinates?: number[] } | undefined)?.coordinates
+        const lng = Array.isArray(coords) ? Number(coords[0]) : Number.NaN
+        const lat = Array.isArray(coords) ? Number(coords[1]) : Number.NaN
+        const looked = Number.isFinite(lat) && Number.isFinite(lng)
+          ? await googlePhotosNear(name, lat, lng, KEY)
+          : null
+        if (looked?.names.length) {
+          photoUrls = looked.names.map((photoName) => proxyPhotoUrl(photoName, looked.placeId, 600))
+          attribution = 'Photo: Google'
+          try {
+            const sid = await mcpConnected()
+            await mcpCall(sid, 'update-many', {
+              database: DB,
+              collection: 'places',
+              filter: { place_id: placeId },
+              update: {
+                $set: {
+                  google_place_id: looked.placeId,
+                  google_photo_names: looked.names,
+                  google_photos_at: new Date().toISOString(),
+                },
+              },
+            })
+          } catch { /* the response still carries the photos */ }
         }
       }
       if (!photoUrls.length) photoUrls = [placeholderFor(name)]
@@ -277,8 +337,10 @@ export async function GET(req: NextRequest) {
       user_ratings_total?: number
     }
 
-    const fieldsOut = photoFields(r.photos)
-    const photoUrls = fieldsOut.photoUrls.length ? fieldsOut.photoUrls : [placeholderFor(r.name || placeId)]
+    const fresh = await newPhotoUrls(placeId)
+    const fieldsOut = photoFields(r.photos, placeId)
+    const resolved = fresh.length ? fresh : fieldsOut.photoUrls
+    const photoUrls = resolved.length ? resolved : [placeholderFor(r.name || placeId)]
 
     const payload = {
       name: r.name,
