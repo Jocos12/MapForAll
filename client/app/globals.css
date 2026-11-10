@@ -985,3 +985,291 @@ html.biz-theming #biz-scroll * {
     transform: none;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   iOS Liquid Glass — client chat portal (scoped to .ios-chat)
+   Light + dark, SF system font, translucent glass bars and cards.
+   ══════════════════════════════════════════════════════════════════════════ */
+.ios-chat {
+  --ios-tint: #FF6A00;
+  --ios-tint-pressed: #E85F00;
+  --ios-tint-soft: rgba(255, 106, 0, 0.12);
+  --ios-green: #34C759;
+  --ios-red: #FF3B30;
+  --ios-blue: #0A84FF;
+
+  --ios-bg: #F2F2F7;
+  --ios-bg-elevated: #FFFFFF;
+  --ios-fill: rgba(120, 120, 128, 0.12);
+  --ios-fill-strong: rgba(120, 120, 128, 0.2);
+  --ios-label: #000000;
+  --ios-label-2: rgba(60, 60, 67, 0.62);
+  --ios-label-3: rgba(60, 60, 67, 0.36);
+  --ios-separator: rgba(60, 60, 67, 0.16);
+
+  --ios-glass: rgba(255, 255, 255, 0.62);
+  --ios-glass-strong: rgba(255, 255, 255, 0.8);
+  --ios-glass-border: rgba(255, 255, 255, 0.75);
+  --ios-glass-edge: rgba(0, 0, 0, 0.06);
+  --ios-glass-shadow: 0 10px 40px -12px rgba(0, 0, 0, 0.18), 0 2px 6px -2px rgba(0, 0, 0, 0.06);
+  --ios-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+
+  --ios-bubble-user: linear-gradient(180deg, #FF8126 0%, #FF6A00 100%);
+  --ios-bubble-ai: #FFFFFF;
+
+  --ios-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --ios-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+  color: var(--ios-label);
+  background:
+    radial-gradient(1200px 600px at 12% -10%, rgba(255, 140, 60, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(10, 132, 255, 0.08), transparent 60%),
+    var(--ios-bg);
+}
+
+.dark .ios-chat {
+  --ios-tint: #FF8A2A;
+  --ios-tint-pressed: #FF7A12;
+  --ios-tint-soft: rgba(255, 138, 42, 0.18);
+  --ios-green: #30D158;
+  --ios-red: #FF453A;
+
+  --ios-bg: #000000;
+  --ios-bg-elevated: #1C1C1E;
+  --ios-fill: rgba(118, 118, 128, 0.24);
+  --ios-fill-strong: rgba(118, 118, 128, 0.36);
+  --ios-label: #FFFFFF;
+  --ios-label-2: rgba(235, 235, 245, 0.62);
+  --ios-label-3: rgba(235, 235, 245, 0.32);
+  --ios-separator: rgba(84, 84, 88, 0.55);
+
+  --ios-glass: rgba(30, 30, 32, 0.58);
+  --ios-glass-strong: rgba(36, 36, 38, 0.78);
+  --ios-glass-border: rgba(255, 255, 255, 0.14);
+  --ios-glass-edge: rgba(255, 255, 255, 0.06);
+  --ios-glass-shadow: 0 14px 44px -12px rgba(0, 0, 0, 0.7), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --ios-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+
+  --ios-bubble-ai: #1C1C1E;
+
+  background:
+    radial-gradient(1200px 600px at 12% -10%, rgba(255, 120, 30, 0.14), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(10, 132, 255, 0.1), transparent 60%),
+    var(--ios-bg);
+}
+
+/* ── Glass materials ───────────────────────────────────────────────────── */
+.ios-glass {
+  background: var(--ios-glass);
+  -webkit-backdrop-filter: blur(28px) saturate(185%);
+  backdrop-filter: blur(28px) saturate(185%);
+  border: 0.5px solid var(--ios-glass-border);
+  box-shadow: var(--ios-glass-shadow), var(--ios-glass-highlight);
+}
+.ios-glass-strong {
+  background: var(--ios-glass-strong);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid var(--ios-glass-border);
+  box-shadow: var(--ios-glass-shadow), var(--ios-glass-highlight);
+}
+.ios-glass-bar {
+  background: color-mix(in srgb, var(--ios-bg) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ios-glass, .ios-glass-strong { background: var(--ios-bg-elevated); }
+  .ios-glass-bar { background: var(--ios-bg); }
+}
+
+/* ── Typography ────────────────────────────────────────────────────────── */
+.ios-large-title { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: -0.022em; }
+.ios-title-2 { font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -0.02em; }
+.ios-headline { font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.022em; }
+.ios-body { font-size: 17px; line-height: 24px; letter-spacing: -0.022em; }
+.ios-callout { font-size: 16px; line-height: 22px; letter-spacing: -0.02em; }
+.ios-subhead { font-size: 15px; line-height: 20px; letter-spacing: -0.016em; }
+.ios-footnote { font-size: 13px; line-height: 18px; letter-spacing: -0.006em; }
+.ios-caption { font-size: 12px; line-height: 16px; }
+.ios-label-2 { color: var(--ios-label-2); }
+.ios-label-3 { color: var(--ios-label-3); }
+.ios-tint { color: var(--ios-tint); }
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+.ios-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 999px;
+  color: var(--ios-label);
+  transition: background-color 160ms var(--ios-ease), transform 160ms var(--ios-ease), color 160ms;
+}
+.ios-icon-btn:hover { background: var(--ios-fill); }
+.ios-icon-btn:active { transform: scale(0.92); background: var(--ios-fill-strong); }
+.ios-icon-btn[aria-pressed='true'] { color: var(--ios-tint); }
+
+.ios-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: 999px;
+  font-size: 14px; font-weight: 500; letter-spacing: -0.01em;
+  color: var(--ios-label);
+  background: var(--ios-fill);
+  white-space: nowrap;
+  transition: background-color 160ms var(--ios-ease), transform 160ms var(--ios-ease), color 160ms;
+}
+.ios-pill:hover { background: var(--ios-fill-strong); }
+.ios-pill:active { transform: scale(0.96); }
+.ios-pill[aria-pressed='true'] { background: var(--ios-tint-soft); color: var(--ios-tint); }
+.ios-pill:disabled { opacity: 0.45; }
+
+.ios-btn-tint {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 999px; background: var(--ios-tint); color: #fff; font-weight: 600;
+  transition: background-color 160ms var(--ios-ease), transform 160ms var(--ios-ease), opacity 160ms;
+}
+.ios-btn-tint:hover { background: var(--ios-tint-pressed); }
+.ios-btn-tint:active { transform: scale(0.94); }
+.ios-btn-tint:disabled { opacity: 0.35; }
+
+/* Segmented control (Chat / Voix) */
+.ios-segmented {
+  position: relative; display: grid; grid-template-columns: 1fr 1fr;
+  padding: 2px; border-radius: 999px; background: var(--ios-fill);
+}
+.ios-segmented-thumb {
+  position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc(50% - 2px);
+  border-radius: 999px; background: var(--ios-bg-elevated);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+  transition: transform 320ms var(--ios-spring);
+}
+.dark .ios-chat .ios-segmented-thumb { background: #636366; }
+.ios-segmented button {
+  position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 14px; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--ios-label);
+}
+
+/* List rows (sidebar) */
+.ios-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; padding: 8px 10px; border-radius: 12px; text-align: left;
+  font-size: 15px; letter-spacing: -0.015em; color: var(--ios-label);
+  transition: background-color 140ms var(--ios-ease);
+}
+.ios-row:hover { background: var(--ios-fill); }
+.ios-row[aria-current='true'] { background: var(--ios-tint-soft); color: var(--ios-tint); font-weight: 600; }
+
+.ios-search {
+  width: 100%; height: 36px; padding: 0 12px 0 34px; border-radius: 10px;
+  background: var(--ios-fill); color: var(--ios-label); font-size: 16px; outline: none;
+}
+@media (min-width: 768px) { .ios-search { font-size: 15px; } }
+.ios-search::placeholder { color: var(--ios-label-2); }
+
+/* Message bubbles */
+.ios-bubble-user {
+  background: var(--ios-bubble-user); color: #fff;
+  border-radius: 22px 22px 6px 22px;
+  box-shadow: 0 4px 14px -6px rgba(255, 106, 0, 0.55);
+}
+.ios-avatar-ai {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0;
+  background: linear-gradient(145deg, #FF9A3D, #FF6A00 60%, #E04E00);
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: -0.02em;
+  box-shadow: 0 4px 12px -4px rgba(255, 106, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* Cards (place results, map preview) */
+.ios-card {
+  background: var(--ios-bg-elevated);
+  border-radius: 22px;
+  border: 0.5px solid var(--ios-glass-edge);
+  box-shadow: 0 8px 28px -14px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  transition: transform 220ms var(--ios-ease), box-shadow 220ms var(--ios-ease);
+}
+.ios-card:hover { box-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.04); }
+.ios-card:active { transform: scale(0.985); }
+.ios-card[data-active='true'] { box-shadow: 0 0 0 2px var(--ios-tint), 0 14px 34px -14px rgba(255, 106, 0, 0.45); }
+
+.ios-carousel {
+  display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory;
+  padding: 4px 2px 14px; margin: 0 -2px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.ios-carousel::-webkit-scrollbar { display: none; }
+.ios-carousel > * { scroll-snap-align: start; flex-shrink: 0; }
+
+/* Composer */
+.ios-composer {
+  border-radius: 26px;
+  transition: box-shadow 200ms var(--ios-ease);
+}
+.ios-composer:focus-within {
+  box-shadow: 0 0 0 4px var(--ios-tint-soft), var(--ios-glass-shadow), var(--ios-glass-highlight);
+}
+
+/* Motion */
+@keyframes ios-rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+.ios-rise { animation: ios-rise 420ms var(--ios-ease) both; }
+@keyframes ios-sheet-in { from { opacity: 0; transform: translateY(24px) scale(0.98); } to { opacity: 1; transform: none; } }
+.ios-sheet-in { animation: ios-sheet-in 460ms var(--ios-ease) both; }
+@keyframes ios-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.ios-fade-in { animation: ios-fade-in 260ms ease both; }
+
+.ios-chat .chat-scroll::-webkit-scrollbar-thumb { background: var(--ios-fill-strong); border-radius: 999px; }
+
+/* Leaflet mini-map pins inside the chat */
+.ios-map-pin.leaflet-div-icon { background: transparent; border: none; }
+.ios-map-pin span {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 999px;
+  background: var(--ios-tint, #FF6A00); color: #fff; font: 700 11px/1 -apple-system, system-ui, sans-serif;
+  border: 2px solid #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ios-rise, .ios-sheet-in, .ios-fade-in { animation: none; }
+  .ios-segmented-thumb { transition: none; }
+}
+
+/* Dark mode: night-style OSM tiles for the in-chat mini map */
+.dark .ios-minimap .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6); }
+
+/* ── Map sheet (Leaflet) ───────────────────────────────────────────────── */
+.ios-pin-wrap.leaflet-div-icon { background: transparent; border: none; }
+.ios-pin {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 999px;
+  background: #FF6A00; color: #fff;
+  font: 700 13px/1 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  border: 2.5px solid #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.ios-pin:hover { transform: scale(1.1); }
+.ios-pin-active {
+  width: 40px; height: 40px; font-size: 15px;
+  background: #1C1C1E; border-color: #FF6A00; border-width: 3px;
+  box-shadow: 0 0 0 6px rgba(255, 106, 0, 0.25), 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.ios-me {
+  display: block; width: 22px; height: 22px; border-radius: 999px;
+  background: #0A84FF; border: 3px solid #fff;
+  box-shadow: 0 0 0 8px rgba(10, 132, 255, 0.22), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.ios-sheetmap .leaflet-top.leaflet-right { top: calc(env(safe-area-inset-top, 0px) + 108px); }
+@media (min-width: 640px) { .ios-sheetmap .leaflet-top.leaflet-right { top: calc(env(safe-area-inset-top, 0px) + 64px); } }
+.ios-sheetmap .leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.7) !important; border-radius: 999px; padding: 1px 8px !important;
+  font-size: 10px; color: rgba(0, 0, 0, 0.6); margin: 6px 14px 0 0 !important;
+}
+.ios-sheetmap .leaflet-control-attribution a { color: inherit; }
+.ios-sheetmap .leaflet-container { font-family: inherit; background: var(--ios-bg); }
+
+/* Guard: Tailwind's img { max-width: 100% } must never shrink Leaflet tiles */
+.ios-sheetmap img.leaflet-tile,
+.ios-minimap img.leaflet-tile { max-width: none !important; max-height: none !important; }

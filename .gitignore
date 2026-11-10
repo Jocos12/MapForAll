@@ -80,3 +80,6 @@ firmware/dumpInfo/config.h
 
 # Misc
 error01
+
+# Local run logs and backups written by start-all.sh
+.local-logs/

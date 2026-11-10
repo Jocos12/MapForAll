@@ -3,34 +3,40 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
+  Accessibility,
+  ArrowDown,
+  ArrowUp,
   Bookmark,
+  Building2,
   CalendarPlus,
-  ChevronDown,
-  History,
+  Coffee,
   Keyboard,
   LocateFixed,
-  Plus,
   LogOut,
   Map as MapIcon,
   MapPin,
-  Menu,
   MessageSquare,
-  MessageSquarePlus,
   Mic,
   Moon,
   MoreHorizontal,
+  Navigation,
+  PanelLeft,
   PanelLeftClose,
-  PanelRightClose,
   Pencil,
-  Send,
+  Pill,
+  Plus,
+  RotateCw,
+  Search,
+  ShoppingBasket,
   Square,
+  SquarePen,
+  Store,
   Sun,
   Trash2,
   Users,
   Volume2,
   VolumeX,
-  Accessibility,
-  Store,
+  X,
 } from 'lucide-react'
 import type { ChatMessage, Place, Theme } from '@/lib/types'
 import type { MapSnapshot } from '@/lib/mapHistory'
@@ -38,13 +44,12 @@ import type { VoiceState } from '@/hooks/useVoice'
 import { ModelSwitcher, type ModelId } from './ModelSwitcher'
 import { CollapsibleMessage } from './CollapsedReply'
 import { TypingIndicator, ThinkingTrace } from './TypingIndicator'
-import { OpenMapButton } from './OpenMapButton'
-import { WorkspaceShortcut, type WorkspaceLink } from './WorkspaceShortcut'
+import { InlineMapPreview } from './InlineMapPreview'
+import type { WorkspaceLink } from './WorkspaceShortcut'
 import { AccountPanel } from './AccountPanel'
 import { InlinePlaceGallery, PhotoGallery } from './InlinePlaceGallery'
 import { googleCalendarUrl } from '@/lib/calendar'
 import { shownMessages } from '@/lib/animationMemory'
-import { focusRing } from '@/lib/design/tokens'
 import { DUR, EASE } from './ui/motion'
 import { useI18n, type Lang } from './I18nProvider'
 
@@ -133,10 +138,6 @@ interface Props {
   onAddPlace?: () => void
 }
 
-const CHIPS = [
-  { key: 'chips.near', query: 'Local businesses near me in Kigali', Icon: MapPin },
-  { key: 'chips.add', query: '', Icon: Plus },
-]
 
 export function ChatPanel({
   messages,
@@ -244,6 +245,12 @@ export function ChatPanel({
     if (id && text) onEditMessage?.(id, text)
   }
   const reduced = useReducedMotion()
+
+  // Desktop keeps the conversations sidebar open by default (like ChatGPT/Claude);
+  // phones start with it closed and slide it over the chat.
+  useEffect(() => {
+    if (window.matchMedia('(min-width: 1024px)').matches) setHistoryOpen(true)
+  }, [])
 
   useEffect(() => {
     const el = inputRef.current
@@ -358,160 +365,138 @@ export function ChatPanel({
     inputRef.current!.value = ''
   }
 
+  const tr = (fr: string, en: string, rw?: string) => (lang === 'en' ? en : lang === 'rw' ? (rw ?? en) : fr)
+
+  const conversationTitle = (() => {
+    const first = messages.find((m) => m.role === 'user')?.content?.trim()
+    if (!first) return tr('Nouvelle conversation', 'New chat', 'Ikiganiro gishya')
+    return first.length > 42 ? `${first.slice(0, 42)}…` : first
+  })()
+
+  const SUGGESTIONS = [
+    { Icon: Coffee, title: tr('Cafés', 'Cafés', 'Café'), query: tr('Cafés à Kimironko', 'Cafés in Kimironko', 'Café i Kimironko'), hint: 'Kimironko' },
+    { Icon: Pill, title: tr('Pharmacie', 'Pharmacy', 'Farumasi'), query: tr('Pharmacie ouverte près de moi', 'Open pharmacy near me', 'Farumasi ifunguye hafi yanjye'), hint: tr('Près de moi', 'Near me', 'Hafi yanjye') },
+    { Icon: Accessibility, title: tr('Accessible', 'Accessible', 'Bigerwaho'), query: tr('Restaurants accessibles en fauteuil roulant à Remera', 'Wheelchair accessible restaurants in Remera', 'Resitora zigerwaho i Remera'), hint: 'Remera' },
+    { Icon: Store, title: tr('Commerces locaux', 'Local shops', 'Amaduka'), query: 'Local businesses near me in Kigali', hint: 'Kigali' },
+  ]
+
   const composer = (
-    <div className="mx-auto w-full max-w-[720px]">
-      {hasMapData && onToggleMapPanel && (
-        <div className="mb-2 flex justify-center">
-          <button
-            type="button"
-            onClick={onToggleMapPanel}
-            className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-header)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:border-[#F56A00]/40 hover:bg-[#F56A00]/[0.06] dark:hover:bg-[#F56A00]/10"
-          >
-            {mapVisible && !mapExpanded ? (
-              <>
-                <PanelRightClose className="h-3.5 w-3.5" />
-                {t('composer.hideMap')}
-              </>
-            ) : (
-              <>
-                <MapIcon className="h-3.5 w-3.5" />
-                {t('composer.showMap')}
-              </>
-            )}
-          </button>
-        </div>
-      )}
-      {hasLocation ? (
-        <p className="mb-2 ml-1 flex items-center gap-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
-          <MapPin className="h-3 w-3" />
-          {t('composer.locationActive')}
-        </p>
-      ) : (onUseMyLocation || onSetCity) ? (
-        <div className="mb-2 ml-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {manualCity && !cityEditing && (
-            <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
-              <MapPin className="h-3 w-3" />
-              {t('composer.city')}: {manualCity}
-            </span>
-          )}
-          {onUseMyLocation && (
-            <button
-              type="button"
-              onClick={onUseMyLocation}
-              disabled={locationPending}
-              className="flex min-h-[32px] items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00] disabled:opacity-50 max-md:min-h-[44px]"
-            >
-              <LocateFixed className={`h-3.5 w-3.5 ${locationPending ? 'animate-pulse' : ''}`} />
-              {locationPending ? t('composer.locating') : t('composer.useLocation')}
-            </button>
-          )}
-          {onSetCity && (
-            <button
-              type="button"
-              onClick={() => { setCityEditing((v) => !v); setCityDraft(manualCity ?? '') }}
-              className="flex min-h-[32px] items-center rounded-full border border-[var(--border)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00] max-md:min-h-[44px]"
-            >
-              {manualCity ? t('composer.changeCity') : t('composer.setCity')}
-            </button>
-          )}
-        </div>
-      ) : null}
+    <div className="mx-auto w-full max-w-[760px]">
       {locationNotice && (
-        <div
-          role="status"
-          className="mb-2 flex items-start gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-header)] px-3 py-2 text-[12px] leading-relaxed text-[var(--text-secondary)]"
-        >
-          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#F56A00]" />
+        <div role="status" className="ios-glass ios-rise mb-2 flex items-start gap-2 rounded-2xl px-3.5 py-2.5 text-[13px] leading-snug text-[var(--ios-label-2)]">
+          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ios-tint)]" />
           <span className="flex-1">{locationNotice}</span>
           {onDismissLocationNotice && (
-            <button
-              type="button"
-              onClick={onDismissLocationNotice}
-              aria-label="Dismiss location message"
-              className="-m-1 shrink-0 p-1 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-            >
-              ×
+            <button type="button" onClick={onDismissLocationNotice} aria-label={tr('Fermer', 'Dismiss')} className="ios-icon-btn -m-1 h-7 w-7">
+              <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
       )}
       {cityEditing && onSetCity && !hasLocation && (
-        <form onSubmit={submitCity} className="mb-2 flex items-center gap-2">
+        <form onSubmit={submitCity} className="ios-glass ios-rise mb-2 flex items-center gap-2 rounded-full p-1.5 pl-4">
+          <MapPin className="h-4 w-4 shrink-0 text-[var(--ios-tint)]" />
           <input
             type="text"
             value={cityDraft}
             onChange={(e) => setCityDraft(e.target.value)}
             placeholder={t('composer.cityPlaceholder')}
             autoFocus
-            className="min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--bg-header)] px-4 py-2 text-[16px] text-[var(--text-primary)] outline-none transition-[border-color] focus:border-[#F56A00]/60 md:text-[13px]"
+            className="min-w-0 flex-1 bg-transparent text-[16px] text-[var(--ios-label)] outline-none placeholder:text-[var(--ios-label-2)] md:text-[15px]"
           />
-          <button
-            type="submit"
-            disabled={!cityDraft.trim()}
-            className="min-h-[36px] rounded-full bg-[#F56A00] px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-40 max-md:min-h-[44px]"
-          >
+          <button type="submit" disabled={!cityDraft.trim()} className="ios-btn-tint h-9 px-4 text-[14px]">
             {t('composer.set')}
           </button>
         </form>
       )}
-      {voiceState === 'listening' && voiceLiveText && (
-        <p className="sr-only" aria-live="polite">{voiceLiveText}</p>
-      )}
-      {voiceState === 'listening' && voiceRecognitionLang && (
-        <p className="mb-1.5 ml-1 text-[11px] font-medium tracking-wide text-[var(--text-secondary)]">
-          {t('composer.recognition')} : {voiceRecognitionLang}
+      {voiceState === 'listening' && voiceLiveText && <p className="sr-only" aria-live="polite">{voiceLiveText}</p>}
+      {(voiceState === 'listening' && voiceRecognitionLang) || (voiceWarning && voiceState !== 'speaking' && voiceState !== 'thinking') ? (
+        <p className="mb-1.5 ml-2 text-[12px] text-[var(--ios-label-2)]">
+          {voiceState === 'listening' && voiceRecognitionLang ? `${t('composer.recognition')} : ${voiceRecognitionLang}` : voiceWarning}
         </p>
-      )}
-      {voiceWarning && voiceState !== 'speaking' && voiceState !== 'thinking' && (
-        <p className="mb-1.5 ml-1 text-[11px] text-[var(--text-secondary)]">{voiceWarning}</p>
-      )}
+      ) : null}
+
+      {/* Context chips: location + inclusion filters, one swipeable row */}
+      <div className="ios-carousel mb-1.5 !gap-2 !pb-2 !pt-0">
+        {hasLocation ? (
+          <span className="ios-pill" aria-pressed="true">
+            <Navigation className="h-3.5 w-3.5 fill-current" />
+            {t('composer.locationActive')}
+          </span>
+        ) : (
+          <>
+            {manualCity && !cityEditing && (
+              <button type="button" onClick={() => { setCityEditing(true); setCityDraft(manualCity) }} className="ios-pill" aria-pressed="true">
+                <MapPin className="h-3.5 w-3.5" />
+                {manualCity}
+              </button>
+            )}
+            {onUseMyLocation && (
+              <button type="button" onClick={onUseMyLocation} disabled={locationPending} className="ios-pill">
+                <LocateFixed className={`h-3.5 w-3.5 ${locationPending ? 'animate-pulse' : ''}`} />
+                {locationPending ? t('composer.locating') : t('composer.useLocation')}
+              </button>
+            )}
+            {onSetCity && !manualCity && (
+              <button type="button" onClick={() => { setCityEditing((v) => !v); setCityDraft('') }} className="ios-pill">
+                <Building2 className="h-3.5 w-3.5" />
+                {t('composer.setCity')}
+              </button>
+            )}
+          </>
+        )}
+        {onInclusionFilter && (
+          <>
+            <button type="button" onClick={() => onInclusionFilter('local')} aria-pressed={inclusionLocal} className="ios-pill">
+              <Store className="h-3.5 w-3.5" />
+              {t('filters.local')}
+            </button>
+            {onMarketFilter && (
+              <button type="button" onClick={onMarketFilter} aria-pressed={inclusionMarkets} className="ios-pill">
+                <ShoppingBasket className="h-3.5 w-3.5" />
+                {t('filters.markets')}
+              </button>
+            )}
+            <button type="button" onClick={() => onInclusionFilter('accessible')} aria-pressed={inclusionAccessible} className="ios-pill">
+              <Accessibility className="h-3.5 w-3.5" />
+              {t('filters.accessible')}
+            </button>
+          </>
+        )}
+        {onAddPlace && (
+          <button type="button" onClick={onAddPlace} className="ios-pill">
+            <Plus className="h-3.5 w-3.5" />
+            {t('chips.add')}
+          </button>
+        )}
+      </div>
+
       <form onSubmit={handleSubmit}>
-        <div
-          className={`flex items-center gap-2 rounded-full border bg-[var(--bg-header)]/95 px-2 py-1 shadow-[0_14px_36px_-18px_rgba(90,40,0,0.45)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-[#F56A00]/70 focus-within:shadow-[0_0_0_4px_rgba(245,106,0,0.16),0_16px_36px_-16px_rgba(245,106,0,0.45)] motion-reduce:transition-none dark:shadow-[0_16px_40px_-18px_rgba(0,0,0,0.7)] dark:focus-within:shadow-[0_0_0_4px_rgba(245,106,0,0.24),0_16px_36px_-16px_rgba(245,106,0,0.35)] sm:px-3 ${
-            voiceActive ? 'border-[#F56A00]/60' : 'border-black/10 dark:border-white/10'
-          }`}
-        >
+        <div className={`ios-glass-strong ios-composer flex items-center gap-1.5 p-1.5 pl-2 ${voiceActive ? 'ring-4 ring-[var(--ios-tint-soft)]' : ''}`}>
           {voiceSupported && onVoiceToggle && (
             <button
               type="button"
               onClick={onVoiceToggle}
               disabled={loading && voiceState === 'idle'}
               aria-label={voiceState === 'listening' ? 'Stop listening and send' : 'Start voice input'}
-              title={voiceState === 'listening' ? 'Stop listening and send' : 'Start voice input'}
-              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 max-md:h-11 max-md:w-11 ${
-                voiceState === 'listening'
-                  ? 'bg-red-500 text-white'
-                  : 'text-gray-500 hover:bg-[#F56A00]/10 hover:text-[#F56A00] dark:hover:bg-[#F56A00]/15'
+              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 max-md:h-10 max-md:w-10 ${
+                voiceState === 'listening' ? 'bg-[var(--ios-red)] text-white' : 'text-[var(--ios-label-2)] hover:bg-[var(--ios-fill)] hover:text-[var(--ios-label)]'
               }`}
             >
               {voiceState === 'listening' && (
-                <>
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-[-4px] rounded-full border-2 border-red-400/70 animate-ping"
-                  />
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-[-7px] rounded-full border border-red-300/40"
-                    style={{ animation: 'voice-orb-pulse 1.4s ease-out infinite' }}
-                  />
-                </>
+                <span aria-hidden className="pointer-events-none absolute inset-[-4px] animate-ping rounded-full border-2 border-[var(--ios-red)]/60" />
               )}
-              <Mic className="relative z-10 h-4 w-4" />
+              <Mic className="relative z-10 h-[18px] w-[18px]" />
             </button>
           )}
           {voiceSupported && uiMode === 'voice' && (
             <button
               type="button"
-              onClick={() => {
-                onVoiceStop?.()
-                onEnterChatMode?.()
-                inputRef.current?.focus()
-              }}
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-neutral-200 px-2.5 text-[11px] font-medium text-neutral-600 transition-colors hover:border-[#E8672A] hover:text-[#E8672A] max-md:h-11 dark:border-white/15 dark:text-neutral-300"
+              onClick={() => { onVoiceStop?.(); onEnterChatMode?.(); inputRef.current?.focus() }}
+              className="ios-pill h-9 shrink-0 !px-3 text-[13px]"
             >
-              <Keyboard className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              <span className="max-w-[9rem] truncate">{t('composer.textMode')}</span>
+              <Keyboard className="h-4 w-4" aria-hidden />
+              <span className="max-w-[8rem] truncate">{t('composer.textMode')}</span>
             </button>
           )}
           <input
@@ -522,12 +507,10 @@ export function ChatPanel({
               : voiceState === 'thinking' ? t('composer.thinking')
               : voiceState === 'speaking' ? t('composer.speaking')
               : voiceState === 'paused' ? t('composer.paused')
-              : t('composer.placeholder')
+              : tr('Demande un lieu à MapForAll…', 'Ask MapForAll for a place…', 'Baza MapForAll ahantu…')
             }
             aria-label={t('composer.placeholder')}
-            className={`min-w-0 flex-1 bg-transparent py-3 text-[16px] text-[var(--text-primary)] outline-none md:text-[14px] ${
-              voiceActive ? 'placeholder:text-[#F56A00]/80' : 'placeholder:text-[var(--text-secondary)]'
-            }`}
+            className="min-w-0 flex-1 bg-transparent px-1 py-2 text-[16px] tracking-[-0.02em] text-[var(--ios-label)] outline-none placeholder:text-[var(--ios-label-3)] md:text-[16px]"
             disabled={loading}
           />
           {(loading || voiceActive) && (onStop || onVoiceStop) ? (
@@ -536,236 +519,199 @@ export function ChatPanel({
               onClick={() => { onVoiceStop?.(); if (!onVoiceStop) onStop?.() }}
               aria-label={t('composer.stop')}
               title={t('composer.stop')}
-              className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-red-500 px-3.5 text-[12px] font-medium text-white transition-colors hover:bg-red-600 max-md:h-11"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--ios-label)] text-[var(--ios-bg)] transition-transform active:scale-90 max-md:h-10 max-md:w-10"
             >
-              <Square className="h-3 w-3 fill-current" />
-              {t('composer.stop')}
+              <Square className="h-3.5 w-3.5 fill-current" />
             </button>
           ) : (
             <button
               type="submit"
               disabled={loading}
               aria-label={t('composer.send')}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F56A00] text-white transition-colors duration-150 hover:bg-[#e05a1a] disabled:opacity-40 max-md:h-11 max-md:w-11"
+              className="ios-btn-tint h-9 w-9 shrink-0 max-md:h-10 max-md:w-10"
             >
-              <Send className="h-4 w-4" />
+              <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.6} />
             </button>
           )}
         </div>
       </form>
-      <div className="mt-3 flex max-w-full flex-wrap justify-center gap-2">
-        {onInclusionFilter && (
-          <>
-            <button
-              type="button"
-              onClick={() => onInclusionFilter('local')}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-colors duration-150 active:opacity-70 ${inclusionLocal ? 'border-terracotta bg-terracotta/15 text-terracotta' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#F56A00]/45`}
-            >
-              <Store className="h-4 w-4 text-terracotta" strokeWidth={2} aria-hidden />
-              {t('filters.local')}
-            </button>
-            {onMarketFilter && (
-              <button
-                type="button"
-                onClick={onMarketFilter}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-colors duration-150 active:opacity-70 ${inclusionMarkets ? 'border-[#E8672A] bg-[#FDE8DC] text-[#E8672A]' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#E8672A]/45`}
-              >
-                <Store className="h-4 w-4 text-[#E8672A]" strokeWidth={2} aria-hidden />
-                {t('filters.markets')}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onInclusionFilter('accessible')}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-colors duration-150 active:opacity-70 ${inclusionAccessible ? 'border-[#0F6E56] bg-[#0F6E56]/15 text-[#0F6E56]' : 'border-[var(--border)] bg-[var(--bg-header)]/80 text-[var(--text-primary)]'} hover:border-[#0F6E56]/45`}
-            >
-              <Accessibility className="h-4 w-4 text-[#0F6E56]" strokeWidth={2} aria-hidden />
-              {t('filters.accessible')}
-            </button>
-          </>
-        )}
-        {messages.length === 0 && CHIPS.map(({ key, query, Icon }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => { if (key === 'chips.add') onAddPlace?.(); else onSend(query) }}
-            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/80 px-3 py-1.5 text-left text-[12px] leading-snug text-[var(--text-primary)] transition-colors duration-150 hover:border-[#E8672A]/40 hover:bg-[#E8672A]/10 active:opacity-70 sm:px-3.5 sm:text-[13px]"
-          >
-            <Icon className="h-4 w-4 shrink-0 text-[#E8672A]" strokeWidth={2} aria-hidden="true" />
-            <span className="min-w-0">{t(key)}</span>
-          </button>
-        ))}
-      </div>
+      <p className="mt-2 hidden text-center text-[11px] text-[var(--ios-label-3)] md:block">
+        {tr('MapForAll peut se tromper. Vérifie les horaires et l’accessibilité sur place.', 'MapForAll can make mistakes. Check hours and access on site.')}
+      </p>
     </div>
   )
 
   const messageList = (
     <>
       <div className="relative min-h-0 overflow-hidden">
-        <div ref={scrollRef} onScroll={handleScroll} className="chat-scroll h-full min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
-          <div className="mx-auto w-full max-w-[720px] space-y-5">
+        <div ref={scrollRef} onScroll={handleScroll} className="chat-scroll h-full min-h-0 overflow-y-auto px-4 pb-8 pt-4 sm:px-6">
+          <div className="mx-auto w-full max-w-[760px] space-y-6">
             {isEmpty && (
-              <div className="flex flex-col items-center px-2 pb-6 pt-[6vh] text-center sm:pt-[8vh]">
-                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-full border border-[#E4D2BE] bg-white dark:border-white/15 dark:bg-[#1C1916]">
-                  <MapPin className="h-6 w-6 text-[#E8672A]" strokeWidth={1.75} aria-hidden="true" />
+              <div className="ios-rise flex flex-col items-center px-2 pb-4 pt-[7vh] text-center sm:pt-[11vh]">
+                <div className="ios-glass mb-5 flex h-[68px] w-[68px] items-center justify-center rounded-[22px]">
+                  <span className="ios-avatar-ai h-12 w-12 rounded-[15px] text-[15px]">MF</span>
                 </div>
-                <p className="font-display text-[clamp(2.4rem,6vw,3rem)] font-semibold italic tracking-tight text-ink dark:text-cream">{t('empty.title')}</p>
-                <p className="mx-auto mt-4 max-w-sm text-[14px] leading-relaxed text-[var(--text-secondary)]">
-                  {t('empty.body')}
-                </p>
+                <h1 className="ios-large-title text-[var(--ios-label)]">
+                  {userName ? tr(`Bonjour, ${userName.split(' ')[0]}`, `Hi, ${userName.split(' ')[0]}`, `Muraho, ${userName.split(' ')[0]}`) : t('empty.title')}
+                </h1>
+                <p className="ios-callout mx-auto mt-2 max-w-md text-[var(--ios-label-2)]">{t('empty.body')}</p>
+                <div className="mt-8 grid w-full max-w-xl grid-cols-2 gap-2.5">
+                  {SUGGESTIONS.map(({ Icon, title, query, hint }) => (
+                    <button
+                      key={query}
+                      type="button"
+                      onClick={() => onSend(query)}
+                      className="ios-glass group flex flex-col items-start gap-2 rounded-[20px] p-3.5 text-left transition-transform duration-200 active:scale-[0.97]"
+                    >
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ios-tint-soft)] text-[var(--ios-tint)]">
+                        <Icon className="h-4 w-4" strokeWidth={2.2} />
+                      </span>
+                      <span>
+                        <span className="block text-[15px] font-semibold tracking-[-0.015em] text-[var(--ios-label)]">{title}</span>
+                        <span className="block text-[13px] text-[var(--ios-label-2)]">{hint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
             {messages.map((msg, i) => (
-            <motion.div
-              key={msg.id}
-              // Just-sent bubble rises from the composer (fast + small offset);
-              // messages restored from history/streamed in glide like every
-              // other surface (base duration, slightly taller rise).
-              initial={reduced || shownMessages.has(msg.id) ? false : { opacity: 0, y: msg.role === 'user' ? 6 : 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: reduced ? 0 : msg.role === 'user' ? DUR.fast : DUR.base,
-                ease: EASE,
-                delay: reduced || i >= initialCountRef.current ? 0 : Math.min(i * 0.05, 0.4),
-              }}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              {msg.role === 'user' ? (
-                editingId === msg.id ? (
-                  <div className="w-full max-w-[min(680px,90%)]">
-                    <textarea
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit() }
-                        if (e.key === 'Escape') setEditingId(null)
-                      }}
-                      autoFocus
-                      rows={Math.min(6, Math.max(2, editText.split('\n').length))}
-                      className="w-full resize-none rounded-2xl border border-[#F56A00]/50 bg-[var(--bg-header)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[#F56A00]/30 md:text-[14px]"
-                    />
-                    <div className="mt-1.5 flex justify-end gap-2">
-                      <button type="button" onClick={() => setEditingId(null)} className="rounded-full px-3 py-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">
-                        Cancel
-                      </button>
-                      <button type="button" disabled={!editText.trim()} onClick={submitEdit} className="rounded-full bg-[#F56A00] px-3.5 py-1 text-[12px] font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-40">
-                        Send
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="group flex items-end gap-1.5">
-                    {msg.fromVoice && msg.id === lastUserMsg?.id && onRetryVoice && (
-                      <button
-                        type="button"
-                        onClick={onRetryVoice}
-                        className="mb-1 shrink-0 rounded-full border border-[#F56A00]/60 bg-white px-2.5 py-1 text-[12px] font-medium text-[#F56A00] shadow-sm transition-colors hover:bg-[#F56A00] hover:text-white dark:bg-[#1C1916]"
-                      >
-                        {t('composer.retry')}
-                      </button>
-                    )}
-                    {onEditMessage && !loading && (
-                      <button
-                        type="button"
-                        onClick={() => { setEditingId(msg.id); setEditText(msg.content) }}
-                        title="Edit & resend"
-                        aria-label="Edit and resend message"
-                        className="mb-1 shrink-0 rounded-full p-1 text-[var(--text-secondary)] opacity-0 transition-opacity hover:text-[#F56A00] group-hover:opacity-100 max-md:p-2 max-md:opacity-100"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <div className="max-w-[min(680px,90%)] rounded-2xl rounded-br-md bg-gradient-to-br from-[#FF8C2F] to-[#F56A00] px-4 py-2.5 shadow-[0_3px_12px_rgba(245,106,0,0.28)]">
-                      <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-white">{msg.content}</p>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="w-full max-w-[min(680px,100%)] text-left">
-                  <p className="mb-1.5 ml-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
-                    MapForAll
-                  </p>
-                  {msg.content ? (
-                    <div className="w-full px-1">
-                      <CollapsibleMessage
-                        content={msg.content}
-                        streaming={streaming && msg.id === lastMsgId}
-                        showCaret={caretVisible && streaming && msg.id === lastMsgId}
-                        animate={msg.id === lastMsgId}
-                        messageKey={msg.id}
+              <motion.div
+                key={msg.id}
+                initial={reduced || shownMessages.has(msg.id) ? false : { opacity: 0, y: msg.role === 'user' ? 8 : 10, scale: msg.role === 'user' ? 0.98 : 1 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{
+                  duration: reduced ? 0 : msg.role === 'user' ? DUR.fast : DUR.base,
+                  ease: EASE,
+                  delay: reduced || i >= initialCountRef.current ? 0 : Math.min(i * 0.05, 0.4),
+                }}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                {msg.role === 'user' ? (
+                  editingId === msg.id ? (
+                    <div className="w-full max-w-[min(600px,88%)]">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit() }
+                          if (e.key === 'Escape') setEditingId(null)
+                        }}
+                        autoFocus
+                        rows={Math.min(6, Math.max(2, editText.split('\n').length))}
+                        className="ios-glass-strong w-full resize-none rounded-[20px] px-4 py-3 text-[16px] text-[var(--ios-label)] outline-none"
                       />
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button type="button" onClick={() => setEditingId(null)} className="ios-pill h-8">
+                          {tr('Annuler', 'Cancel')}
+                        </button>
+                        <button type="button" disabled={!editText.trim()} onClick={submitEdit} className="ios-btn-tint h-8 px-4 text-[14px]">
+                          {tr('Envoyer', 'Send')}
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <TypingIndicator />
-                  )}
-                  {showWriting && msg.id === lastMsgId && (
-                    <p className="animate-fade-up ml-1 mt-1.5 text-[11px] text-gray-500">
-                      {t('composer.thinking')}
-                    </p>
-                  )}
-                  {msg.gallery?.type === 'photo_gallery' && msg.gallery.photos.length > 0 ? (
-                    <PhotoGallery
-                      placeName={msg.gallery.place_name}
-                      photos={msg.gallery.photos}
-                      attribution={msg.gallery.attribution}
-                    />
-                  ) : msg.places?.length ? (
-                    <InlinePlaceGallery places={msg.places} onDetails={onPlaceDetails} onFocusPlace={onFocusPlace} activePlaceId={activePlaceId} />
-                  ) : null}
-                  {onRetry && msg.role === 'assistant' && msg.id === lastMsgId && /surcharg|overloaded|try again in a moment/i.test(msg.content) && (
-                    <button
-                      type="button"
-                      onClick={onRetry}
-                      className="mt-2 rounded-full border border-[#E8672A] px-3 py-1.5 text-[12px] font-medium text-[#E8672A]"
-                    >
-                      {t('composer.retry')}
-                    </button>
-                  )}
-                  {msg.calendarEvents?.length ? (
-                    <div className="mt-2.5 flex flex-wrap gap-2">
-                      {msg.calendarEvents.map((ev, i) => (
-                        <a
-                          key={`${ev.title}-${i}`}
-                          href={googleCalendarUrl(ev)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-header)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
+                    <div className="group flex max-w-[min(600px,86%)] items-end gap-1.5">
+                      {msg.fromVoice && msg.id === lastUserMsg?.id && onRetryVoice && (
+                        <button type="button" onClick={onRetryVoice} className="ios-pill mb-1 h-7 shrink-0 !px-2.5 text-[12px]">
+                          {t('composer.retry')}
+                        </button>
+                      )}
+                      {onEditMessage && !loading && (
+                        <button
+                          type="button"
+                          onClick={() => { setEditingId(msg.id); setEditText(msg.content) }}
+                          aria-label={tr('Modifier et renvoyer', 'Edit and resend')}
+                          className="ios-icon-btn mb-1 h-7 w-7 shrink-0 text-[var(--ios-label-2)] opacity-0 group-hover:opacity-100 max-md:opacity-100"
                         >
-                          <CalendarPlus className="h-3.5 w-3.5" />
-                          Add “{ev.title}” to Calendar
-                        </a>
-                      ))}
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <div className="ios-bubble-user px-4 py-2.5">
+                        <p className="whitespace-pre-wrap text-[16px] leading-[22px] tracking-[-0.015em]">{msg.content}</p>
+                      </div>
                     </div>
-                  ) : null}
-                  {(msg.places?.length || msg.itinerary?.stops?.length) ? (
-                    <OpenMapButton
-                      message={msg}
-                      mapVisible={mapVisible}
-                      onOpen={() => onOpenMapFromMessage(msg)}
-                    />
-                  ) : null}
-                </div>
-              )}
-            </motion.div>
-          ))}
+                  )
+                ) : (
+                  <div className="flex w-full min-w-0 gap-3">
+                    <span className="ios-avatar-ai mt-0.5 hidden sm:inline-flex">MF</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-1 text-[13px] font-semibold tracking-[-0.01em] text-[var(--ios-label)]">MapForAll</p>
+                      {msg.content ? (
+                        <div className="text-[16px] leading-[24px] tracking-[-0.015em] text-[var(--ios-label)] [&_a]:text-[var(--ios-tint)]">
+                          <CollapsibleMessage
+                            content={msg.content}
+                            streaming={streaming && msg.id === lastMsgId}
+                            showCaret={caretVisible && streaming && msg.id === lastMsgId}
+                            animate={msg.id === lastMsgId}
+                            messageKey={msg.id}
+                          />
+                        </div>
+                      ) : (
+                        <TypingIndicator />
+                      )}
+                      {showWriting && msg.id === lastMsgId && (
+                        <p className="mt-1.5 text-[12px] text-[var(--ios-label-2)]">{t('composer.thinking')}</p>
+                      )}
+                      {msg.gallery?.type === 'photo_gallery' && msg.gallery.photos.length > 0 ? (
+                        <PhotoGallery placeName={msg.gallery.place_name} photos={msg.gallery.photos} attribution={msg.gallery.attribution} />
+                      ) : msg.places?.length ? (
+                        <InlinePlaceGallery places={msg.places} onDetails={onPlaceDetails} onFocusPlace={onFocusPlace} activePlaceId={activePlaceId} />
+                      ) : null}
+                      {(msg.places?.length || msg.itinerary?.stops?.length) ? (
+                        <InlineMapPreview
+                          pins={(msg.itinerary?.stops?.length ? msg.itinerary.stops : msg.places ?? []).map((p) => ({ name: p.name, coordinates: p.coordinates }))}
+                          label={
+                            msg.itinerary?.stops?.length
+                              ? tr(`Itinéraire · ${msg.itinerary.stops.length} étapes`, `Route · ${msg.itinerary.stops.length} stops`)
+                              : tr(`Voir ${msg.places!.length} lieu${msg.places!.length > 1 ? 'x' : ''} sur la carte`, `See ${msg.places!.length} place${msg.places!.length > 1 ? 's' : ''} on the map`)
+                          }
+                          onOpen={() => onOpenMapFromMessage(msg)}
+                        />
+                      ) : null}
+                      {onRetry && msg.id === lastMsgId && /surcharg|overloaded|try again in a moment/i.test(msg.content) && (
+                        <button type="button" onClick={onRetry} className="ios-pill mt-3" aria-pressed="true">
+                          <RotateCw className="h-3.5 w-3.5" />
+                          {t('composer.retry')}
+                        </button>
+                      )}
+                      {msg.calendarEvents?.length ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {msg.calendarEvents.map((ev, j) => (
+                            <a key={`${ev.title}-${j}`} href={googleCalendarUrl(ev)} target="_blank" rel="noopener noreferrer" className="ios-pill">
+                              <CalendarPlus className="h-3.5 w-3.5 text-[var(--ios-tint)]" />
+                              {tr(`Ajouter « ${ev.title} » au calendrier`, `Add “${ev.title}” to Calendar`)}
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            ))}
 
-          {showThinking && (
-            <div className="flex justify-start">
-              <div className="w-full max-w-[min(680px,100%)]">
-                <p className="mb-1.5 ml-1 text-[11px] font-medium tracking-wide text-[#E8672A] dark:text-[#FF8C2F]">
-                  MapForAll
-                </p>
-                <div className="animate-fade-up">
-                  <ThinkingTrace steps={thinkingSteps} />
-                </div>
-                <div className="mt-3 space-y-2" aria-hidden>
-                  <div className="h-16 animate-pulse rounded-xl bg-black/[0.06] motion-reduce:animate-none dark:bg-white/10" />
-                  <div className="h-16 w-4/5 animate-pulse rounded-xl bg-black/[0.06] motion-reduce:animate-none dark:bg-white/10" />
+            {showThinking && (
+              <div className="flex w-full gap-3">
+                <span className="ios-avatar-ai mt-0.5 hidden sm:inline-flex">MF</span>
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1 text-[13px] font-semibold text-[var(--ios-label)]">MapForAll</p>
+                  <div className="ios-glass ios-rise inline-block rounded-[18px] px-3.5 py-2.5">
+                    <ThinkingTrace steps={thinkingSteps} />
+                  </div>
+                  <div className="ios-carousel mt-3" aria-hidden>
+                    {[0, 1].map((k) => (
+                      <div key={k} className="ios-card h-[250px] w-[248px] animate-pulse motion-reduce:animate-none sm:w-[264px]">
+                        <div className="h-[148px] bg-[var(--ios-fill)]" />
+                        <div className="m-3.5 h-4 w-2/3 rounded-full bg-[var(--ios-fill)]" />
+                        <div className="mx-3.5 h-3 w-1/2 rounded-full bg-[var(--ios-fill)]" />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
             <div ref={bottomRef} />
           </div>
@@ -775,214 +721,200 @@ export function ChatPanel({
           {(!atBottom || hasNewBelow) && messages.length > 0 && (
             <motion.button
               type="button"
-              initial={reduced ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduced ? undefined : { opacity: 0, y: 8 }}
-              transition={{ duration: reduced ? 0 : 0.2 }}
+              initial={reduced ? false : { opacity: 0, y: 8, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={reduced ? undefined : { opacity: 0, y: 8, scale: 0.9 }}
+              transition={{ duration: reduced ? 0 : 0.22 }}
               onClick={() => scrollToBottom(reduced ? 'auto' : 'smooth')}
-              className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/95 px-4 py-1.5 text-[13px] text-[var(--text-primary)] shadow-[0_8px_24px_rgba(0,0,0,0.12)] backdrop-blur-sm transition-colors hover:border-[#F56A00]/40 dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+              aria-label={tr('Aller en bas', 'Scroll to bottom')}
+              className="ios-glass-strong absolute bottom-3 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full text-[var(--ios-label)]"
             >
-              <ChevronDown className="h-4 w-4" />
-              New message
+              <ArrowDown className="h-4 w-4" strokeWidth={2.4} />
             </motion.button>
           )}
         </AnimatePresence>
       </div>
 
-      <div className="pb-safe relative z-10 shrink-0 border-t border-[var(--border)] bg-[var(--bg-chat)]/90 px-4 py-3 backdrop-blur-md sm:px-6 sm:py-4">
+      <div className="pb-safe relative z-10 shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-4">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-[var(--ios-bg)] to-transparent" />
         {composer}
       </div>
     </>
   )
 
   const modeToggle = onEnterChatMode && onEnterVoiceMode ? (
-    <div className="relative grid grid-cols-2 rounded-full border border-[var(--border)] bg-[var(--bg-header)]/90 p-1 shadow-sm backdrop-blur-sm">
-      <span
-        aria-hidden
-        className={`pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full bg-[#F56A00] shadow-[0_2px_8px_rgba(245,106,0,0.35)] transition-transform duration-300 ease-[var(--ease-glide)] motion-reduce:transition-none ${
-          uiMode === 'voice' ? 'translate-x-full' : 'translate-x-0'
-        }`}
-      />
-      <button
-        type="button"
-        onClick={onEnterChatMode}
-        aria-pressed={uiMode === 'chat'}
-        className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors duration-300 sm:px-3.5 sm:text-[12px] ${
-          uiMode === 'chat' ? 'text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-        }`}
-      >
+    <div className="ios-segmented">
+      <span aria-hidden className="ios-segmented-thumb" style={{ transform: uiMode === 'voice' ? 'translateX(100%)' : 'translateX(0)' }} />
+      <button type="button" onClick={onEnterChatMode} aria-pressed={uiMode === 'chat'}>
         <MessageSquare className="h-3.5 w-3.5" />
         {t('header.chat')}
       </button>
-      <button
-        type="button"
-        onClick={onEnterVoiceMode}
-        aria-pressed={uiMode === 'voice'}
-        className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors duration-300 sm:px-3.5 sm:text-[12px] ${
-          uiMode === 'voice' ? 'text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-        }`}
-      >
+      <button type="button" onClick={onEnterVoiceMode} aria-pressed={uiMode === 'voice'}>
         <Mic className="h-3.5 w-3.5" />
         {t('header.voice')}
       </button>
     </div>
   ) : null
 
-  return (
-    <div className="relative flex h-full flex-col overflow-hidden bg-transparent">
-      {historyOpen && (
+  const closeSidebarOnMobile = () => {
+    if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches) setHistoryOpen(false)
+  }
+
+  const sidebar = (
+    <div className="flex h-full w-[280px] flex-col">
+      <div className="flex shrink-0 items-center gap-2.5 px-4 pb-2 pt-[calc(env(safe-area-inset-top,0px)+14px)]">
+        <span className="ios-avatar-ai h-8 w-8 rounded-[10px]">MF</span>
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="truncate text-[17px] font-semibold tracking-[-0.02em] text-[var(--ios-label)]">MapForAll</p>
+          <p className="truncate text-[12px] text-[var(--ios-label-2)]">{t('app.subtitle')}</p>
+        </div>
+        <button type="button" onClick={() => setHistoryOpen(false)} aria-label={tr('Masquer la barre latérale', 'Hide sidebar')} className="ios-icon-btn text-[var(--ios-label-2)]">
+          <PanelLeft className="h-[18px] w-[18px]" />
+        </button>
+      </div>
+
+      <div className="px-3 pt-2">
         <button
           type="button"
-          aria-label="Close chat history"
-          onClick={() => setHistoryOpen(false)}
-          className="fixed inset-0 z-[49]"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.28)' }}
-        />
-      )}
-
-      <aside
-        aria-hidden={!historyOpen}
-        className={`fixed left-0 top-0 z-50 flex h-full w-[min(100%,272px)] flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)] shadow-[8px_0_40px_-16px_rgba(26,22,20,0.28)] transition-transform duration-300 ease-[var(--ease-glide)] motion-reduce:transition-none dark:shadow-[8px_0_40px_-12px_rgba(0,0,0,0.55)] ${
-          historyOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
-        }`}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3.5">
-          <span className="font-display text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-            MapForAll
-          </span>
-          <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close chat history" className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[#F56A00]/10 hover:text-[#F56A00]">
-            ×
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          onClick={() => { onNewChat(); closeSidebarOnMobile() }}
+          className="ios-btn-tint h-10 w-full justify-start gap-2.5 rounded-xl px-3 text-[15px]"
+        >
+          <SquarePen className="h-[18px] w-[18px]" />
+          {t('header.newChat')}
+        </button>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ios-label-2)]" />
           <input
             type="search"
             value={historyQuery}
             onChange={(e) => setHistoryQuery(e.target.value)}
             placeholder={t('header.searchChats')}
-            className="mb-3 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-header)] px-3 py-2 text-[16px] text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-[#F56A00]/60 focus:ring-2 focus:ring-[#F56A00]/20 motion-reduce:transition-none md:text-[13px] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            className="ios-search"
           />
-          <button
-            type="button"
-            onClick={() => { onNewChat(); setHistoryOpen(false) }}
-            className="flex w-full items-center gap-2 rounded-xl bg-[#F56A00] px-3 py-2.5 text-left text-[13px] font-semibold text-white shadow-[0_10px_22px_-12px_rgba(245,106,0,0.9)] transition-[transform,background-color] duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#e05a1a] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-          >
-            <MessageSquarePlus className="h-4 w-4 shrink-0" />
-            {t('header.newChat')}
-          </button>
-          <a
-            href="/saved"
-            onClick={() => setHistoryOpen(false)}
-            className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[#F56A00]/10"
-          >
-            <Bookmark className="h-4 w-4 shrink-0 text-terracotta dark:text-[#FF8C2F]" />
-            {t('header.saved')}
-          </a>
-          {mapArchive.length > 0 && (
-            <div className="mt-5 border-t border-[var(--border)] pt-4">
-              <p className="mb-2 flex items-center gap-1.5 px-1 text-[10px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
-                <MapIcon className="h-3 w-3" /> Saved maps (kept on device)
-              </p>
-              <div className="max-h-40 space-y-1.5 overflow-y-auto">
-                {mapArchive.slice(0, 12).map((snap) => (
-                  <button
-                    key={snap.id}
-                    type="button"
-                    onClick={() => { onSelectMapArchive?.(snap.id); setHistoryOpen(false) }}
-                    className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left transition-colors hover:border-[#F56A00]/40 hover:bg-[#F56A00]/[0.06] dark:hover:bg-[#F56A00]/10"
-                  >
-                    <p className="truncate text-[12px] font-medium text-[var(--text-primary)]">{snap.title}</p>
-                    <p className="text-[10px] text-gray-500">
-                      {new Date(snap.savedAt).toLocaleDateString()}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="mt-4 border-t border-[var(--border)] pt-4">
-            <p className="mb-2 flex items-center gap-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-              <History className="h-3 w-3" /> {t('header.recent')}
-            </p>
-            <div className="space-y-1">
-            {visibleHistoryItems.length === 0 ? (
-              <p className="px-1 text-[13px] text-[var(--text-secondary)]">{t('header.noChats')}</p>
-            ) : (
-              visibleHistoryItems.map((item) => (
-                <div key={item.id} className="group relative">
-                  <button
-                    type="button"
-                    onClick={() => { onSelectHistory(item.id); setHistoryOpen(false) }}
-                    className="w-full rounded-xl px-2.5 py-2 pr-8 text-left transition-colors hover:bg-[#F56A00]/10"
-                  >
-                    <span className="block truncate text-[13px] text-[var(--text-primary)]">{item.title}</span>
-                    <span className="mt-0.5 block text-[11px] text-gray-500">
-                      {new Date(item.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </button>
-                  {onDeleteHistory && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); onDeleteHistory(item.id) }}
-                      aria-label="Delete chat"
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-[var(--text-secondary)] opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100 max-md:p-2 max-md:opacity-100"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-            </div>
-          </div>
         </div>
+      </div>
 
-        {onLogout && (
-          <div className="shrink-0 border-t border-[var(--border)] p-3">
-            {workspace && (
-              <a
-                href={workspace.href}
-                className={`mb-2 flex items-center justify-center gap-2 rounded-xl bg-[#1A1614] px-3 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#33291F] dark:bg-[#E8672A] dark:text-[#1A1614] dark:hover:bg-[#F07A40] ${focusRing}`}
-              >
-                <Store className="h-4 w-4" aria-hidden />
-                {workspace.cta}
-              </a>
+      <nav className="mt-3 space-y-0.5 px-3">
+        <a href="/saved" className="ios-row">
+          <Bookmark className="h-[18px] w-[18px] text-[var(--ios-tint)]" />
+          {t('header.saved')}
+        </a>
+        {onOpenCommunity && (
+          <button type="button" onClick={() => { onOpenCommunity(); closeSidebarOnMobile() }} className="ios-row">
+            <Users className="h-[18px] w-[18px] text-[var(--ios-blue)]" />
+            {t('header.community')}
+            {!!communityInviteCount && (
+              <span className="ml-auto rounded-full bg-[var(--ios-red)] px-1.5 text-[11px] font-semibold text-white">{communityInviteCount}</span>
             )}
-            <div className="flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg-header)] p-1.5 shadow-[0_8px_20px_-14px_rgba(26,22,20,0.45)]">
-              <button
-                ref={accountTriggerRef}
-                type="button"
-                onClick={() => setAccountOpen(true)}
-                aria-haspopup="dialog"
-                aria-expanded={accountOpen}
-                aria-label={t('accountPanel.open')}
-                className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-[#E8672A]/10 focus-visible:bg-[#E8672A]/10 ${focusRing}`}
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF8C2F] to-terracotta text-[13px] font-semibold text-white shadow-[0_6px_14px_-6px_rgba(196,92,38,0.8)] ring-2 ring-white dark:ring-[#3A322C]">
-                  {(userName?.trim()?.[0] ?? 'U').toUpperCase()}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                    {userName || t('header.signedIn')}
-                  </p>
-                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)]">{t('header.account')}</p>
-                </div>
+          </button>
+        )}
+        {workspace && (
+          <a href={workspace.href} className="ios-row">
+            <Store className="h-[18px] w-[18px] text-[var(--ios-green)]" />
+            {workspace.cta}
+          </a>
+        )}
+      </nav>
+
+      <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-3 chat-scroll">
+        <p className="mb-1 px-2.5 text-[13px] font-semibold text-[var(--ios-label-2)]">{t('header.recent')}</p>
+        {mapArchive.length > 0 && (
+          <div className="mb-2 space-y-0.5">
+            {mapArchive.slice(0, 6).map((snap) => (
+              <button key={snap.id} type="button" onClick={() => { onSelectMapArchive?.(snap.id); closeSidebarOnMobile() }} className="ios-row">
+                <MapIcon className="h-4 w-4 shrink-0 text-[var(--ios-label-2)]" />
+                <span className="truncate">{snap.title}</span>
               </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onLogout()
-                }}
-                aria-label={t('header.logout')}
-                title={t('header.logout')}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-red-500/10 hover:text-red-500 ${focusRing}`}
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
+            ))}
           </div>
         )}
+        {visibleHistoryItems.length === 0 ? (
+          <p className="px-2.5 py-2 text-[14px] text-[var(--ios-label-2)]">{t('header.noChats')}</p>
+        ) : (
+          <div className="space-y-0.5">
+            {visibleHistoryItems.map((item) => (
+              <div key={item.id} className="group relative">
+                <button
+                  type="button"
+                  onClick={() => { onSelectHistory(item.id); closeSidebarOnMobile() }}
+                  className="ios-row pr-9"
+                  title={item.title}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{item.title}</span>
+                    <span className="block text-[12px] text-[var(--ios-label-2)]">
+                      {new Date(item.updatedAt).toLocaleDateString(lang === 'en' ? 'en-GB' : 'fr-FR', { day: 'numeric', month: 'short' })}
+                      {' · '}
+                      {new Date(item.updatedAt).toLocaleTimeString(lang === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </span>
+                </button>
+                {onDeleteHistory && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDeleteHistory(item.id) }}
+                    aria-label={tr('Supprimer la conversation', 'Delete chat')}
+                    className="ios-icon-btn absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-[var(--ios-label-2)] opacity-0 hover:text-[var(--ios-red)] group-hover:opacity-100 max-md:opacity-100"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-[var(--ios-separator)] p-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)]">
+        <div className="flex items-center gap-1">
+          <button
+            ref={accountTriggerRef}
+            type="button"
+            onClick={() => setAccountOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={accountOpen}
+            aria-label={t('accountPanel.open')}
+            className="ios-row min-w-0 flex-1 !py-1.5"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#A1A1AA] to-[#71717A] text-[15px] font-semibold text-white">
+              {(userName?.trim()?.[0] ?? 'U').toUpperCase()}
+            </span>
+            <span className="min-w-0 flex-1 leading-tight">
+              <span className="block truncate text-[15px] font-semibold">{userName || t('header.signedIn')}</span>
+              <span className="block text-[12px] text-[var(--ios-label-2)]">{t('header.account')}</span>
+            </span>
+          </button>
+          <button type="button" onClick={onToggleTheme} aria-label={t('header.theme')} className="ios-icon-btn text-[var(--ios-label-2)]">
+            {theme === 'dark' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+          </button>
+          {onLogout && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onLogout() }} aria-label={t('header.logout')} title={t('header.logout')} className="ios-icon-btn text-[var(--ios-label-2)] hover:!text-[var(--ios-red)]">
+              <LogOut className="h-[18px] w-[18px]" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="ios-chat relative flex h-full overflow-hidden">
+      {/* Sidebar: persistent column on desktop, slide-over drawer on phones */}
+      {historyOpen && (
+        <button
+          type="button"
+          aria-label={tr('Fermer', 'Close')}
+          onClick={() => setHistoryOpen(false)}
+          className="ios-fade-in fixed inset-0 z-[49] bg-black/30 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
+      <aside
+        aria-label={t('header.history')}
+        className={`ios-glass-bar z-50 h-full shrink-0 overflow-hidden border-r border-[var(--ios-separator)] transition-[width,transform] duration-[420ms] ease-[var(--ios-ease)] motion-reduce:transition-none max-lg:fixed max-lg:left-0 max-lg:top-0 max-lg:w-[280px] max-lg:shadow-[0_0_60px_rgba(0,0,0,0.25)] ${
+          historyOpen ? 'lg:w-[280px] max-lg:translate-x-0' : 'lg:w-0 max-lg:-translate-x-full max-lg:pointer-events-none'
+        }`}
+      >
+        {sidebar}
       </aside>
 
       <AccountPanel
@@ -994,138 +926,78 @@ export function ChatPanel({
         onNameChange={onUserNameChange}
       />
 
-      {/* History is an overlay drawer (with a backdrop), NOT a layout push —
-          the chat panel can be a narrow centered column, and pushing it by the
-          drawer width crushed the header. */}
-      <div className="flex min-h-0 flex-1 flex-col bg-transparent">
-        <header className="sticky top-0 z-30 shrink-0 border-b border-black/[0.06] bg-[#FBF6EE]/95 shadow-[0_10px_28px_-22px_rgba(26,22,20,0.55)] backdrop-blur-md dark:border-white/10 dark:bg-[#141210]/95">
-          <div className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E8672A] text-[11px] font-bold tracking-tight text-white">MF</span>
-            <span className="min-w-0 leading-tight">
-              <span className="block truncate font-display text-[15px] font-semibold tracking-tight text-[#1A1614] dark:text-gray-50">MapForAll</span>
-              <span className="hidden truncate text-[11px] font-normal text-[#8A7364] sm:block dark:text-gray-400">{t('app.subtitle')}</span>
-            </span>
-          </div>
-          <div className="mx-auto shrink-0">{modeToggle}</div>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {speechOutSupported && onToggleSpeakReplies && (
-              <button
-                type="button"
-                onClick={onToggleSpeakReplies}
-                aria-label={speakReplies ? t('header.mute') : t('header.unmute')}
-                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-150 active:opacity-70 ${speakReplies ? 'text-[#E8672A]' : 'text-[#6E5B50] hover:bg-black/[0.04] dark:text-gray-300 dark:hover:bg-white/10'}`}
-              >
-                {speakReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              </button>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="ios-glass-bar sticky top-0 z-30 shrink-0 border-b border-[var(--ios-separator)] pt-safe">
+          <div className="flex h-14 items-center gap-1.5 px-2.5 sm:px-4">
+            {!historyOpen && (
+              <>
+                <button type="button" onClick={() => setHistoryOpen(true)} aria-label={t('header.history')} className="ios-icon-btn">
+                  <PanelLeft className="h-5 w-5" />
+                </button>
+                <button type="button" onClick={onNewChat} aria-label={t('header.newChat')} className="ios-icon-btn hidden sm:inline-flex">
+                  <SquarePen className="h-5 w-5" />
+                </button>
+              </>
             )}
-            {workspace && <WorkspaceShortcut workspace={workspace} />}
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              aria-label={t('header.theme')}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-[#6E5B50] transition-colors duration-150 hover:bg-black/[0.04] active:opacity-70 dark:text-gray-300 dark:hover:bg-white/10"
-            >
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
-            <div ref={langRef} className="relative">
-              <button
-                type="button"
-                aria-label={t('header.language')}
-                aria-expanded={langOpen}
-                onClick={() => setLangOpen((v) => !v)}
-                className="flex h-9 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium uppercase tracking-wide text-[#1A1614] transition-colors duration-150 hover:bg-black/[0.04] active:opacity-70 dark:text-gray-100 dark:hover:bg-white/10"
-              >
-                {lang}
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${langOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {langOpen && (
-                <div className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-[88px] overflow-hidden rounded-xl border border-black/10 bg-white py-1 shadow-[0_8px_24px_rgba(26,22,20,0.12)] dark:border-white/10 dark:bg-[#1C1916]">
-                  {(['fr', 'en', 'rw'] as Lang[]).map((code) => (
-                    <button
-                      key={code}
-                      type="button"
-                      onClick={() => { setLang(code); setLangOpen(false) }}
-                      className={`block w-full px-3 py-1.5 text-left text-[12px] uppercase transition-colors duration-150 ${lang === code ? 'text-[#E8672A]' : 'text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5'}`}
-                    >
-                      {code}
-                    </button>
-                  ))}
-                </div>
-              )}
+            <div className="min-w-0 flex-1 px-1">
+              <p className="truncate text-[17px] font-semibold tracking-[-0.022em] text-[var(--ios-label)]">{conversationTitle}</p>
             </div>
-            <button
-              type="button"
-              onClick={() => setAccountOpen(true)}
-              aria-label={t('accountPanel.open')}
-              aria-haspopup="dialog"
-              aria-expanded={accountOpen}
-              className={`ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1614] text-[12px] font-semibold text-white transition-opacity duration-150 hover:opacity-90 active:opacity-70 dark:bg-white dark:text-[#1A1614] ${focusRing}`}
-            >
-              {(userName?.trim()?.[0] ?? 'M').toUpperCase()}
-            </button>
-            <div ref={moreRef} className="relative">
-              <button
-                type="button"
-                aria-label={t('header.more')}
-                aria-haspopup="menu"
-                aria-expanded={moreOpen}
-                onClick={() => setMoreOpen((v) => !v)}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-[#6E5B50] transition-colors duration-150 hover:bg-black/[0.04] active:opacity-70 dark:text-gray-300 dark:hover:bg-white/10"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-              {moreOpen && (
-                <div
-                  role="menu"
-                  aria-label={t('header.more')}
-                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-56 overflow-hidden rounded-xl border border-black/10 bg-white py-1 shadow-[0_8px_24px_rgba(26,22,20,0.12)] dark:border-white/10 dark:bg-[#1C1916]"
-                >
-                  <button type="button" role="menuitem" onClick={() => { onNewChat(); setMoreOpen(false) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5">
-                    <MessageSquarePlus className="h-4 w-4" />
-                    {t('header.newChat')}
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => { setHistoryOpen(true); setMoreOpen(false) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5">
-                    <Menu className="h-4 w-4" />
-                    {t('header.history')}
-                  </button>
-                  {onOpenCommunity && (
-                    <button type="button" role="menuitem" onClick={() => { onOpenCommunity(); setMoreOpen(false) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5">
-                      <Users className="h-4 w-4" />
-                      {t('header.community')}
-                      {!!communityInviteCount && <span className="ml-auto text-[11px] text-[#E8672A]">{communityInviteCount}</span>}
+            <div className="hidden shrink-0 sm:block">{modeToggle}</div>
+            <div className="flex shrink-0 items-center gap-0.5 pl-1">
+              {hasMapData && (
+                <button type="button" onClick={onExpandMap} aria-label={t('header.openMap')} title={t('header.openMap')} className="ios-icon-btn">
+                  <MapIcon className="h-5 w-5" />
+                </button>
+              )}
+              {speechOutSupported && onToggleSpeakReplies && (
+                <button type="button" onClick={onToggleSpeakReplies} aria-pressed={!!speakReplies} aria-label={speakReplies ? t('header.mute') : t('header.unmute')} className="ios-icon-btn">
+                  {speakReplies ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+                </button>
+              )}
+              <div ref={moreRef} className="relative">
+                <button type="button" aria-label={t('header.more')} aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)} className="ios-icon-btn">
+                  <MoreHorizontal className="h-5 w-5" />
+                </button>
+                {moreOpen && (
+                  <div role="menu" aria-label={t('header.more')} className="ios-glass-strong ios-rise absolute right-0 top-[calc(100%+8px)] z-50 w-64 overflow-hidden rounded-[18px] p-1.5">
+                    <div className="mb-1 flex justify-center p-1 sm:hidden">{modeToggle}</div>
+                    <button type="button" role="menuitem" onClick={() => { onNewChat(); setMoreOpen(false) }} className="ios-row">
+                      <SquarePen className="h-[18px] w-[18px]" />
+                      {t('header.newChat')}
                     </button>
-                  )}
-                  {hasMapData && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        if (mapExpanded) onCollapseMap()
-                        else if (mapVisible) onExpandMap()
-                        else onOpenMapPanel()
-                        setMoreOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#1A1614] hover:bg-[#FBF3E7] dark:text-gray-100 dark:hover:bg-white/5"
-                    >
-                      <MapIcon className="h-4 w-4" />
-                      {mapExpanded ? t('header.compactMap') : mapVisible ? t('header.fullMap') : t('header.openMap')}
+                    <button type="button" role="menuitem" onClick={() => { onToggleTheme(); setMoreOpen(false) }} className="ios-row">
+                      {theme === 'dark' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+                      {theme === 'dark' ? tr('Mode clair', 'Light mode', 'Urumuri') : tr('Mode sombre', 'Dark mode', 'Umwijima')}
                     </button>
-                  )}
-                  {SHOW_MODEL && (
-                    <div className="border-t border-black/5 p-2 dark:border-white/10">
-                      <ModelSwitcher selected={selectedModel} onChange={onModelChange} />
+                    <div className="my-1 h-px bg-[var(--ios-separator)]" />
+                    <p className="px-2.5 pb-1 pt-1.5 text-[12px] font-semibold text-[var(--ios-label-2)]">{t('header.language')}</p>
+                    <div className="grid grid-cols-3 gap-1 px-1 pb-1">
+                      {(['fr', 'en', 'rw'] as Lang[]).map((code) => (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => { setLang(code); setMoreOpen(false) }}
+                          aria-pressed={lang === code}
+                          className="ios-pill h-8 justify-center !px-0 text-[13px] uppercase"
+                        >
+                          {code}
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
+                    {SHOW_MODEL && (
+                      <div className="border-t border-[var(--ios-separator)] p-2">
+                        <ModelSwitcher selected={selectedModel} onChange={onModelChange} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {onCollapse && (
+                <button type="button" onClick={onCollapse} aria-label="Collapse chat" className="ios-icon-btn">
+                  <PanelLeftClose className="h-5 w-5" />
+                </button>
               )}
             </div>
-            {onCollapse && (
-              <button type="button" onClick={onCollapse} aria-label="Collapse chat" className="flex h-9 w-9 items-center justify-center rounded-full text-[#6E5B50] dark:text-gray-300">
-                <PanelLeftClose className="h-4 w-4" />
-              </button>
-            )}
-          </div>
           </div>
         </header>
 

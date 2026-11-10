@@ -588,8 +588,13 @@ def _catalog_for_intent(request: str, intent: Any, lat: float, lng: float) -> tu
 
 def _vector_for_intent(query: str, tool_context: ToolContext) -> list[dict[str, Any]]:
     """Vector neighbors in seeded host cities, dropped unless the score clears the floor."""
+    import os
     from .places_tools import find_places_by_vector
 
+    # Vector search needs Vertex AI embeddings (Google Cloud credentials) and
+    # Atlas Vector Search. Without them it only waits for a timeout, so skip it.
+    if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().upper() != "TRUE":
+        return []
     rows = find_places_by_vector(query or "places", "Kigali", tool_context, limit=8)
     kept: list[dict[str, Any]] = []
     for row in rows:
@@ -888,7 +893,39 @@ async def discover_places(request: str, tool_context: ToolContext) -> str:
         except (TypeError, ValueError):
             return 1e9
 
-    pooled.sort(key=lambda place: (0 if place.get("local_business") is True else 1, _distance_key(place)))
+    # Specific words in the ask ("burger", "planet", "java") must win over the
+    # generic category: names that match come first, and local listings that
+    # match nothing the user typed are left out instead of topping every search.
+    generic = {"restaurant", "restaurants", "resto", "restos", "user", "location", "near", "place", "places",
+               "cafe", "cafes", "coffee", "shop", "shops", "store", "hotel", "hotels", "market", "markets",
+               "pharmacy", "pharmacie", "kigali", "rwanda", "selected", "pin", "tapped"}
+    specific = [t for t in (_fold(term) for term in search_terms(search_request, intent)) if len(t) >= 4 and t not in generic]
+
+    def _blob(place: dict[str, Any]) -> str:
+        parts = [place.get("name"), place.get("summary"), place.get("description")]
+        for key in ("categories", "tags", "keywords"):
+            value = place.get(key)
+            if isinstance(value, list):
+                parts.extend(str(v) for v in value)
+        return _fold(" ".join(str(p) for p in parts if p))
+
+    def _match(place: dict[str, Any]) -> int:
+        name = _fold(str(place.get("name") or ""))
+        if specific and all(t in name for t in specific):
+            return 0
+        if any(t in name for t in specific):
+            return 1
+        if any(t in _blob(place) for t in specific):
+            return 2
+        return 3
+
+    if specific and not modifier:
+        matched = [place for place in pooled if _match(place) < 3]
+        if matched:
+            pooled = matched
+        else:
+            pooled = [place for place in pooled if place.get("local_business") is not True]
+    pooled.sort(key=lambda place: (_match(place) if specific else 0, 0 if place.get("local_business") is True else 1, _distance_key(place)))
     candidates = dedupe_places(pooled, limit=min(limit, 10))
     if modifier == "cheaper":
         candidates.sort(key=lambda place: _PRICE_RANK.get(str(place.get("price_level") or ""), 9))

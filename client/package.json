@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "node --experimental-strip-types --test lib/lifecycle.test.ts lib/sessionRules.test.ts lib/dashboardRules.test.ts lib/viewRules.test.ts",
-    "seed:demo": "node scripts/seed-demo.mjs"
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

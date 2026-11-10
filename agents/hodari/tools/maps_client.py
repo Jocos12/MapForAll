@@ -203,6 +203,46 @@ async def search_text_places(
     open_now: bool = False,
     page_size: int = 10,
 ) -> tuple[list[dict[str, Any]], int]:
+    """Google Places text search, with a free OpenStreetMap fallback.
+
+    When Google is unavailable (no key, 403 without billing, quota), the same
+    search runs on OpenStreetMap (Overpass/Nominatim) so the app still works.
+    """
+    global _google_places_down
+    status = 0
+    if not _google_places_down:
+        rows, status = await _google_search_text_places(
+            text_query, lat, lng, radius_m,
+            included_type=included_type, open_now=open_now, page_size=page_size,
+        )
+        if status == 200:
+            return rows, status
+        if status in (0, 401, 403):
+            # Key missing or not allowed: stop wasting a request on every search.
+            _google_places_down = True
+    from . import osm_fallback
+
+    if not osm_fallback.enabled():
+        return [], status
+    rows = await osm_fallback.search_osm_places(
+        text_query, lat, lng, radius_m, included_type=included_type, page_size=page_size,
+    )
+    return rows, 200 if rows else (status or 204)
+
+
+_google_places_down = False
+
+
+async def _google_search_text_places(
+    text_query: str,
+    lat: float,
+    lng: float,
+    radius_m: float,
+    *,
+    included_type: str | None = None,
+    open_now: bool = False,
+    page_size: int = 10,
+) -> tuple[list[dict[str, Any]], int]:
     """Places API (New) Text Search biased to a circle around the user.
 
     Returns (places, http_status). Status 0 means the key is missing and no request was sent.

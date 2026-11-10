@@ -2,14 +2,13 @@
 
 import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from 'react'
 import dynamic from 'next/dynamic'
-import { MessageSquare, Mic } from 'lucide-react'
+import { X } from 'lucide-react'
 import { ChatPanel } from '@/components/ChatPanel'
 import type { WorkspaceLink } from '@/components/WorkspaceShortcut'
 import { AddPlaceSheet } from '@/components/AddPlaceSheet'
 import { useI18n } from '@/components/I18nProvider'
-import { MapView, PlaceInfoCard, type RouteInfo } from '@/components/MapView'
-import { PlaceCardStrip } from '@/components/PlaceCardStrip'
-import { CollapsedReply } from '@/components/CollapsedReply'
+import { type RouteInfo } from '@/components/MapView'
+import { MapSheet } from '@/components/MapSheet'
 import { detailsExpandedPref, PlaceDetailsPanel, setDetailsExpandedPref } from '@/components/PlaceDetailsPanel'
 import { streamChat, fetchSessionState, ChatGateError } from '@/lib/stream'
 import { placesForAsk, replyFromPlaces, requestedCategory } from '@/lib/placeCategory'
@@ -20,7 +19,7 @@ import { getRouteSnapshot, subscribeRoute } from '@/lib/routeProgress'
 import { SCORING_DEFAULTS, type ScoringWeights } from '@/lib/scoringSettings'
 import Paywall, { type GateState } from '@/components/Paywall'
 import { VoiceOrb } from '@/components/VoiceOrb'
-import { MobileChatSheet, SHEET_PEEK_PX, type SheetSnap } from '@/components/MobileChatSheet'
+import type { SheetSnap } from '@/components/MobileChatSheet'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
   isValidCoord,
@@ -337,6 +336,8 @@ export default function LandingPage() {
     return () => { cancelled = true }
   }, [])
   const [mapExpanded, setMapExpanded] = useState(false)
+  /** iOS-style full-screen map sheet opened from the chat (inline map card, header, "voir sur la carte"). */
+  const [mapSheetOpen, setMapSheetOpen] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const [uiMode, setUiMode] = useState<'chat' | 'voice'>('chat')
   const [chatWidth, setChatWidth] = useState(380)
@@ -1924,6 +1925,12 @@ export default function LandingPage() {
     pinsFarFromUser(userLocation, places.map((p) => p.coordinates))
 
   const routeActive = routeFromUser || !!customRoute
+  useEffect(() => { if (mapExpanded) setMapSheetOpen(true) }, [mapExpanded])
+  const closeMapSheet = useCallback(() => {
+    setMapSheetOpen(false)
+    setMapExpanded(false)
+    setChatCollapsed(false)
+  }, [])
   const communityLayerHasData =
     communityLayerOn && (communityPins.length > 0 || communityFriends.length > 0)
   const heldRouteId = useSyncExternalStore(subscribeRoute, () => getRouteSnapshot().route?.id ?? 0, () => 0)
@@ -2076,12 +2083,16 @@ export default function LandingPage() {
       mapExpanded={mapExpanded}
       hasMapData={hasMapData}
       onOpenMapPanel={() => { setMapVisible(true); setMapExpanded(false); setChatCollapsed(false) }}
-      onExpandMap={() => { setMapVisible(true); setMapExpanded(true); setChatCollapsed(false) }}
+      onExpandMap={() => { setMapVisible(true); setMapSheetOpen(true) }}
       onCollapseMap={() => { setMapExpanded(false); setMapVisible(true); setChatCollapsed(false) }}
-      onOpenMapFromMessage={handleOpenMapFromMessage}
+      onOpenMapFromMessage={(message) => { handleOpenMapFromMessage(message); setMapSheetOpen(true) }}
       onEditMessage={handleEditMessage}
-      onPlaceDetails={handleGalleryCardClick}
-      onFocusPlace={focusPlaceOnMap}
+      onPlaceDetails={(place) => {
+        if (activePlaceRef.current?.place_id !== place.place_id) rememberActiveRef.current(place)
+        setDetailsExpandedPref(true)
+        setDetailsPlace({ ...place })
+      }}
+      onFocusPlace={(place) => { focusPlaceOnMap(place); setMapSheetOpen(true) }}
       activePlaceId={activePlace?.place_id}
       onToggleMapPanel={() => {
         setMapVisible((v) => {
@@ -2104,7 +2115,6 @@ export default function LandingPage() {
       speakReplies={speakReplies}
       speechOutSupported={speechOutSupported}
       onToggleSpeakReplies={() => setSpeakReplies((v) => { const nv = !v; if (!nv) cancelSpeech(); return nv })}
-      onCollapse={mapExpanded ? () => setChatCollapsed(true) : undefined}
       onStop={handleStop}
       uiMode={uiMode}
       onEnterChatMode={enterChatMode}
@@ -2136,419 +2146,65 @@ export default function LandingPage() {
         onSubmitted={() => { /* confirmation stays in the sheet */ }}
       />
 
-      {/* Mode toggle when chat panel is collapsed on full-screen map */}
-      {!isMobile && mapExpanded && chatCollapsed && (
-        <div className="fixed top-3 left-4 z-[300] grid grid-cols-2 rounded-full border border-border bg-surface/95 p-1 shadow-lg backdrop-blur-md">
-          <span
-            aria-hidden
-            className={`pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full bg-amber-600 shadow transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
-              uiMode === 'voice' ? 'translate-x-full' : 'translate-x-0'
-            }`}
-          />
-          <button
-            type="button"
-            onClick={enterChatMode}
-            aria-pressed={uiMode === 'chat'}
-            className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors duration-300 ${
-              uiMode === 'chat' ? 'text-white' : 'text-text2 hover:text-text'
-            }`}
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={enterVoiceMode}
-            aria-pressed={uiMode === 'voice'}
-            className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] font-medium transition-colors duration-300 ${
-              uiMode === 'voice' ? 'text-white' : 'text-text2 hover:text-text'
-            }`}
-          >
-            <Mic className="h-3.5 w-3.5" />
-            Voice
-          </button>
-        </div>
-      )}
-
-      {/* Compact layout: chat on the left, map + place list on the right */}
-      {!isMobile && !mapExpanded && (
-        <div className="absolute inset-0 flex animate-fade-up">
-          <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-            {!mapVisible && (
-              <>
-              </>
-            )}
-            <div className={`relative mx-auto flex h-full w-full flex-col ${mapVisible ? '' : 'max-w-2xl'}`}>
-              {chatPanel}
-            </div>
-          </div>
-
-          {mapVisible && (hasMapData || placesLoading) && (
-            <aside className="flex h-full w-[clamp(300px,32vw,420px)] shrink-0 flex-col border-l border-border bg-surface2/40 animate-slide-right">
-              <div className="relative min-h-[200px] flex-1 p-2">
-                <MapView
-                  loading={placesLoading && mapPlaces.length === 0}
-                  places={mapPlaces as Place[]}
-                  itinerary={mapItinerary}
-                  annotations={annotations}
-                  activeStopIndex={activeStop}
-                  onMarkerClick={handleMarkerClick}
-                  userLocation={userLocation}
-                  theme={theme}
-                  showUserLocation={showUserOnMap}
-                  onAddPlace={() => { void openAddPlace() }}
-                  onMapClick={addOpen ? (pos) => { setDraftLat(pos.lat.toFixed(5)); setDraftLng(pos.lng.toFixed(5)) } : undefined}
-                  routeFromUser={routeFromUser}
-                  customRoute={customRoute}
-                  routeMode={routeMode}
-                  onRouteModeChange={setRouteMode}
-                  onRequestLocation={handleUseMyLocation}
-                  locationPending={locationPending}
-                  onRouteInfo={setRouteInfo}
-                  onRouteError={reportRouteError}
-                  onEndRoute={endRoute}
-                  placeCardOpen={placeCardOpen}
-                  onPlaceCardClose={() => setPlaceCardOpen(false)}
-                  zoomFocusOnActive={mapZoomFocus}
-                  aiBusy={loading}
-                  size="compact"
-                  hideInlinePlaceCard
-                  onPlaceFullDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
-                  onPlaceSave={handleSavePlace}
-                  onPlaceRoute={handleRouteFromMe}
-                  onNavigatePlace={navigateToPlace}
-                  activePlace={activePlace}
-                  chatPlaces={chatResultPlaces}
-                  onExpand={() => { setMapExpanded(true); setMapVisible(true); setChatCollapsed(false) }}
-                  selectedPlace={selectedPlace}
-                  routeInfo={routeInfo}
-                  onDirections={activeStop != null ? () => handleRouteFromMe(activeStop) : undefined}
-                  communityPins={communityPins}
-                  communityFriends={communityFriends}
-                  communityLayerOn={communityLayerOn}
-                  onToggleCommunityLayer={showCommunity ? handleToggleCommunityLayer : undefined}
-                  onOpenProfile={handleOpenProfile}
-                  communityFocus={communityFocus}
-                />
-              </div>
-              {routeActive && routeError && (
-                <div className="mx-2 mb-1 shrink-0 rounded-xl border border-red-500/40 bg-surface/95 px-3 py-2 text-[12px] text-text2">
-                  {routeError}
-                </div>
-              )}
-              {routeFromUser && locationPending && (
-                <div className="mx-2 mb-1 shrink-0 rounded-xl border border-border bg-surface/95 px-3 py-2 text-[12px] text-text2">
-                  Getting your location…
-                </div>
-              )}
-              {/* Place results live ONLY in the chat now (InlinePlaceGallery under
-                  the AI reply). The right side keeps just the map. */}
-            </aside>
-          )}
-        </div>
-      )}
-
-      {/* Expanded full-screen map — `isolate` creates a stacking context so Google
-          Maps' internal z-indices (up to ~1000002) don't escape and cover the chat */}
-      {!isMobile && mapExpanded && (
-        <div
-          className="absolute inset-y-0 right-0 isolate"
-          style={{ left: chatCollapsed ? 0 : chatWidth }}
-        >
-          <MapView
-            loading={placesLoading && mapPlaces.length === 0}
-            places={mapPlaces as Place[]}
-            itinerary={mapItinerary}
-            annotations={annotations}
-            activeStopIndex={activeStop}
-            onMarkerClick={handleMarkerClick}
-            userLocation={userLocation}
-            theme={theme}
-            showUserLocation={showUserOnMap}
-            onAddPlace={() => { void openAddPlace() }}
-            onMapClick={addOpen ? (pos) => { setDraftLat(pos.lat.toFixed(5)); setDraftLng(pos.lng.toFixed(5)) } : undefined}
-            routeFromUser={routeFromUser}
-            customRoute={customRoute}
-            routeMode={routeMode}
-            onRouteModeChange={setRouteMode}
-            onRequestLocation={handleUseMyLocation}
-            locationPending={locationPending}
-            onRouteInfo={setRouteInfo}
-            onRouteError={reportRouteError}
-            onEndRoute={endRoute}
-            routeInfo={routeInfo}
-            placeCardOpen={placeCardOpen}
-            onPlaceCardClose={() => setPlaceCardOpen(false)}
-            zoomFocusOnActive={mapZoomFocus}
-            aiBusy={loading}
-            onCollapse={() => { setMapExpanded(false); setChatCollapsed(false) }}
-            onPlaceFullDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
-            onPlaceSave={handleSavePlace}
-            onPlaceRoute={handleRouteFromMe}
-            onNavigatePlace={navigateToPlace}
-            activePlace={activePlace}
-            chatPlaces={chatResultPlaces}
-            savedPlaceIds={savedPlaceIds}
-            communityPins={communityPins}
-            communityFriends={communityFriends}
-            communityLayerOn={communityLayerOn}
-            onToggleCommunityLayer={showCommunity ? handleToggleCommunityLayer : undefined}
-            onOpenProfile={handleOpenProfile}
-            communityFocus={communityFocus}
-            onPlaceShare={handlePlaceShare}
-          />
-          {pinsMismatch && (
-            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-md px-4 py-2 rounded-xl bg-surface/95 border border-gold/40 text-sm text-text backdrop-blur-md">
-              Pins look far from your GPS. Ask MapForAll to search again in your city.
-            </div>
-          )}
-          {routeActive && routeError && (
-            <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 max-w-lg px-4 py-2 rounded-xl bg-surface/95 border border-red-500/40 text-sm text-text2 backdrop-blur-md">
-              {routeError}
-            </div>
-          )}
-          {routeFromUser && locationPending && (
-            <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-full bg-surface/95 border border-border text-sm text-text2 backdrop-blur-md">
-              Getting your location…
-            </div>
-          )}
-          {routeFromUser && !userLocation && !locationPending && (
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 max-w-md px-4 py-2 rounded-xl bg-surface/95 border border-gold/40 text-sm text-text2 backdrop-blur-md text-center">
-              Allow location in your browser, then tap <strong className="text-text">Route from me</strong> again.
-            </div>
-          )}
-          {!itineraryStops && places.length > 0 && (
-            <PlaceCardStrip
-              places={places}
-              activeIndex={activeStop}
-              activePlaceId={activePlace?.place_id}
-              onSelect={handleMarkerClick}
-              onShowDetails={(place) => {
-                if (activePlaceRef.current?.place_id !== place.place_id) rememberActiveRef.current(place)
-                else setPlaceCardOpen(true)
-                setDetailsExpandedPref(true)
-                setDetailsPlace(place)
-              }}
-              onRouteFromMe={handleRouteFromMe}
-              onFocusPlace={focusPlaceOnMap}
-              leftOffset={0}
-            />
-          )}
-          {itineraryStops && itineraryStops.length > 0 && (
-            <PlaceCardStrip
-              places={itineraryStops.map((s) => ({ ...s, personalization_score: 0, categories: [] })) as Place[]}
-              activeIndex={activeStop}
-              activePlaceId={activePlace?.place_id}
-              onSelect={handleMarkerClick}
-              onShowDetails={(stop) => {
-                if (activePlaceRef.current?.place_id !== stop.place_id) rememberActiveRef.current(stop)
-                else setPlaceCardOpen(true)
-                setDetailsExpandedPref(true)
-                setDetailsPlace(stop)
-              }}
-              onRouteFromMe={handleRouteFromMe}
-              onFocusPlace={focusPlaceOnMap}
-              leftOffset={0}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Chat overlay on the expanded map — conversation stays reachable */}
-      {!isMobile && mapExpanded && !chatCollapsed && (
-        <div
-          data-map-pad="chat"
-          className="absolute top-0 bottom-0 left-0 z-[200] flex flex-col bg-bg/95 backdrop-blur-md border-r border-border animate-slide-left"
-          style={{ width: chatWidth }}
-        >
+      {/* ── iOS chat layout: the conversation is the whole screen ─────────── */}
+      <div className="absolute inset-0 flex animate-fade-up">
+        <div className="relative flex h-full w-full flex-col">
           {chatPanel}
-          <div
-            onMouseDown={startResize}
-            title="Drag to resize"
-            className="absolute top-0 right-0 h-full w-2 cursor-col-resize group z-20"
-          >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 h-16 w-1 rounded-full bg-border group-hover:bg-gold/70 transition-colors" />
-          </div>
         </div>
-      )}
+      </div>
 
-      {/* Collapsed chat pill on the expanded map */}
-      {!isMobile && mapExpanded && chatCollapsed && (
-        <CollapsedReply
-          content={lastAssistant?.content ?? null}
-          loading={loading}
-          streaming={loading && streamingStarted}
-          onOpen={() => setChatCollapsed(false)}
-        />
-      )}
-
-      {/* Exit full map — back to the side-panel layout */}
-      {!isMobile && mapExpanded && (
-        <button
-          onClick={() => { setMapExpanded(false); setChatCollapsed(false) }}
-          className="absolute top-4 right-4 z-[210] bg-bg/90 backdrop-blur-sm border border-border rounded-xl p-2 text-text2 hover:text-text hover:border-gold/40 transition-all"
-          aria-label="Exit full map"
-        >
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
-            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-          </svg>
-        </button>
-      )}
-
-      {/* ── Mobile layout (<768px) ──────────────────────────────────────────
-          Map is the base layer; the chat rides in a draggable bottom sheet
-          (collapsed / half / full). Without map data the chat is full-screen. */}
-      {isMobile && !showMobileMap && (
-        <div className="absolute inset-0 flex animate-fade-up">
-          <div className="relative mx-auto flex h-full w-full max-w-2xl flex-col">
-            {chatPanel}
-          </div>
-        </div>
-      )}
-      {isMobile && showMobileMap && (
-        <>
-          <div
-            className={mapExpanded ? 'fixed inset-0 z-[100] isolate' : 'absolute inset-0 isolate'}
-            style={mapExpanded ? { top: 'env(safe-area-inset-top)', bottom: 'env(safe-area-inset-bottom)' } : undefined}
-          >
-            <MapView
-              size={mapExpanded ? 'compact' : 'full'}
-              loading={placesLoading && mapPlaces.length === 0}
+      {/* ── Full-screen map sheet (opened from the chat) ────────────────── */}
+      {mapSheetOpen && (
+        <div className="ios-chat fixed inset-0 z-[150] ![background:transparent]" role="dialog" aria-modal="true" aria-label="Carte">
+          <button
+            type="button"
+            aria-label="Fermer la carte"
+            onClick={closeMapSheet}
+            className="ios-fade-in absolute inset-0 bg-black/40 backdrop-blur-[6px]"
+          />
+          <div className="ios-sheet-in absolute inset-0 isolate overflow-hidden bg-[var(--ios-bg)] md:inset-4 md:rounded-[32px] md:border md:border-[var(--ios-glass-border)] md:shadow-[0_30px_90px_-20px_rgba(0,0,0,0.55)] lg:inset-6">
+            <MapSheet
+              title={
+                itineraryStops?.length
+                  ? `${itineraryStops.length} étapes`
+                  : mapPlaces.length
+                    ? `${mapPlaces.length} lieu${mapPlaces.length > 1 ? 'x' : ''}`
+                    : 'Carte'
+              }
               places={mapPlaces as Place[]}
-              itinerary={mapItinerary}
-              annotations={annotations}
-              activeStopIndex={activeStop}
-              onMarkerClick={handleMarkerClick}
+              activeIndex={activeStop}
+              activePlaceId={activePlace?.place_id}
               userLocation={userLocation}
-              theme={theme}
-              showUserLocation={showUserOnMap}
-              onAddPlace={() => { void openAddPlace() }}
-              onMapClick={addOpen ? (pos) => { setDraftLat(pos.lat.toFixed(5)); setDraftLng(pos.lng.toFixed(5)) } : undefined}
-              routeFromUser={routeFromUser}
-              customRoute={customRoute}
+              routeTo={routeFromUser && activePlace ? { lat: activePlace.lat, lng: activePlace.lng, name: activePlace.name } : null}
               routeMode={routeMode}
               onRouteModeChange={setRouteMode}
-              onRequestLocation={handleUseMyLocation}
-              locationPending={locationPending}
-              onRouteInfo={setRouteInfo}
-              onRouteError={reportRouteError}
               onEndRoute={endRoute}
-              routeInfo={routeInfo}
-              placeCardOpen={placeCardOpen}
-              onPlaceCardClose={() => setPlaceCardOpen(false)}
-              zoomFocusOnActive={mapZoomFocus}
-              aiBusy={loading}
-              onExpand={mapExpanded ? undefined : () => { setMapExpanded(true); setMapVisible(true); setChatSnap('collapsed') }}
-              onCollapse={mapExpanded ? () => { setMapExpanded(false); setChatSnap('half') } : undefined}
-              onPlaceFullDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
-              onPlaceSave={handleSavePlace}
-              onPlaceRoute={handleRouteFromMe}
-              onNavigatePlace={navigateToPlace}
-              activePlace={activePlace}
-              chatPlaces={chatResultPlaces}
-              savedPlaceIds={savedPlaceIds}
-              communityPins={communityPins}
-              communityFriends={communityFriends}
-              communityLayerOn={communityLayerOn}
-              onToggleCommunityLayer={showCommunity ? handleToggleCommunityLayer : undefined}
-              onOpenProfile={handleOpenProfile}
-              communityFocus={communityFocus}
-              onPlaceShare={handlePlaceShare}
-            />
-            {/* Status banners pinned near the top — clear of the bottom sheet */}
-            <div className="pointer-events-none absolute inset-x-3 top-16 z-[65] flex flex-col items-center gap-2">
-              {pinsMismatch && (
-                <div className="pointer-events-auto max-w-md rounded-xl border border-gold/40 bg-surface/95 px-4 py-2 text-[13px] text-text backdrop-blur-md">
-                  Pins look far from your GPS. Ask MapForAll to search again in your city.
-                </div>
-              )}
-              {routeActive && routeError && (
-                <div className="pointer-events-auto max-w-md rounded-xl border border-red-500/40 bg-surface/95 px-4 py-2 text-[13px] text-text2 backdrop-blur-md">
-                  {routeError}
-                </div>
-              )}
-              {routeFromUser && locationPending && (
-                <div className="pointer-events-auto rounded-full border border-border bg-surface/95 px-4 py-2 text-[13px] text-text2 backdrop-blur-md">
-                  Getting your location…
-                </div>
-              )}
-            </div>
-            {/* Result / itinerary card strip — only while the sheet is a peek */}
-            {chatSnap === 'collapsed' && !itineraryStops && places.length > 0 && (
-              <div className="absolute inset-x-0 z-[55]" style={{ bottom: SHEET_PEEK_PX }}>
-                <PlaceCardStrip
-                  places={places}
-                  activeIndex={activeStop}
-                  activePlaceId={activePlace?.place_id}
-                  onSelect={handleMarkerClick}
-                  onShowDetails={(place) => {
+              onRouteInfo={setRouteInfo}
+              onSelect={handleMarkerClick}
+              onDetails={(place) => {
                 if (activePlaceRef.current?.place_id !== place.place_id) rememberActiveRef.current(place)
-                else setPlaceCardOpen(true)
                 setDetailsExpandedPref(true)
                 setDetailsPlace(place)
               }}
-                  onRouteFromMe={handleRouteFromMe}
-                  onFocusPlace={focusPlaceOnMap}
-                  leftOffset={0}
-                />
-              </div>
-            )}
-            {chatSnap === 'collapsed' && itineraryStops && itineraryStops.length > 0 && (
-              <div className="absolute inset-x-0 z-[55]" style={{ bottom: SHEET_PEEK_PX }}>
-                <PlaceCardStrip
-                  places={itineraryStops.map((s) => ({ ...s, personalization_score: 0, categories: [] })) as Place[]}
-                  activeIndex={activeStop}
-                  activePlaceId={activePlace?.place_id}
-                  onSelect={handleMarkerClick}
-                  onShowDetails={(stop) => {
-                if (activePlaceRef.current?.place_id !== stop.place_id) rememberActiveRef.current(stop)
-                else setPlaceCardOpen(true)
-                setDetailsExpandedPref(true)
-                setDetailsPlace(stop)
-              }}
-                  onRouteFromMe={handleRouteFromMe}
-                  onFocusPlace={focusPlaceOnMap}
-                  leftOffset={0}
-                />
-              </div>
-            )}
+              onRoute={(index) => { void handleRouteFromMe(index) }}
+              onRequestLocation={handleUseMyLocation}
+              locationPending={locationPending}
+              onClose={closeMapSheet}
+              notices={
+                <>
+                  {pinsMismatch && (
+                    <div className="ios-glass-strong pointer-events-auto max-w-md rounded-2xl px-4 py-2 text-[13px] text-[var(--ios-label)]">
+                      Les repères semblent loin de ta position. Demande à MapForAll de chercher dans ta ville.
+                    </div>
+                  )}
+                  {routeActive && routeError && (
+                    <div className="ios-glass-strong pointer-events-auto max-w-md rounded-2xl px-4 py-2 text-[13px] text-[var(--ios-red)]">{routeError}</div>
+                  )}
+                </>
+              }
+            />
           </div>
-          <MobileChatSheet
-            snap={chatSnap}
-            onSnapChange={setChatSnap}
-            peek={
-              <button
-                type="button"
-                onClick={() => setChatSnap('half')}
-                className="min-h-[44px] w-full px-5 pb-3 text-left"
-              >
-                <p className="text-[11px] font-medium uppercase tracking-wider text-[#F56A00] dark:text-[#FF8C2F]">
-                  MapForAll
-                </p>
-                <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-[var(--text-secondary)]">
-                  {loading
-                    ? 'Working on it…'
-                    : lastAssistant?.content || 'Ask me about food, sights, or your matchday plan.'}
-                </p>
-              </button>
-            }
-          >
-            {chatPanel}
-          </MobileChatSheet>
-          {placeCardOpen && selectedPlace && chatSnap === 'collapsed' && activeStop != null && (
-            <div className="fixed inset-x-0 z-[125] px-3" style={{ bottom: SHEET_PEEK_PX + 8 }}>
-              <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_-8px_30px_rgba(0,0,0,0.18)]">
-                <PlaceInfoCard
-                  place={selectedPlace}
-                  index={activeStop}
-                  onClose={() => setPlaceCardOpen(false)}
-                  onRoute={(index) => { void handleRouteFromMe(index) }}
-                  onDetails={(place) => { setDetailsExpandedPref(true); setDetailsPlace(place); setPlaceCardOpen(true) }}
-                />
-              </div>
-            </div>
-          )}
-        </>
+        </div>
       )}
 
       {/* In-app place details */}
@@ -2560,10 +2216,10 @@ export default function LandingPage() {
           fallbackPlace={detailsPlace}
           userLocation={userLocation}
           onClose={() => setDetailsPlace(null)}
-          onViewInApp={focusPlaceOnMap}
+          onViewInApp={(place) => { focusPlaceOnMap(place); setMapSheetOpen(true) }}
           onShare={() => setShareTarget(detailsPlace)}
-          onWalk={() => { setRouteMode('WALK'); rememberActiveRef.current(detailsPlace) }}
-          onDrive={() => { setRouteMode('DRIVE'); rememberActiveRef.current(detailsPlace) }}
+          onWalk={() => { setRouteMode('WALK'); rememberActiveRef.current(detailsPlace); setMapSheetOpen(true) }}
+          onDrive={() => { setRouteMode('DRIVE'); rememberActiveRef.current(detailsPlace); setMapSheetOpen(true) }}
           onSave={() => handleSavePlace(detailsPlace)}
           saved={savedPlaceIds.has(detailsPlace.place_id)}
           distance={routeInfo?.destinationName === detailsPlace.name ? routeInfo.distance : undefined}

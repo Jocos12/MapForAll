@@ -172,7 +172,7 @@ Map_Me/
 
 ## Prerequisites
 
-- **Node.js** 18+ and npm
+- **Node.js** 20+ and npm
 - **Python 3.12** (official CPython — MSYS2/MinGW Python lacks `pydantic-core` wheels)
 - **MongoDB Atlas** cluster + connection string
 - **Google Cloud project** with these APIs enabled:
@@ -185,7 +185,14 @@ Map_Me/
 
 ## Local development
 
-Three processes, each in its own terminal. Start them in order.
+> **macOS / Linux — quickest way:** `./setup.sh` once, fill in `agents/.env` and
+> `client/.env.local`, then `./start-all.sh` (and `./stop-all.sh`). Full guide,
+> troubleshooting and the list of recent changes: **[SETUP_AND_CHANGES.md](./SETUP_AND_CHANGES.md)**.
+>
+> ⚠️ Always run the MongoDB MCP server **pinned to `@1.14.0`**. Versions 2.x/3.x
+> require a `connectionId` on every tool call and every database request fails.
+
+Manual setup (any OS, including Windows): three processes, each in its own terminal. Start them in order.
 
 ```
 :3100  MongoDB MCP server  →  :8000  ADK agents  →  :3000  Next.js client
@@ -195,10 +202,10 @@ Three processes, each in its own terminal. Start them in order.
 
 ```bash
 # macOS / Linux
-MDB_MCP_CONNECTION_STRING="<Atlas URI>" npx mongodb-mcp-server --transport http --httpPort=3100
+MDB_MCP_CONNECTION_STRING="<Atlas URI>" npx -y mongodb-mcp-server@1.14.0 --transport http --httpPort=3100
 
 # Windows PowerShell
-$env:MDB_MCP_CONNECTION_STRING="<Atlas URI>"; npx mongodb-mcp-server --transport http --httpPort=3100
+$env:MDB_MCP_CONNECTION_STRING="<Atlas URI>"; npx -y mongodb-mcp-server@1.14.0 --transport http --httpPort=3100
 ```
 
 **Terminal 2 — ADK agents:**

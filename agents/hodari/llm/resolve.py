@@ -104,7 +104,7 @@ def _wrap_gemini_primary(model_name: str):
 
     from .retry import MAX_RETRIES, RequestBudget, log_failure_once, retryable_status, status_of
 
-    fallback_name = _env("GEMINI_FALLBACK_MODEL") or "gemini-2.0-flash"
+    fallback_name = _env("GEMINI_FALLBACK_MODEL") or "gemini-3.6-flash"
     inner = LLMRegistry.new_llm(model_name)
     fallback = LLMRegistry.new_llm(fallback_name) if fallback_name and fallback_name != model_name else None
 
@@ -171,7 +171,7 @@ def resolve_agent_model():
     """Gemini with at most two retries, then one lighter model. No second retry loop."""
     primary_name = _env("GEMINI_MODEL") or "gemini-3.5-flash"
     region = _env("GOOGLE_CLOUD_LOCATION") or "global"
-    fallback_name = _env("GEMINI_FALLBACK_MODEL") or "gemini-2.0-flash"
+    fallback_name = _env("GEMINI_FALLBACK_MODEL") or "gemini-3.6-flash"
     logger.info(
         "[llm] quota/health model=%s region=%s fallback=%s",
         primary_name,
@@ -225,7 +225,7 @@ async def call_llm_with_fallback(
     # 1) Gemini Developer API key (optional) — skip if in cooldown
     gemini_key = _env("GEMINI_API_KEY")
     if gemini_key and not gemini_in_cooldown():
-        model = _env("GEMINI_FALLBACK_MODEL") or "gemini-2.0-flash"
+        model = _env("GEMINI_FALLBACK_MODEL") or "gemini-3.6-flash"
         try:
             url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"

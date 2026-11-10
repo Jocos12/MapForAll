@@ -298,7 +298,11 @@ export async function rememberSession(token: string): Promise<void> {
 
 export const SESSION_COOKIE_OPTS = {
   httpOnly: true as const,
-  secure: process.env.NODE_ENV === 'production' || process.env.PUBLIC_BASE_URL?.startsWith('https://') ? true : false,
+  // Plain-http localhost (local production build) can't keep Secure cookies in Safari,
+  // which made every sign-in code look "expired". Real deployments use https and stay Secure.
+  secure: process.env.PUBLIC_BASE_URL?.startsWith('http://localhost')
+    ? false
+    : process.env.NODE_ENV === 'production' || process.env.PUBLIC_BASE_URL?.startsWith('https://') ? true : false,
   sameSite: 'lax' as const,
   path: '/',
   maxAge: SESSION_IDLE_SEC,

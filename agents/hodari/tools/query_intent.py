@@ -396,7 +396,7 @@ def relevance_score(place: dict[str, Any], intent: SearchIntent, vector_score: f
     if vector_score is not None and vector_score >= MIN_VECTOR_SCORE:
         return float(vector_score)
     source = str(place.get("source") or "")
-    if source in {"places_api", "maps", "google", "google_maps"}:
+    if source in {"places_api", "maps", "google", "google_maps", "openstreetmap"}:
         type_blob = _fold(
             " ".join(
                 [

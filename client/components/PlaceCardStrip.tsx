@@ -34,7 +34,7 @@ export function PlaceCardStrip({ places, activeIndex, onSelect, onShowDetails, o
   return (
     <div
       data-map-pad="bottom"
-      className="absolute bottom-0 right-0 z-[25] border-t border-border bg-surface/95 px-4 py-3 backdrop-blur-md"
+      className="ios-glass-bar absolute bottom-0 right-0 z-[25] rounded-t-[26px] border-t border-[var(--ios-separator)] px-4 pb-4 pt-3"
       style={{ left: leftOffset }}
     >
       <div className="mb-2.5">

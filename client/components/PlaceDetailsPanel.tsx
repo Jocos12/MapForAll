@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bookmark, Car, ChevronLeft, ChevronRight, Clock, Copy, Footprints, HeartHandshake, MapPin, Share2, Star, Tag, Users } from 'lucide-react'
+import { Bookmark, Car, Check, ChevronLeft, ChevronRight, Clock, Copy, Footprints, Globe, HeartHandshake, Map as MapIcon, MapPin, Navigation, Phone, Share2, Star, Tag, Users, X } from 'lucide-react'
 import { MapsChooser } from '@/components/MapsChooser'
 import { AccessConfirm } from '@/components/AccessConfirm'
 import { PlaceBadges } from '@/components/PlaceBadges'
@@ -203,21 +203,18 @@ function WeekSchedule({ week }: { week: WeekHours }) {
   const { t } = useI18n()
   const today = todayIndex()
   return (
-    <div className="mt-3 flex items-start gap-1.5 text-[12.5px] text-[var(--text-secondary)]">
-      <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />
-      <dl className="grid flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-        {WEEK_DAYS.map((day, i) => {
-          const slot = week[day]
-          const current = i === today
-          return (
-            <div key={day} className={`contents ${current ? 'font-semibold text-[var(--text-primary)]' : ''}`}>
-              <dt>{t(`biz.days.${day}`)}</dt>
-              <dd className="tabular-nums">{slot.closed ? t('biz.hours.closed') : `${slot.open} – ${slot.close}`}</dd>
-            </div>
-          )
-        })}
-      </dl>
-    </div>
+    <dl className="grid grid-cols-[1fr_auto] gap-y-1 text-[14px]">
+      {WEEK_DAYS.map((day, i) => {
+        const slot = week[day]
+        const current = i === today
+        return (
+          <div key={day} className={`contents ${current ? 'font-semibold text-[var(--ios-label)]' : 'text-[var(--ios-label-2)]'}`}>
+            <dt>{t(`biz.days.${day}`)}</dt>
+            <dd className={`text-right tabular-nums ${slot.closed ? 'text-[var(--ios-red)]' : ''}`}>{slot.closed ? t('biz.hours.closed') : `${slot.open} – ${slot.close}`}</dd>
+          </div>
+        )
+      })}
+    </dl>
   )
 }
 
@@ -414,213 +411,307 @@ export function PlaceDetailsPanel({
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(displayName || fallbackName)}&query_place_id=${encodeURIComponent(placeId)}`
     : (data?.mapsUri || fallbackMapsUrl || null)
 
+  const tr = (fr: string, en: string) => (lang === 'en' ? en : fr)
+  const photoCount = data?.photoUrls?.length ?? 0
+  const photoIndex = Math.min(gallery, Math.max(0, photoCount - 1))
+  const statusLine = [
+    categoryText,
+    data?.rating != null ? `★ ${data.rating.toFixed(1)}${data.ratingCount != null ? ` (${data.ratingCount.toLocaleString()})` : ''}` : null,
+    data?.priceSymbol || null,
+  ].filter(Boolean) as string[]
+  const fromYou = distance || duration ? [distance, duration].filter(Boolean).join(' · ') : walking
+
+  const actionBtn =
+    'flex h-[62px] flex-1 flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ios-fill)] text-[12px] font-semibold tracking-[-0.01em] text-[var(--ios-tint)] transition-transform active:scale-95'
+  const rowLabel = 'text-[13px] font-semibold uppercase tracking-[0.02em] text-[var(--ios-label-2)]'
+
   return (
-    <div className="pointer-events-none fixed inset-0 z-[250]" role="dialog" aria-modal="false" aria-label={displayName}>
+    <div className="ios-chat pointer-events-none fixed inset-0 z-[250] ![background:transparent]" role="dialog" aria-modal="false" aria-label={displayName}>
       <div
         data-map-pad="details"
-        className="pointer-events-auto absolute inset-x-0 bottom-0 flex max-h-[min(78dvh,720px)] w-full animate-fade-up flex-col overflow-hidden rounded-t-2xl border border-[var(--border)] bg-[var(--bg-header)] shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:h-full md:max-h-none md:w-[min(400px,92vw)] md:animate-slide-right md:rounded-none md:rounded-l-2xl"
+        className="ios-glass-strong ios-sheet-in pointer-events-auto absolute inset-x-0 bottom-0 flex max-h-[min(86dvh,760px)] w-full flex-col overflow-hidden rounded-t-[30px] md:inset-y-3 md:left-auto md:right-3 md:max-h-none md:w-[400px] md:rounded-[30px]"
       >
-        <div className="relative h-44 shrink-0 overflow-hidden bg-gray-100 dark:bg-white/5" style={{ aspectRatio: '16 / 9', maxHeight: 176 }}>
-          <div className="absolute inset-0 bg-gray-200 dark:bg-white/10" aria-hidden />
-          {data?.photoUrls?.length ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={data.photoUrls[Math.min(gallery, data.photoUrls.length - 1)]}
-                alt={displayName}
-                className="absolute inset-0 h-full w-full cursor-zoom-in object-cover"
-                loading="lazy"
-                onClick={() => openLightbox(Math.min(gallery, data.photoUrls.length - 1))}
-                onError={placePhotoError}
-                onTouchStart={(event) => { (event.currentTarget as HTMLImageElement).dataset.x = String(event.changedTouches[0]?.clientX ?? 0) }}
-                onTouchEnd={(event) => {
-                  const start = Number((event.currentTarget as HTMLImageElement).dataset.x || 0)
-                  const delta = (event.changedTouches[0]?.clientX ?? 0) - start
-                  if (Math.abs(delta) < 40 || data.photoUrls.length < 2) return
-                  setGallery((index) => (delta < 0 ? (index + 1) % data.photoUrls.length : (index + data.photoUrls.length - 1) % data.photoUrls.length))
-                }}
-              />
-              {data.photoUrls.length > 1 && (
-                <>
-                  <button type="button" aria-label={t('placeCard.photo')} onClick={() => setGallery((index) => (index + data.photoUrls.length - 1) % data.photoUrls.length)} className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white">
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button type="button" aria-label={t('placeCard.photo')} onClick={() => setGallery((index) => (index + 1) % data.photoUrls.length)} className="absolute right-12 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white">
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </>
-              )}
-            </>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="font-display text-4xl font-semibold text-amber-600/60">
-                {displayName.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}
-              </span>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={hide}
-            title={t('placeCard.hideDetails')}
-            aria-label={t('placeCard.close')}
-            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70"
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg>
-          </button>
+        {/* Grabber (phones) */}
+        <div className="flex justify-center pb-1 pt-2 md:hidden" aria-hidden>
+          <span className="h-[5px] w-9 rounded-full bg-[var(--ios-label-3)]" />
         </div>
 
-        {data && data.photoUrls.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto border-b border-[var(--border)] px-3 py-2 scrollbar-hide">
-            {data.photoUrls.map((url, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={`${url}-${i}`}
-                src={url}
-                alt={`${displayName} photo ${i + 1}`}
-                className="h-14 w-20 shrink-0 cursor-zoom-in rounded-lg object-cover transition-opacity hover:opacity-80"
-                loading="lazy"
-                onError={placePhotoError}
-                onClick={() => openLightbox(i)}
-              />
-            ))}
+        <div className="chat-scroll min-h-0 flex-1 overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
+          {/* Hero photo */}
+          <div className="relative mx-3 mt-1 overflow-hidden rounded-[22px] bg-[var(--ios-fill)] md:mt-3" style={{ height: 210 }}>
+            {photoCount ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={data!.photoUrls[photoIndex]}
+                  alt={displayName}
+                  className="absolute inset-0 h-full w-full cursor-zoom-in object-cover"
+                  loading="lazy"
+                  onClick={() => openLightbox(photoIndex)}
+                  onError={placePhotoError}
+                  onTouchStart={(event) => { (event.currentTarget as HTMLImageElement).dataset.x = String(event.changedTouches[0]?.clientX ?? 0) }}
+                  onTouchEnd={(event) => {
+                    const start = Number((event.currentTarget as HTMLImageElement).dataset.x || 0)
+                    const delta = (event.changedTouches[0]?.clientX ?? 0) - start
+                    if (Math.abs(delta) < 40 || photoCount < 2) return
+                    setGallery((index) => (delta < 0 ? (index + 1) % photoCount : (index + photoCount - 1) % photoCount))
+                  }}
+                />
+                {photoCount > 1 && (
+                  <>
+                    <button type="button" aria-label={t('placeCard.photo')} onClick={() => setGallery((index) => (index + photoCount - 1) % photoCount)} className="absolute left-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-md">
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button type="button" aria-label={t('placeCard.photo')} onClick={() => setGallery((index) => (index + 1) % photoCount)} className="absolute right-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-md">
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <div className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5">
+                      {data!.photoUrls.map((_, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          aria-label={`Photo ${i + 1}`}
+                          onClick={() => setGallery(i)}
+                          className={`h-1.5 rounded-full transition-all ${i === photoIndex ? 'w-5 bg-white' : 'w-1.5 bg-white/60'}`}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#FFB070] to-[#FF6A00]">
+                <span className="text-[44px] font-bold tracking-[-0.03em] text-white/90">
+                  {displayName.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}
+                </span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={hide}
+              title={t('placeCard.hideDetails')}
+              aria-label={t('placeCard.close')}
+              className="ios-glass-strong absolute right-2.5 top-2.5 flex h-9 w-9 items-center justify-center rounded-full text-[var(--ios-label)] active:scale-90"
+            >
+              <X className="h-[18px] w-[18px]" strokeWidth={2.4} />
+            </button>
           </div>
-        )}
 
-        <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
-          <h2 className="font-display text-xl font-semibold leading-tight text-[var(--text-primary)]">
-            {displayName}
-          </h2>
-
-          <button type="button" onClick={hide} className="mt-2 text-[12px] font-medium text-[#E8672A]">
-            {t('placeCard.hideDetails')}
-          </button>
-          {status === 'loading' && (
-            <div className="mt-4 space-y-2" aria-busy="true">
-              <p className="text-[12px] text-[var(--text-secondary)]">{t('placeCard.loading')}</p>
-              <div className="h-3 w-2/3 animate-pulse rounded bg-black/10 motion-reduce:animate-none dark:bg-white/10" />
-              <div className="h-3 w-full animate-pulse rounded bg-black/10 motion-reduce:animate-none dark:bg-white/10" />
-              <div className="h-3 w-5/6 animate-pulse rounded bg-black/10 motion-reduce:animate-none dark:bg-white/10" />
+          {photoCount > 1 && (
+            <div className="scrollbar-hide mt-2 flex gap-2 overflow-x-auto px-3">
+              {data!.photoUrls.map((url, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={`${url}-${i}`}
+                  src={url}
+                  alt={`${displayName} photo ${i + 1}`}
+                  className={`h-14 w-14 shrink-0 cursor-pointer rounded-[12px] object-cover transition-opacity ${i === photoIndex ? 'ring-2 ring-[var(--ios-tint)]' : 'opacity-70 hover:opacity-100'}`}
+                  loading="lazy"
+                  onError={placePhotoError}
+                  onClick={() => setGallery(i)}
+                  onDoubleClick={() => openLightbox(i)}
+                />
+              ))}
             </div>
           )}
-          {status === 'error' && (
-            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
-              <p className="text-[13px] text-[var(--text-primary)]">{loadError || t('placeCard.detailsError')}</p>
-              <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-2 rounded-full bg-[#F56A00] px-3 py-1 text-[12px] font-medium text-white">
-                {t('placeCard.retry')}
-              </button>
+
+          <div className="px-5 pt-4">
+            {/* Title */}
+            <h2 className="text-[26px] font-bold leading-[31px] tracking-[-0.025em] text-[var(--ios-label)]">{displayName}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[15px] text-[var(--ios-label-2)]">
+              {statusLine.map((part, i) => (
+                <span key={part} className="capitalize">{i > 0 && <span className="mr-1.5">·</span>}{part}</span>
+              ))}
+              {data?.isOpen != null && (
+                <span className={`font-semibold ${data.isOpen ? 'text-[var(--ios-green)]' : 'text-[var(--ios-red)]'}`}>
+                  {statusLine.length > 0 && <span className="mr-1.5 font-normal text-[var(--ios-label-2)]">·</span>}
+                  {data.isOpen ? t('placeCard.open') : t('placeCard.closed')}
+                </span>
+              )}
             </div>
-          )}
+
+            {status === 'loading' && (
+              <div className="mt-5 space-y-2.5" aria-busy="true">
+                <div className="h-[62px] animate-pulse rounded-[16px] bg-[var(--ios-fill)] motion-reduce:animate-none" />
+                <div className="h-24 animate-pulse rounded-[18px] bg-[var(--ios-fill)] motion-reduce:animate-none" />
+                <p className="text-center text-[13px] text-[var(--ios-label-2)]">{t('placeCard.loading')}</p>
+              </div>
+            )}
+            {status === 'error' && (
+              <div className="mt-4 rounded-[18px] bg-[color-mix(in_srgb,var(--ios-red)_12%,transparent)] p-3.5">
+                <p className="text-[14px] text-[var(--ios-label)]">{loadError || t('placeCard.detailsError')}</p>
+                <button type="button" onClick={() => setAttempt((n) => n + 1)} className="ios-btn-tint mt-2.5 h-8 px-4 text-[13px]">
+                  {t('placeCard.retry')}
+                </button>
+              </div>
+            )}
+          </div>
 
           {data && status !== 'loading' && (
-            <>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {categoryText && (
-                  <span className="text-[12px] text-[var(--text-secondary)]">{categoryText}</span>
+            <div className="px-4">
+              {/* Primary actions — iOS Maps style */}
+              <div className="mt-4 flex gap-2">
+                {onWalk && (
+                  <button type="button" onClick={() => { trackPlace(placeId, 'route', 'map'); onWalk?.() }} className={`${actionBtn} !bg-[var(--ios-tint)] !text-white`}>
+                    <Footprints className="h-5 w-5" aria-hidden />
+                    {tr('À pied', 'Walk')}
+                  </button>
                 )}
-                {place && <PlaceBadges place={place} />}
-                {place && <AccessConfirm place={place} />}
-                <StillThere placeId={placeId} />
+                {onDrive && (
+                  <button type="button" onClick={() => { trackPlace(placeId, 'route', 'map'); onDrive?.() }} className={actionBtn}>
+                    <Car className="h-5 w-5" aria-hidden />
+                    {tr('Voiture', 'Drive')}
+                  </button>
+                )}
+                {onSave && (
+                  <button type="button" onClick={() => { trackPlace(placeId, 'save', 'map'); onSave?.() }} className={actionBtn} aria-pressed={saved}>
+                    <Bookmark className={`h-5 w-5 ${saved ? 'fill-current' : ''}`} aria-hidden />
+                    {saved ? tr('Enregistré', 'Saved') : tr('Enregistrer', 'Save')}
+                  </button>
+                )}
+                {onShare ? (
+                  <button type="button" onClick={onShare} className={actionBtn}>
+                    <Share2 className="h-5 w-5" aria-hidden />
+                    {t('placeCard.share')}
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => { onRate?.(); setRateOpen(true) }} className={actionBtn}>
+                    <Star className="h-5 w-5" aria-hidden />
+                    {tr('Noter', 'Rate')}
+                  </button>
+                )}
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                {data.rating != null && (
-                  <span className="inline-flex items-center gap-1 text-[13px] text-[var(--text-primary)]">
-                    <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-                    {data.rating.toFixed(1)}
-                    {data.ratingCount != null && (
-                      <span className="text-[var(--text-secondary)]">({data.ratingCount.toLocaleString()})</span>
-                    )}
-                  </span>
-                )}
-                {data.priceSymbol && (
-                  <span className="text-[13px] font-medium text-green-600">{t('placeCard.price')} {data.priceSymbol}</span>
-                )}
-                {data.isOpen != null && (
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                      data.isOpen
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                    }`}
-                  >
-                    {data.isOpen ? t('placeCard.open') : t('placeCard.closed')}
-                  </span>
-                )}
-              </div>
+              {rateOpen && (
+                <div className="relative">
+                  <PlaceRatePopover placeId={placeId} onSaved={() => setRateOpen(false)} onClose={() => setRateOpen(false)} />
+                </div>
+              )}
+
+              {/* Badges & community checks */}
+              {place && (
+                <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                  <PlaceBadges place={place} />
+                </div>
+              )}
 
               {data.summary && (
-                <p className="mt-3 text-[13.5px] leading-relaxed text-[var(--text-secondary)]">{data.summary}</p>
+                <p className="mt-4 px-1 text-[16px] leading-[23px] tracking-[-0.015em] text-[var(--ios-label)]">{data.summary}</p>
               )}
 
-              {place?.hours_week ? (
-                <WeekSchedule week={place.hours_week} />
-              ) : data.weekday && data.weekday.length > 0 ? (
-                <div className="mt-3">
-                  <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
-                    <Clock className="h-3.5 w-3.5 text-amber-600" aria-hidden />
-                    {t('placeCard.hours')}
-                  </p>
-                  <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px] text-[var(--text-secondary)]">
-                    {data.weekday.map((row) => (
-                      <div key={row.label} className={`contents ${row.today ? 'font-semibold text-[var(--text-primary)]' : ''}`}>
-                        <dt>{row.label}</dt>
-                        <dd>{row.hours}</dd>
+              {/* Info group */}
+              {(place?.hours_week || data.weekday?.length || data.todayHours || data.address || fromYou || data.phone || data.website) && (
+                <section className="mt-5">
+                  <p className={`mb-1.5 px-1 ${rowLabel}`}>{tr('Informations', 'Details')}</p>
+                  <div className="divide-y divide-[var(--ios-separator)] overflow-hidden rounded-[18px] bg-[var(--ios-bg-elevated)]">
+                    {(place?.hours_week || data.weekday?.length || data.todayHours) && (
+                      <div className="px-4 py-3">
+                        <p className="mb-1.5 flex items-center gap-2 text-[15px] font-semibold text-[var(--ios-label)]">
+                          <Clock className="h-4 w-4 text-[var(--ios-tint)]" aria-hidden />
+                          {t('placeCard.hours')}
+                        </p>
+                        {place?.hours_week ? (
+                          <WeekSchedule week={place.hours_week} />
+                        ) : data.weekday?.length ? (
+                          <dl className="grid grid-cols-[1fr_auto] gap-y-1 text-[14px]">
+                            {data.weekday.map((row) => (
+                              <div key={row.label} className={`contents ${row.today ? 'font-semibold text-[var(--ios-label)]' : 'text-[var(--ios-label-2)]'}`}>
+                                <dt className="capitalize">{row.label}</dt>
+                                <dd className="text-right tabular-nums">{row.hours}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        ) : (
+                          <p className="text-[14px] text-[var(--ios-label-2)]">{data.todayHours}</p>
+                        )}
                       </div>
-                    ))}
-                  </dl>
-                </div>
-              ) : data.todayHours ? (
-                <p className="mt-3 flex items-start gap-1.5 text-[12.5px] text-[var(--text-secondary)]">
-                  <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                  {data.todayHours}
-                </p>
-              ) : null}
-
-              {data.access && (
-                <ul className="mt-3 space-y-1 text-[12.5px] text-[var(--text-secondary)]">
-                  {([
-                    ['entrance', t('placeCard.stepFree')],
-                    ['toilet', t('placeCard.accessibleToilet')],
-                    ['parking', t('placeCard.accessibleParking')],
-                    ['seating', t('placeCard.accessibleSeating')],
-                  ] as const).map(([key, label]) => {
-                    const value = data.access?.[key]
-                    const state = value === true ? t('placeCard.yes') : value === false ? t('placeCard.no') : t('placeCard.notConfirmed')
-                    return <li key={key}>{label}: {state}</li>
-                  })}
-                </ul>
+                    )}
+                    {data.address && (
+                      <div className="flex items-start gap-3 px-4 py-3">
+                        <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ios-tint)]" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] text-[var(--ios-label-2)]">{tr('Adresse', 'Address')}</p>
+                          <p className="text-[15px] leading-[20px] text-[var(--ios-label)]">{data.address}</p>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label={t('placeCard.copyAddress')}
+                          title={copied ? t('placeCard.copied') : t('placeCard.copyAddress')}
+                          className="ios-icon-btn h-8 w-8 shrink-0 text-[var(--ios-tint)]"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(data.address || '').then(() => {
+                              setCopied(true)
+                              window.setTimeout(() => setCopied(false), 1600)
+                            })
+                          }}
+                        >
+                          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    )}
+                    {fromYou && (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <Navigation className="h-4 w-4 shrink-0 text-[var(--ios-blue)]" aria-hidden />
+                        <p className="flex-1 text-[15px] text-[var(--ios-label)]">{t('placeCard.fromYou')}</p>
+                        <p className="text-[15px] text-[var(--ios-label-2)]">{fromYou}</p>
+                      </div>
+                    )}
+                    {data.phone && (
+                      <a href={`tel:${data.phone}`} onClick={() => trackPlace(placeId, 'call', 'map')} className="flex items-center gap-3 px-4 py-3">
+                        <Phone className="h-4 w-4 shrink-0 text-[var(--ios-green)]" aria-hidden />
+                        <span className="flex-1 text-[15px] text-[var(--ios-label)]">{t('placeCard.phone')}</span>
+                        <span className="text-[15px] text-[var(--ios-tint)]">{data.phone}</span>
+                      </a>
+                    )}
+                    {data.website && (
+                      <a href={data.website} target="_blank" rel="noopener noreferrer" onClick={() => trackPlace(placeId, 'website', 'map')} className="flex items-center gap-3 px-4 py-3">
+                        <Globe className="h-4 w-4 shrink-0 text-[var(--ios-blue)]" aria-hidden />
+                        <span className="flex-1 text-[15px] text-[var(--ios-label)]">{t('placeCard.website')}</span>
+                        <ChevronRight className="h-4 w-4 text-[var(--ios-label-3)]" />
+                      </a>
+                    )}
+                  </div>
+                </section>
               )}
 
-              {data.address && (
-                <div className="mt-3 flex items-start gap-2 text-[var(--text-secondary)]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                  <span className="flex-1 text-[13px] leading-relaxed">{data.address}</span>
-                  <button
-                    type="button"
-                    className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-[#E8672A]"
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(data.address || '').then(() => {
-                        setCopied(true)
-                        window.setTimeout(() => setCopied(false), 1600)
-                      })
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" aria-hidden />
-                    {copied ? t('placeCard.copied') : t('placeCard.copyAddress')}
-                  </button>
-                </div>
-              )}
-
-              {(distance || duration || walking) && (
-                <p className="mt-2 text-[12.5px] text-[var(--text-secondary)]">
-                  {t('placeCard.fromYou')}
-                  {distance || duration ? ` · ${[distance, duration].filter(Boolean).join(' · ')}` : walking ? ` · ${walking}` : ''}
-                </p>
+              {/* Accessibility group */}
+              {(data.access || place) && (
+                <section className="mt-5">
+                  <p className={`mb-1.5 px-1 ${rowLabel}`}>{tr('Accessibilité', 'Accessibility')}</p>
+                  <div className="overflow-hidden rounded-[18px] bg-[var(--ios-bg-elevated)]">
+                    {data.access && (
+                      <ul className="divide-y divide-[var(--ios-separator)]">
+                        {([
+                          ['entrance', t('placeCard.stepFree')],
+                          ['toilet', t('placeCard.accessibleToilet')],
+                          ['parking', t('placeCard.accessibleParking')],
+                          ['seating', t('placeCard.accessibleSeating')],
+                        ] as const).map(([key, label]) => {
+                          const value = data.access?.[key]
+                          return (
+                            <li key={key} className="flex items-center gap-3 px-4 py-2.5 text-[15px]">
+                              <span className="flex-1 text-[var(--ios-label)]">{label}</span>
+                              <span className={value === true ? 'font-semibold text-[var(--ios-green)]' : value === false ? 'text-[var(--ios-red)]' : 'text-[var(--ios-label-3)]'}>
+                                {value === true ? t('placeCard.yes') : value === false ? t('placeCard.no') : t('placeCard.notConfirmed')}
+                              </span>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                    {place && (
+                      <div className={`flex flex-wrap items-center gap-2 px-4 py-3 ${data.access ? 'border-t border-[var(--ios-separator)]' : ''}`}>
+                        <AccessConfirm place={place} />
+                        <StillThere placeId={placeId} />
+                      </div>
+                    )}
+                  </div>
+                </section>
               )}
 
               {!!place?.tags?.length && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                <div className="mt-4 flex flex-wrap gap-1.5 px-1">
                   {place.tags.map((tag) => (
-                    <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+                    <span key={tag} className="ios-pill h-7 !px-2.5 text-[13px]">
                       <Tag className="h-3 w-3" />
                       {tag}
                     </span>
@@ -629,127 +720,68 @@ export function PlaceDetailsPanel({
               )}
 
               {recommendedBy >= 2 && (
-                <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#2E8B57]/10 px-2.5 py-1 text-[12px] font-medium text-[#1F6B43] dark:text-[#3DDC97]">
+                <p className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--ios-green)_14%,transparent)] px-3 py-1.5 text-[13px] font-semibold text-[var(--ios-green)]">
                   <Users className="h-3.5 w-3.5" aria-hidden />
                   {t('placeCard.recommendedBy').replace('{n}', String(recommendedBy))}
                 </p>
               )}
               {recommended.length > 0 && (
-                <div className="mt-3 rounded-xl bg-[#FDE8DC]/60 px-3 py-2.5 dark:bg-[#E8672A]/10">
-                  <p className="flex items-center gap-1.5 text-[12px] font-medium text-[#E8672A]">
+                <section className="mt-5">
+                  <p className={`mb-1.5 flex items-center gap-1.5 px-1 ${rowLabel}`}>
                     <HeartHandshake className="h-3.5 w-3.5" />
                     {t('placeCard.recommends')}
                   </p>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {recommended.map((row) =>
                       row.place_id.startsWith('user_') ? (
-                        <a
-                          key={row.place_id}
-                          href={`/p/${encodeURIComponent(row.place_id)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-full bg-white px-2.5 py-1 text-[12px] text-[var(--text-primary)] transition-colors hover:text-[#E8672A] dark:bg-white/10"
-                        >
+                        <a key={row.place_id} href={`/p/${encodeURIComponent(row.place_id)}`} target="_blank" rel="noopener noreferrer" className="ios-pill h-8 text-[13px]">
                           {row.name}
                         </a>
                       ) : (
-                        <span key={row.place_id} className="rounded-full bg-white px-2.5 py-1 text-[12px] text-[var(--text-primary)] dark:bg-white/10">
-                          {row.name}
-                        </span>
+                        <span key={row.place_id} className="ios-pill h-8 text-[13px]">{row.name}</span>
                       ),
                     )}
                   </div>
-                </div>
+                </section>
               )}
 
               {!data.summary && !data.address && data.rating == null && !data.todayHours && !place?.hours_week && !categoryText && !place?.local_business && !place?.accessible && !walking && (
-                <p className="mt-3 text-[13px] text-[var(--text-secondary)]">
-                  {t('placeCard.noDetails')}
-                </p>
+                <p className="mt-4 px-1 text-[14px] text-[var(--ios-label-2)]">{t('placeCard.noDetails')}</p>
               )}
 
-              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-4">
-                {onWalk && (
-                  <button type="button" onClick={() => { trackPlace(placeId, 'route', 'map'); onWalk?.() }} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#F56A00] px-3 text-[12px] font-medium text-white">
-                    <Footprints className="h-3.5 w-3.5" aria-hidden />
-                    {t('placeCard.walkRoute')}
-                  </button>
-                )}
-                {onDrive && (
-                  <button type="button" onClick={() => { trackPlace(placeId, 'route', 'map'); onDrive?.() }} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-primary)]">
-                    <Car className="h-3.5 w-3.5" aria-hidden />
-                    {t('placeCard.driveRoute')}
-                  </button>
-                )}
-                {mapsLink && (
-                  <a href={mapsLink} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center rounded-full border border-[var(--border)] px-3 text-[12px] text-[var(--text-secondary)]">
-                    {t('placeCard.openMaps')}
-                  </a>
-                )}
-                {onSave && (
-                  <button type="button" onClick={() => { trackPlace(placeId, 'save', 'map'); onSave?.() }} className={`inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[12px] ${saved ? 'text-[#F56A00]' : 'text-[var(--text-secondary)]'}`}>
-                    <Bookmark className={`h-3.5 w-3.5 ${saved ? 'fill-[#F56A00]' : ''}`} aria-hidden />
-                    {saved ? t('placeCard.saved') : t('placeCard.save')}
-                  </button>
-                )}
-                <button type="button" onClick={() => { onRate?.(); setRateOpen(true) }} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[12px] text-amber-700">
-                  <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" aria-hidden />
-                  {t('placeCard.rate')}
-                </button>
-                {rateOpen && (
-                  <PlaceRatePopover
-                    placeId={placeId}
-                    onSaved={() => setRateOpen(false)}
-                    onClose={() => setRateOpen(false)}
+              {/* Secondary actions */}
+              <div className="mt-5 overflow-hidden rounded-[18px] bg-[var(--ios-bg-elevated)]">
+                <div className="flex items-center gap-3 px-4 py-2.5">
+                  <MapIcon className="h-4 w-4 shrink-0 text-[var(--ios-tint)]" aria-hidden />
+                  <span className="flex-1 text-[15px] text-[var(--ios-label)]">{tr('Ouvrir dans une app de cartes', 'Open in a maps app')}</span>
+                  <MapsChooser
+                    place={{
+                      ...(place ?? fallbackPlace ?? {
+                        place_id: placeId,
+                        name: data?.name || fallbackName,
+                        address: '',
+                        coordinates: { lat: 0, lng: 0 },
+                        categories: [],
+                      }),
+                      maps_url: place?.maps_url || fallbackPlace?.maps_url || fallbackMapsUrl || mapsLink || undefined,
+                    }}
+                    onViewInApp={onViewInApp}
+                    buttonClassName="ios-pill h-8 !px-3 text-[13px]"
                   />
-                )}
-                <MapsChooser
-                  place={{
-                    ...(place ?? fallbackPlace ?? {
-                      place_id: placeId,
-                      name: data?.name || fallbackName,
-                      address: '',
-                      coordinates: { lat: 0, lng: 0 },
-                      categories: [],
-                    }),
-                    maps_url: place?.maps_url || fallbackPlace?.maps_url || fallbackMapsUrl || mapsLink || undefined,
-                  }}
-                  onViewInApp={onViewInApp}
-                  buttonClassName="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#F56A00] px-4 text-[12px] font-medium text-white transition-colors hover:bg-[#e05a1a]"
-                />
+                </div>
                 {onShare && (
-                  <button
-                    type="button"
-                    onClick={onShare}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-4 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-amber-400 hover:text-amber-600"
-                  >
-                    <Share2 className="h-3.5 w-3.5" />
-                    {t('placeCard.share')}
+                  <button type="button" onClick={() => { onRate?.(); setRateOpen(true) }} className="flex w-full items-center gap-3 border-t border-[var(--ios-separator)] px-4 py-3 text-left">
+                    <Star className="h-4 w-4 shrink-0 fill-[#FF9F0A] text-[#FF9F0A]" aria-hidden />
+                    <span className="flex-1 text-[15px] text-[var(--ios-label)]">{t('placeCard.rate')}</span>
+                    <ChevronRight className="h-4 w-4 text-[var(--ios-label-3)]" />
                   </button>
-                )}
-                {data.website && (
-                  <a
-                    href={data.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => trackPlace(placeId, 'website', 'map')}
-                    className="rounded-full border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-amber-400 hover:text-amber-600"
-                  >
-                    {t('placeCard.website')}
-                  </a>
-                )}
-                {data.phone && (
-                  <a
-                    href={`tel:${data.phone}`}
-                    onClick={() => trackPlace(placeId, 'call', 'map')}
-                    className="rounded-full border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-amber-400 hover:text-amber-600"
-                  >
-                    {t('placeCard.phone')} {data.phone}
-                  </a>
                 )}
               </div>
-              <PlaceReviews placeId={placeId} />
-            </>
+
+              <div className="mt-5 px-1">
+                <PlaceReviews placeId={placeId} />
+              </div>
+            </div>
           )}
         </div>
       </div>

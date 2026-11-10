@@ -72,6 +72,15 @@ async def route_before_model(ctx: Any, llm_request: Any) -> LlmResponse | None:
     if intent != LIST_DISCOVERY:
         return None
 
+    # The cards were already sent in this turn. ADK re-runs the model after a
+    # function_response part; answer with a final empty text so the turn ends
+    # instead of looping on the cache (seen as hundreds of "cache hit" lines).
+    invocation = getattr(ctx, "invocation_id", None)
+    if invocation and state.get("fast_path_invocation") == invocation:
+        return LlmResponse(content=types.Content(role="model", parts=[types.Part(text="")]))
+    if invocation:
+        state["fast_path_invocation"] = invocation
+
     state["intent_type"] = LIST_DISCOVERY
     key = _cache_key(request)
     cache = get_response_cache()

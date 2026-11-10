@@ -19,76 +19,66 @@ interface Props {
 }
 
 /**
- * Persistent place cards rendered INSIDE the chat, directly under the AI reply.
- * Unlike the map's bottom strip these don't slide in or live on the right — they
- * stay attached to the message so the images are always there on scroll-back.
+ * Place results inside the chat, under the AI reply: an iOS-style horizontal
+ * card carousel (swipe on phones, scroll on desktop). Cards stay attached to
+ * the message so photos are still there on scroll-back.
  */
 export function InlinePlaceGallery({ places, onDetails, onFocusPlace, activePlaceId }: Props) {
   const unique = dedupePlaces(places)
   if (!unique.length) return null
 
-  // Past ~4 cards (2 rows on desktop) cap the height and let it scroll
-  // vertically (up/down) so the gallery doesn't push the chat down endlessly.
-  const scrolls = unique.length > 4
-
   return (
-    <div
-      className={`mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 ${
-        scrolls ? 'chat-scroll max-h-[58vh] overflow-y-auto pr-1' : ''
-      }`}
-    >
-      {unique.map((place) => {
+    <div className="ios-carousel mt-3" role="list">
+      {unique.map((place, index) => {
+        const active = !!activePlaceId && place.place_id === activePlaceId
+        const meta = [place.categories?.[0]?.replace(/_/g, ' '), place.distance].filter(Boolean).join(' · ')
         return (
-          <div
+          <article
             key={placeKey(place)}
-            className={`group overflow-hidden rounded-xl border bg-[var(--bg-header)] shadow-[0_1px_8px_rgba(0,0,0,0.05)] transition-colors hover:border-[#F56A00]/40 dark:shadow-[0_1px_8px_rgba(0,0,0,0.4)] ${
-              activePlaceId && place.place_id === activePlaceId ? 'border-[#F56A00] ring-2 ring-[#F56A00]/50' : 'border-[var(--border)]'
-            }`}
+            role="listitem"
+            data-active={active}
+            className="ios-card flex w-[248px] flex-col sm:w-[264px]"
           >
-            <div className="block w-full text-left">
-              <GalleryPhoto place={place} />
-              <button
-                type="button"
-                onClick={() => onDetails?.(place)}
-                className="block w-full px-3 pb-1.5 pt-2 text-left"
-                title="See photos & details"
-              >
-                <p className="line-clamp-1 text-[13px] font-medium leading-snug text-[var(--text-primary)]">
-                  {place.name}
+            <GalleryPhoto place={place} index={index} />
+            <button
+              type="button"
+              onClick={() => onDetails?.(place)}
+              className="flex flex-1 flex-col px-3.5 pb-2 pt-3 text-left"
+              title={place.name}
+            >
+              <p className="line-clamp-1 text-[16px] font-semibold leading-[21px] tracking-[-0.02em] text-[var(--ios-label)]">
+                {place.name}
+              </p>
+              {meta && (
+                <p className="mt-0.5 line-clamp-1 text-[13px] capitalize text-[var(--ios-label-2)]">{meta}</p>
+              )}
+              {(place.description || place.summary || place.why) && (
+                <p className="mt-1 line-clamp-2 text-[13px] leading-[18px] text-[var(--ios-label-2)]">
+                  {(place.description || place.summary || place.why || '').slice(0, 140)}
                 </p>
-                {(place.description || place.summary) && (
-                  <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--text-secondary)]">
-                    {(place.description || place.summary || '').slice(0, 90)}
-                  </p>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                {place.rating != null && (
+                  <span className="flex items-center gap-1 text-[12px] font-medium text-[var(--ios-label)]">
+                    <Star className="h-3 w-3 fill-[#FF9F0A] text-[#FF9F0A]" />
+                    {place.rating.toFixed(1)}
+                  </span>
                 )}
-                {(place.distance || place.why) && (
-                  <p className="mt-0.5 line-clamp-2 text-[10px] text-[var(--text-secondary)]">
-                    {[place.distance, place.why].filter(Boolean).join(' · ')}
-                  </p>
+                {place.open_now != null && (
+                  <span className={`text-[12px] font-semibold ${place.open_now ? 'text-[var(--ios-green)]' : 'text-[var(--ios-red)]'}`}>
+                    {place.open_now ? 'Ouvert' : 'Fermé'}
+                  </span>
                 )}
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  {place.rating != null && (
-                    <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
-                      <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
-                      {place.rating.toFixed(1)}
-                    </span>
-                  )}
-                  <PlaceBadges place={place} />
-                  {place.open_now != null && (
-                    <span className={`text-[10px] font-semibold ${place.open_now ? 'text-[#1FA463]' : 'text-[#E5484D]'}`}>
-                      {place.open_now ? 'Open now' : 'Closed'}
-                    </span>
-                  )}
-                </div>
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-0.5">
+                <PlaceBadges place={place} />
+              </div>
+            </button>
+            <div className="mt-auto flex items-center gap-2 px-3 pb-3 pt-1">
               <button
                 type="button"
                 onClick={() => onDetails?.(place)}
-                className="rounded-full bg-[#F56A00]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#F56A00] transition-colors hover:bg-[#F56A00]/20 dark:bg-[#F56A00]/15 dark:text-[#FF8C2F]"
+                className="ios-btn-tint h-8 flex-1 px-3 text-[13px]"
               >
-                Details
+                Détails
               </button>
               {place.website && (
                 <a
@@ -96,58 +86,57 @@ export function InlinePlaceGallery({ places, onDetails, onFocusPlace, activePlac
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
+                  aria-label="Site web"
+                  className="ios-icon-btn h-8 w-8 bg-[var(--ios-fill)]"
                 >
-                  <Globe className="h-3 w-3" />
-                  Site
+                  <Globe className="h-4 w-4" />
                 </a>
               )}
               <MapsChooser
                 place={place}
                 onViewInApp={onFocusPlace}
-                buttonClassName="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)] transition-colors hover:border-[#F56A00]/40 hover:text-[#F56A00]"
+                buttonClassName="ios-pill h-8 px-3 text-[13px]"
               />
             </div>
-          </div>
+          </article>
         )
       })}
     </div>
   )
 }
 
-function GalleryPhoto({ place }: { place: Place }) {
-  const urls = placePhotoList(place, 440).slice(0, 4)
+function GalleryPhoto({ place, index }: { place: Place; index: number }) {
+  const urls = placePhotoList(place, 600).slice(0, 4)
   const [open, setOpen] = useState<number | null>(null)
-
-  if (urls.length === 0) {
-    return (
-      <div className="relative h-28 w-full overflow-hidden bg-black/5 dark:bg-white/5">
-        <PlaceImage place={place} width={440} height={240} className="h-full w-full object-cover" />
-      </div>
-    )
-  }
 
   return (
     <>
-      <div className={`grid gap-0.5 ${urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
-        {urls.map((url, i) => (
-          <button
-            key={`${url}-${i}`}
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              setOpen(i)
-            }}
-            className="relative h-24 overflow-hidden bg-black/5 dark:bg-white/5"
-            aria-label={`${place.name} photo ${i + 1}`}
-          >
-            <PlaceImage place={place} src={url} width={440} height={240} className="h-full w-full" />
-          </button>
-        ))}
-      </div>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          if (urls.length) setOpen(0)
+        }}
+        className="relative block h-[148px] w-full overflow-hidden bg-[var(--ios-fill)]"
+        aria-label={`${place.name} photos`}
+      >
+        {urls.length ? (
+          <PlaceImage place={place} src={urls[0]} width={600} height={340} className="h-full w-full object-cover" />
+        ) : (
+          <PlaceImage place={place} width={600} height={340} className="h-full w-full object-cover" />
+        )}
+        <span className="ios-glass-strong absolute left-2.5 top-2.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[12px] font-bold text-[var(--ios-label)]">
+          {index + 1}
+        </span>
+        {urls.length > 1 && (
+          <span className="absolute bottom-2.5 right-2.5 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-md">
+            1/{urls.length}
+          </span>
+        )}
+      </button>
       {open != null && (
         <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-6"
+          className="ios-fade-in fixed inset-0 z-[400] flex items-center justify-center bg-black/85 p-6 backdrop-blur-xl"
           onClick={() => setOpen(null)}
           role="dialog"
           aria-label={place.name}
@@ -155,13 +144,28 @@ function GalleryPhoto({ place }: { place: Place }) {
           <button
             type="button"
             onClick={() => setOpen(null)}
-            aria-label="Close"
-            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white"
+            aria-label="Fermer"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-md"
           >
             <X className="h-5 w-5" />
           </button>
-          <div className="max-h-[80vh] max-w-full" onClick={(event) => event.stopPropagation()}>
-            <PlaceImage place={place} src={urls[open]} width={1200} height={800} className="max-h-[80vh] w-full" />
+          <div className="flex max-h-[80vh] max-w-full flex-col items-center gap-4" onClick={(event) => event.stopPropagation()}>
+            <PlaceImage place={place} src={urls[open]} width={1200} height={800} className="max-h-[70vh] w-full rounded-2xl" />
+            {urls.length > 1 && (
+              <div className="flex gap-2">
+                {urls.map((url, i) => (
+                  <button
+                    key={`${url}-${i}`}
+                    type="button"
+                    onClick={() => setOpen(i)}
+                    className={`h-14 w-14 overflow-hidden rounded-xl ring-2 ${i === open ? 'ring-white' : 'ring-transparent opacity-60'}`}
+                    aria-label={`Photo ${i + 1}`}
+                  >
+                    <PlaceImage place={place} src={url} width={160} height={160} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
