@@ -1,382 +1,223 @@
-# Hodari
+# ConnectRwanda AI
 
-[![CI](https://github.com/ganji759/Map_Me/actions/workflows/ci.yml/badge.svg)](https://github.com/ganji759/Map_Me/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+**Smart, accessible mobility for Rwanda.** ConnectRwanda AI is one platform that helps people move around Kigali and the country: live bus information, door-to-door directions, voice assistance in three languages, an accessibility map, and a free showcase for local businesses.
 
-**A multi-agent tourist AI assistant for the 2026 FIFA World Cup.** Hodari helps football fans plan grounded, personalized itineraries through a conversational interface backed by real Google Maps data, and renders them on an interactive map with walking/driving routes.
-
-> Hodari (Swahili: *brave / capable*) turns a fan's free time between matches into a concrete plan: where to eat, what to see, and how to get there.
-
-**Live:** https://hodari-frontend-377773225771.us-central1.run.app
+> Available in **Kinyarwanda, Français and English**, with dark and light themes.
 
 ---
 
-## Features
+## Table of contents
 
-- **Conversational planning** — describe time, budget, dietary needs, and location in plain language; Hodari streams back a structured plan.
-- **Grounded place search** — places come from Google Maps (Maps Grounding Lite MCP): real names, coordinates, ratings, hours, and photos — no hallucinations.
-- **Feasible itineraries** — stops are ordered to minimize travel, with real distances, durations, and polylines drawn on the map.
-- **Place photos** — restaurant and venue photos are auto-fetched from the Places API and shown directly on the sidebar cards.
-- **Save places** — bookmark any place from the sidebar; saved items persist per user. Access them at `/saved`.
-- **Visit planner** — on the Saved page, set a visit date and note for each saved place. A calendar view groups planned visits by month.
-- **Personalization** — the Explorer agent calls `find_similar_preferences` (Atlas Vector Search on the `interactions` collection) to score candidates against the user's past liked/visited/disliked places before returning results.
-- **Interactive map** — custom pins, route polylines, expandable place cards, full-screen mode, and per-place follow-up chat.
-- **Push-to-talk voice** — server-side Gemini STT + TTS via Vertex AI.
-- **Chat history with delete** — conversations are saved in the browser; hover any entry in the sidebar to delete it.
-- **Email login** — no passwords; enter a name + email to create or resume a fan profile stored in MongoDB.
-- **Dark / light themes** and a **PWA** install target.
+1. [The problem](#the-problem)
+2. [Our solution](#our-solution)
+3. [Who it is for](#who-it-is-for)
+4. [Main features](#main-features)
+5. [How it works](#how-it-works)
+6. [Tech stack](#tech-stack)
+7. [Run it on your computer](#run-it-on-your-computer)
+8. [Configuration](#configuration)
+9. [User roles and admin account](#user-roles-and-admin-account)
+10. [Project structure](#project-structure)
+11. [Project status and roadmap](#project-status-and-roadmap)
+12. [Contributing, security and license](#contributing-security-and-license)
 
 ---
 
-## Architecture
+## The problem
 
-Four agents run **in a single process** (in-process routing, not four services). The Orchestrator owns session state and streams the final answer to the client over SSE.
+Moving around Kigali is harder than it should be:
+
+- **Passengers wait without information.** Nobody knows when the next bus arrives or which line to take.
+- **People with disabilities lack reliable information** about step-free routes, accessible entrances and venues.
+- **Not everyone can read a screen easily.** Many people prefer to speak and listen, in Kinyarwanda.
+- **Small local businesses are invisible online** next to larger brands.
+
+## Our solution
+
+ConnectRwanda AI brings everything together in **one app**:
+
+| | What it does |
+|---|---|
+| **Smart navigation** | Door-to-door routes on foot and by bus, drawn on a real map of Kigali. |
+| **Public transport guidance** | Live bus positions and arrival times at each stop. |
+| **Voice assistance** | Ask by voice and hear the answer, in Kinyarwanda, French or English. |
+| **Accessible mapping** | Step-free routes and venues, confirmed by the community. |
+| **Local businesses** | Free listings managed by the owners, ranked fairly. |
+
+## Who it is for
+
+- **Passengers and residents** who travel every day.
+- **People with disabilities and older people** who need accessible information.
+- **Visitors and tourists** discovering Kigali.
+- **Local businesses** that want to be found.
+- **Transport operators** who want a real-time view of their fleet and to inform passengers.
+
+## Main features
+
+- **Landing page** with an animated film, the Rwanda flag and a live map of Kigali.
+- **AI chat assistant** that understands plain language ("How do I get to Kimironko market?") and answers with places and routes on the map.
+- **Interactive map** (Leaflet + OpenStreetMap) with bus lines, routes and accessibility markers.
+- **Voice**: push-to-talk speech to text and text to speech.
+- **Secure accounts**: sign in with email + password and a 6-digit code sent by email, plus a full password reset.
+- **Saved places and visit planner.**
+- **Community**: share accessibility information and reviews.
+- **Business space**: owners create and manage their listing (validated by an admin before it appears).
+- **Admin dashboard**: users, business validation, statistics and reports.
+- **Three languages** and **dark / light mode** everywhere.
+- **Installable as an app** on a phone (PWA).
+
+## How it works
 
 ```mermaid
-flowchart TD
-    C["Next.js client<br/>(chat · map · cards · voice · saved)"] -- "HTTPS + SSE" --> O
-
-    subgraph ADK["ADK agent runtime (single Cloud Run service)"]
-        O["Orchestrator<br/>loads profile · saves preferences · streams reply"]
-        O --> P["Planner<br/>request → Plan<br/>(goal · constraints · subtasks)"]
-        P --> E["Explorer / Map<br/>Plan → CandidateSet<br/>(5–10 grounded + ranked places)"]
-        E --> I["Itinerary<br/>Plan + CandidateSet → Itinerary<br/>(ordered stops · routes · voice summary)"]
-    end
-
-    subgraph Mongo["MongoDB Atlas (MCP)"]
-        U[("users")]
-        PL[("places<br/>+ 768-dim embeddings")]
-        IX[("interactions<br/>+ 768-dim embeddings")]
-    end
-
-    subgraph VTX["Vertex AI"]
-        EM["text-embedding-004<br/>(768 dim, cosine)"]
-        LLM["Gemini 3.5 Flash<br/>(global endpoint)"]
-    end
-
-    O -- "load profile / save preference" --> U
-    E -- "find_places_by_vector<br/>(places vector search)" --> PL
-    E -- "find_similar_preferences<br/>(interactions vector search)" --> IX
-    E -- "embed query" --> EM
-    IX -- "embed interactions" --> EM
-    E -- "search_places (live fallback)" --> G["Google Maps<br/>Grounding Lite MCP"]
-    I -- "compute_routes<br/>lookup_weather" --> G
-    O & P & E & I -- "Gemini 3.5 Flash" --> LLM
+flowchart LR
+    U["Person<br/>(phone or computer)"] --> W["Website<br/>Next.js"]
+    W --> A["AI agents<br/>Python (Google ADK)"]
+    W --> DB[("Database<br/>MongoDB")]
+    A --> DB
+    A --> AI["AI model<br/>Gemini"]
+    A --> M["Maps and routes<br/>OpenStreetMap / Google Maps"]
+    B["Buses<br/>GPS / IoT tracker (planned)"] -.-> DB
 ```
 
-Inter-agent contracts are Pydantic schemas with one retry on malformed output: `Plan` → `CandidateSet` → `Itinerary`.
+1. **The person asks** a question by text or voice on the website.
+2. **The AI agents** understand the request, find places and compute routes:
+   - **Planner** turns the request into a clear plan;
+   - **Explorer** finds the right places (database + maps);
+   - **Itinerary** orders the stops and computes the routes.
+3. **The answer** is shown on the map, read aloud, and can be followed step by step.
 
-**Explorer tool execution (parallel):**
-1. `find_similar_preferences` — vector search on `interactions` → past liked/disliked categories as personalization signal
-2. `find_places_by_vector` — vector search on seeded `places` → pre-embedded venue candidates
-3. `search_places` (Maps MCP) — live Google Maps call for new or niche venues
-Results are merged, deduplicated, and re-ranked using `personalization_score` (0.0–1.0).
-
-| Agent | Input | Output | Tools |
-|---|---|---|---|
-| **Orchestrator** | user message + profile + history | streamed reply | `load_user_profile`, `save_preference` (MongoDB MCP) |
-| **Planner** | request + profile | `Plan` | none — pure reasoning |
-| **Explorer / Map** | `Plan` | `CandidateSet` | `find_similar_preferences` (interactions vector search), `find_places_by_vector` (places vector search), `search_places` (Maps MCP — live fallback) |
-| **Itinerary** | `Plan` + `CandidateSet` | `Itinerary` | `compute_routes`, `lookup_weather` (Maps MCP) |
-
-### Production deployment
-
-Both services run on **Google Cloud Run** with a **MongoDB MCP sidecar** container:
-
-```
-hodari-agent (port 8080)        ← Python ADK server
-  + mongodb-mcp sidecar (3100)  ← MCP bridge to Atlas
-
-hodari-frontend (port 3000)     ← Next.js standalone
-  + mongodb-mcp sidecar (3100)  ← MCP bridge (for login route)
-```
-
-Cloud Run service definitions live in `infra/`. Secrets (MongoDB URI, Maps API key) are stored in Google Secret Manager and injected at runtime.
-
----
+Maps work **without any paid key**: search, photos and directions fall back to free OpenStreetMap services. A Google Maps key with billing adds Google data on top.
 
 ## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 15 (App Router), React 18, Tailwind CSS, PWA |
-| Map UI | Google Maps JavaScript API + Places API |
-| Agent runtime | Python 3.12, Google Agent Development Kit (ADK) |
-| LLM | Gemini 3.5 Flash via Vertex AI (`global` endpoint) |
-| Embeddings | Vertex AI `text-embedding-004` (768 dimensions) |
-| Database | MongoDB Atlas — `users`, `places`, `interactions` |
-| Vector search | Atlas Vector Search (HNSW, cosine) — two indexes: `places_embedding` + `interactions_embedding` |
-| DB access | MongoDB MCP Server (sidecar, no direct driver) |
-| Maps grounding | Maps Grounding Lite MCP (`https://mapstools.googleapis.com/mcp`) |
-| Schemas | Pydantic |
-| Secrets | Google Secret Manager |
-| Deployment | Google Cloud Run (agent + frontend) |
+| Website | Next.js 15, React 18, Tailwind CSS, Framer Motion |
+| Map | Leaflet, OpenStreetMap, OSRM routing (Google Maps optional) |
+| AI agents | Python 3.12, Google Agent Development Kit (ADK) |
+| AI model | Gemini (Vertex AI or free AI Studio key) |
+| Database | MongoDB (local or Atlas), accessed through the MongoDB MCP server |
+| Email | Nodemailer (SMTP, e.g. a Gmail app password) |
+| Deployment | Docker, Google Cloud Run (see `infra/` and `deploy/`) |
 
----
+## Run it on your computer
 
-## Repository structure
-
-```
-Map_Me/
-├── agents/
-│   ├── hodari/
-│   │   ├── agent.py            # Orchestrator + SequentialAgent pipeline
-│   │   ├── sub_agents/         # planner.py · explorer.py · itinerary.py
-│   │   ├── tools/              # maps_mcp.py · mongo_tools.py · pipeline_tool.py
-│   │   └── schemas/            # contracts.py (Plan, CandidateSet, Itinerary)
-│   ├── Dockerfile
-│   ├── cloudbuild.yaml         # builds agent image via Cloud Build
-│   ├── requirements.txt
-│   └── .env.example
-├── client/
-│   ├── app/
-│   │   ├── page.tsx            # landing page
-│   │   ├── chat/page.tsx       # main chat + map interface
-│   │   ├── login/page.tsx      # email login
-│   │   ├── saved/page.tsx      # saved places + visit calendar
-│   │   └── api/                # chat · session · feedback · saved · place-photos · directions · voice
-│   ├── components/
-│   │   ├── ChatPanel.tsx       # chat, history sidebar, voice
-│   │   ├── LandingPage.tsx     # root layout + state management
-│   │   ├── MapView.tsx         # map with pins and route overlays
-│   │   ├── PlaceListPanel.tsx  # sidebar place cards with photos + save button
-│   │   ├── PlaceDetailsPanel.tsx
-│   │   ├── ModelSwitcher.tsx
-│   │   └── landing/            # landing page components
-│   ├── lib/                    # types.ts · stream.ts · mapActions.ts · voice.ts
-│   ├── Dockerfile
-│   └── cloudbuild.yaml         # builds frontend image via Cloud Build
-├── infra/
-│   ├── cloudrun-agent.example.yaml     # template: agent + MCP sidecar
-│   ├── cloudrun-frontend.example.yaml  # template: frontend + MCP sidecar
-│   ├── mongodb-mcp/Dockerfile          # pre-installs mongodb-mcp-server
-│   └── README.md                       # how to fill in the templates
-├── docs/
-│   ├── Hodari_System_Architecture.md   # the design reference
-│   ├── SECURITY_HARDENING.md           # deployment hardening checklist
-│   ├── BILLING.md                      # usage metering and Stripe credit packs
-│   ├── PERFORMANCE_OPTIMIZATION_PLAN.md
-│   ├── CAPABILITIES_ROADMAP.md
-│   ├── FEATURE_EXPANSION_ROADMAP.md
-│   └── UI_OVERHAUL_SPRINT.md
-├── .github/                    # CI, issue templates, pull request template
-├── CONTRIBUTING.md
-├── SECURITY.md
-├── CODE_OF_CONDUCT.md
-├── LICENSE
-└── CLAUDE.md
-```
-
----
-
-## Prerequisites
-
-- **Node.js** 20+ and npm
-- **Python 3.12** (official CPython — MSYS2/MinGW Python lacks `pydantic-core` wheels)
-- **MongoDB Atlas** cluster + connection string
-- **Google Cloud project** with these APIs enabled:
-  - Vertex AI API
-  - Maps Grounding Lite API
-  - Maps JavaScript API + Places API
-- **gcloud CLI** — `winget install Google.CloudSDK`
-
----
-
-## Local development
-
-> **macOS / Linux — quickest way:** `./setup.sh` once, fill in `agents/.env` and
-> `client/.env.local`, then `./start-all.sh` (and `./stop-all.sh`). Full guide,
-> troubleshooting and the list of recent changes: **[SETUP_AND_CHANGES.md](./SETUP_AND_CHANGES.md)**.
->
-> ⚠️ Always run the MongoDB MCP server **pinned to `@1.14.0`**. Versions 2.x/3.x
-> require a `connectionId` on every tool call and every database request fails.
-
-Manual setup (any OS, including Windows): three processes, each in its own terminal. Start them in order.
-
-```
-:3100  MongoDB MCP server  →  :8000  ADK agents  →  :3000  Next.js client
-```
-
-**Terminal 1 — MongoDB MCP server:**
+**You need:** Node.js 20+, Python 3.11 to 3.13, and a MongoDB database (local or Atlas). Works on macOS and Linux (see `SETUP_AND_CHANGES.md` for Windows).
 
 ```bash
-# macOS / Linux
-MDB_MCP_CONNECTION_STRING="<Atlas URI>" npx -y mongodb-mcp-server@1.14.0 --transport http --httpPort=3100
+# 1. Get the code
+git clone https://github.com/Jocos12/MapForAll.git
+cd MapForAll
+git checkout connectrwanda-ai
 
-# Windows PowerShell
-$env:MDB_MCP_CONNECTION_STRING="<Atlas URI>"; npx -y mongodb-mcp-server@1.14.0 --transport http --httpPort=3100
+# 2. Install everything (once)
+./setup.sh
+
+# 3. Fill in the two settings files it created (see "Configuration" below)
+#    agents/.env  and  client/.env.local
+
+# 4. Start
+./start-all.sh
 ```
 
-**Terminal 2 — ADK agents:**
+Then open **http://localhost:3000**.
 
-```bash
-cd agents
-
-# First-time: create venv
-py -3.12 -m venv .venv
-
-# Activate — Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-# Activate — macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-cp .env.example .env    # fill in values
-
-# Start (call the venv's adk directly on Windows to avoid PATH shadowing)
-.\.venv\Scripts\adk.exe api_server hodari
-# macOS / Linux
-adk api_server hodari
-```
-
-**Terminal 3 — Next.js client:**
-
-```bash
-cd client
-npm install
-cp .env.local.example .env.local   # fill in values
-npm run dev
-```
-
-Open **http://localhost:3000**. Verify with `curl http://localhost:8000/list-apps` → `["hodari"]`.
-
-### Known limitations (local dev on Windows)
-
-**Next.js dev server stuck after many hot reloads (error `-4094`).** When the repo
-sits on a secondary or external drive (here `J:`), Windows can briefly lock files
-in `client/.next` during a hot reload. The server log then shows
-`UNKNOWN: unknown error, open ... errno: -4094`, and pages either return HTTP 500 or
-render but never finish loading: grey placeholder cards that never fill in.
-The business dashboard shows *"Le chargement semble bloqué"* with a reload link
-after 8 seconds instead of staying grey. If reloading doesn't fix it, restart the
-dev server:
-
-```powershell
-# In the terminal running `npm run dev`: Ctrl+C, then
-cd client
-npm run dev
-# If port 3000 is still taken, stop whoever holds it first:
-Get-NetTCPConnection -LocalPort 3000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-```
-
-If it keeps happening, delete `client/.next` while the server is stopped, or move
-the repo to the system drive (`C:`). **Before a demo:** restart the dev server,
-open each page you'll show once to compile it, and avoid editing files while
-presenting.
-
-**MongoDB MCP server memory.** Every MCP session opens its own Atlas connection
-pool, and the MCP server never releases it. The Next.js server now reuses a single
-session per process (see `client/lib/mcp.ts`). Don't add routes that call
-`initialize` per request. If `npx mongodb-mcp-server` has been running for days
-and responses slow down, restart it. The Next.js server reconnects on its own.
-
-### Environment variables
-
-**`agents/.env`**
-
-| Variable | Value |
+| Command | What it does |
 |---|---|
-| `GOOGLE_GENAI_USE_VERTEXAI` | `TRUE` |
-| `GOOGLE_CLOUD_PROJECT` | your GCP project ID |
-| `GOOGLE_CLOUD_LOCATION` | `global` (Gemini 3.x is only served from the global Vertex endpoint) |
-| `GEMINI_MODEL` | `gemini-3.5-flash` |
-| `GOOGLE_MAPS_API_KEY` | backend key — enable Maps Grounding Lite API |
-| `MONGODB_URI` | Atlas connection string |
-| `MONGODB_DATABASE` | `hodari` |
-| `MONGODB_MCP_URL` | `http://localhost:3100/mcp` |
+| `./start-all.sh` | Starts the database connector, the AI agents and the website |
+| `./start-all.sh --build` | Same, but forces a fresh build of the website (use after big changes) |
+| `./stop-all.sh` | Stops everything |
 
-**`client/.env.local`**
+What runs on your computer:
 
-| Variable | Value |
+| Port | Service |
 |---|---|
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | frontend key — enable Maps JS API + Places API |
-| `GOOGLE_MAPS_SERVER_KEY` | server-side key for the Places photo proxy (can be the same key) |
-| `ADK_BASE_URL` | `http://localhost:8000` |
-| `ADK_APP_NAME` | `hodari` |
-| `MONGODB_MCP_URL` | `http://localhost:3100/mcp` |
-| `MONGODB_DATABASE` | `hodari` |
+| 3000 | Website |
+| 8000 | AI agents |
+| 3100 | Database connector (MongoDB MCP) |
+| 27017 | MongoDB (only if you use a local database) |
 
----
+Logs are saved in `.local-logs/`. More help and troubleshooting: **[SETUP_AND_CHANGES.md](./SETUP_AND_CHANGES.md)**.
 
-## Deployment (Google Cloud Run)
+## Configuration
 
-Both images are built via Cloud Build (no local Docker needed).
+Settings live in **`agents/.env`** and **`client/.env.local`**. They contain secrets, so they are **never committed** to GitHub. `./setup.sh` creates them from the `.example` files; ask the project owner for the real values.
+
+Minimum to run:
+
+| Setting | Meaning |
+|---|---|
+| `MONGODB_URI` | Address of your MongoDB database |
+| `MONGODB_DATABASE` | Database name (`hodari`) |
+| `MONGODB_MCP_URL` | `http://127.0.0.1:3100/mcp` |
+| `HODARI_SESSION_SECRET` | A long random string |
+| `PUBLIC_BASE_URL` | `http://localhost:3000` on your computer |
+| `SMTP_*` | Email account used to send the 6-digit codes |
+
+For the AI, choose one:
+
+- **Free:** run `./set-gemini-key.sh` and paste a key from https://aistudio.google.com/apikey.
+- **Google Cloud (Vertex AI):** set `GOOGLE_GENAI_USE_VERTEXAI=TRUE` and `GOOGLE_CLOUD_PROJECT`.
+
+Optional: `./set-maps-key.sh` adds a Google Maps key.
+
+## User roles and admin account
+
+| Role | Can do |
+|---|---|
+| `client` | Use the map, chat, voice, save places, contribute |
+| `business_owner` | Everything above + manage a business listing |
+| `moderator` | Review community content |
+| `admin` | Full dashboard: users, validations, statistics |
+
+Create your admin account:
 
 ```bash
-# Build frontend
-gcloud builds submit --config client/cloudbuild.yaml --project <PROJECT_ID> client/
-
-# Build agent
-gcloud builds submit --config agents/cloudbuild.yaml --project <PROJECT_ID> agents/
-
-# First time only: copy the templates and fill in your project id.
-#   cp infra/cloudrun-agent.example.yaml    infra/cloudrun-agent.yaml
-#   cp infra/cloudrun-frontend.example.yaml infra/cloudrun-frontend.yaml
-# Your real copies stay out of git. See infra/README.md.
-
-# After each build, pin the new digest in infra/cloudrun-*.yaml then:
-gcloud run services replace infra/cloudrun-frontend.yaml --region us-central1 --project <PROJECT_ID>
-gcloud run services replace infra/cloudrun-agent.yaml   --region us-central1 --project <PROJECT_ID>
-
-# Make the frontend public (first deploy only).
-# Do NOT make the agent public in production. See docs/SECURITY_HARDENING.md.
-gcloud run services add-iam-policy-binding hodari-frontend --member="allUsers" --role="roles/run.invoker" --region us-central1
-gcloud run services add-iam-policy-binding hodari-agent   --member="allUsers" --role="roles/run.invoker" --region us-central1
+# in client/.env.local add:
+#   ADMIN_EMAIL=you@example.com
+#   ADMIN_PASSWORD=<a long password>
+#   HODARI_ADMIN_EMAILS=you@example.com
+cd client && npm run create-admin
 ```
 
-**Secrets required in Secret Manager:** `MONGODB_URI`, `GOOGLE_MAPS_API_KEY`, `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
+Want demo data (demo users and places in Kigali)? Run `cd client && npm run seed:demo`.
 
----
+## Project structure
 
-## Build phasing
+```
+MapForAll/
+├── client/                 Website (Next.js)
+│   ├── app/                Pages and API routes (login, admin, business, chat, ...)
+│   ├── components/         Interface pieces (landing/ holds the ConnectRwanda AI landing and auth pages)
+│   ├── lib/                Accounts, email, codes, database access, design tokens
+│   └── locales/            Translations: rw.json, fr.json, en.json
+├── agents/                 AI agents (Python, Google ADK)
+│   └── hodari/             Orchestrator + Planner, Explorer, Itinerary agents and their tools
+├── infra/, deploy/         Cloud deployment files
+├── firmware/, hardware/    Bus tracker (GPS / IoT) work
+├── docs/                   Architecture and project documents
+├── setup.sh                One-time installation
+├── start-all.sh            Start everything
+└── stop-all.sh             Stop everything
+```
 
-- **MVP (current)** — all four agents (Orchestrator → Planner → Explorer → Itinerary) run in one process with in-process routing. The Explorer runs three tools in parallel: vector search on the seeded `places` collection, vector search on the user's `interactions` history for personalization, and a live `search_places` call via Maps MCP as a fallback. Embeddings are generated on demand via Vertex AI `text-embedding-004`.
-- **Phase 2** — per-agent Cloud Run services (independent scaling), expanded `places` seed coverage, `lookup_weather`-driven itinerary adjustments.
+> The repository is still named **MapForAll**, and some internal names use **Hodari** (the original project). The product is now **ConnectRwanda AI**.
 
-See [`Hodari_System_Architecture.md`](./Hodari_System_Architecture.md) for the full spec.
+## Project status and roadmap
 
----
+**Working today (prototype):** landing page, accounts with email codes and password reset, AI chat with places and routes, interactive map, voice, accessibility map, business listings, admin dashboard, three languages.
 
-## Out of scope (MVP)
+**Next steps:**
 
-Booking/payments, email notifications, calendar sync, OAuth, and multilingual support are intentionally deferred.
+- **0 to 3 months:** user tests, accessibility mapping, improve the prototype.
+- **3 to 6 months:** GPS / IoT pilot on one bus line with a transport operator.
+- **6 to 12 months:** mobile app, more bus lines, more cities in Rwanda.
 
----
+## Contributing, security and license
 
-## Contributing
+- How to contribute: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- Report a security issue: [SECURITY.md](./SECURITY.md)
+- License: [Apache 2.0](./LICENSE)
 
-Contributions are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) for the
-setup, the code style, and the pull request process. Everyone who takes part
-must follow the [Code of Conduct](./CODE_OF_CONDUCT.md).
-
-Good places to start:
-
-- Issues labelled `good first issue`.
-- Documentation fixes. These need no prior issue.
-- New Explorer tools. Add a tool to an existing agent. Do not add a fifth agent.
-
----
-
-## Security
-
-Do not report a security problem in a public issue. Read
-[SECURITY.md](./SECURITY.md) for the private reporting process.
-
-If you deploy your own instance, work through
-[docs/SECURITY_HARDENING.md](./docs/SECURITY_HARDENING.md) first. Hodari holds
-real user data and calls paid APIs.
-
----
-
-## License
-
-Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) and
-[NOTICE](./NOTICE).
-
-Hodari calls Google Maps Platform, Vertex AI, MongoDB Atlas, and Stripe. Each
-service has its own terms. This license grants you no right to use them. Bring
-your own keys and accept the terms of each provider.
-
-The name "Hodari" and the Hodari logo are not covered by the license. See
-Section 6 of the Apache License.
+**Team:** Mindset Alliance SARL · Project code A27
