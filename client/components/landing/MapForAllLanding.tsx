@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { motion, useMotionValueEvent, useScroll } from 'framer-motion'
-import { Accessibility, ArrowRight, Check, ChevronDown, ChevronRight, MapPin, Menu, Store, X } from 'lucide-react'
+import {
+  Accessibility, ArrowRight, BarChart3, Bus, Check, ChevronDown, ChevronRight, Clock, Cpu, Heart, MapPin, Menu, Mic,
+  Navigation, Radio, Satellite, Sparkles, Store, Timer, Users, X,
+} from 'lucide-react'
 import {
   LiveClock,
   ThemeToggle,
@@ -13,6 +16,7 @@ import {
 import ShowcaseMarquee from '@/components/landing/ShowcaseMarquee'
 import DistrictMap from '@/components/landing/DistrictMap'
 import HowItWorks from '@/components/landing/HowItWorks'
+import { ArrivalsBoard, BusLiveMap } from '@/components/landing/transit'
 import { Flag, LANG_NAMES } from '@/components/landing/flags'
 import { useTransitionLinks } from '@/components/landing/pageTransition'
 import {
@@ -45,6 +49,7 @@ import {
 import { useI18n, type Lang } from '@/components/I18nProvider'
 
 const LANGS: Lang[] = ['fr', 'en', 'rw']
+const BRAND = 'ConnectRwanda AI'
 
 /** Apple's easing, as a Tailwind arbitrary value for CSS transitions. */
 const EASE_CSS = 'ease-[cubic-bezier(0.28,0.11,0.32,1)]'
@@ -74,8 +79,8 @@ function scrollToHash(href: string) {
 function Mark({ size = 'md' }: { size?: 'md' | 'sm' }) {
   const box = size === 'sm' ? 'h-7 w-7 text-[10px]' : 'h-9 w-9 text-[11px]'
   return (
-    <span className={`flex items-center justify-center rounded-full bg-[#E8672A] font-bold tracking-tight text-white ${box}`}>
-      MF
+    <span className={`flex items-center justify-center rounded-full bg-gradient-to-br from-[#FF9A3D] to-[#E8672A] font-bold tracking-tight text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] ${box}`}>
+      CR
     </span>
   )
 }
@@ -279,20 +284,71 @@ function Landing() {
   }, [menuOpen])
 
   const ctaHref = signedIn ? '/chat' : '/login'
-  const goHow = (e: React.MouseEvent<HTMLAnchorElement>) => { if (scrollToHash('#how')) e.preventDefault() }
+  const goSolution = (e: React.MouseEvent<HTMLAnchorElement>) => { if (scrollToHash('#solution')) e.preventDefault() }
   const nav = [
-    { label: t('landing.nav.how'), href: '#how' },
-    { label: t('landing.nav.businesses'), href: '#businesses' },
+    { label: t('landing.nav.transit'), href: '#transit' },
+    { label: t('landing.nav.search'), href: '#search' },
     { label: t('landing.nav.access'), href: '#access' },
+    { label: t('landing.nav.businesses'), href: '#businesses' },
   ]
   const slides = [
+    { src: '/landing/kigali-city-real.jpg', tag: t('landing.cards.missionKicker'), title: t('landing.cards.missionTitle') },
     { src: '/landing/kigali-market-real.jpg', tag: t('landing.cards.localKicker'), title: t('landing.cards.localTitle') },
     { src: '/landing/kigali-stall-real.jpg', tag: t('landing.cards.tableKicker'), title: t('landing.cards.tableTitle') },
     { src: '/landing/kigali-street-real.jpg', tag: t('landing.cards.accessKicker'), title: t('landing.cards.accessTitle') },
-    { src: '/landing/kigali-city-real.jpg', tag: t('landing.cards.missionKicker'), title: t('landing.cards.missionTitle') },
     { src: '/landing/kigali-view-real.jpg', tag: t('landing.cards.sceneKicker'), title: t('landing.cards.sceneTitle') },
   ]
+  const problems = [
+    { Icon: MapPin, n: 1 },
+    { Icon: Clock, n: 2 },
+    { Icon: Store, n: 3 },
+    { Icon: Accessibility, n: 4 },
+  ]
+  const pillars = [
+    { Icon: Navigation, n: 1 },
+    { Icon: Bus, n: 2 },
+    { Icon: Mic, n: 3 },
+    { Icon: Accessibility, n: 4 },
+  ]
+  const tech = [
+    { Icon: Satellite, label: t('landing.solution.tech1') },
+    { Icon: Cpu, label: t('landing.solution.tech2') },
+    { Icon: Sparkles, label: t('landing.solution.tech3') },
+    { Icon: Users, label: t('landing.solution.tech4') },
+  ]
+  const factors = [
+    { Icon: Navigation, label: t('landing.bento.f1') },
+    { Icon: Accessibility, label: t('landing.bento.f2') },
+    { Icon: Store, label: t('landing.bento.f3') },
+    { Icon: Heart, label: t('landing.bento.f4') },
+  ]
+  const transitList = [1, 2, 3, 4].map((n) => t(`landing.transit.l${n}`))
   const accessList = [1, 2, 3, 4].map((n) => t(`landing.access2.l${n}`))
+  const ops = [
+    { Icon: Radio, n: 1 },
+    { Icon: Timer, n: 2 },
+    { Icon: BarChart3, n: 3 },
+  ]
+
+  const checkList = (items: string[], tone: 'green' | 'orange' = 'green') => (
+    <ul className="mt-7 flex flex-col gap-2.5">
+      {items.map((item, i) => (
+        <motion.li
+          key={item}
+          initial={{ opacity: 0, x: -16 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={{ amount: 0.8 }}
+          transition={{ duration: 0.6, delay: i * 0.1, ease: APPLE_EASE }}
+          className="flex items-center gap-3 text-[15px] font-medium text-[#1A1614] dark:text-gray-100"
+        >
+          <span aria-hidden className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white ${tone === 'green' ? 'bg-[#1F8A5B]' : 'bg-[#E8672A]'}`}>
+            <Check size={13} strokeWidth={3} />
+          </span>
+          {item}
+        </motion.li>
+      ))}
+    </ul>
+  )
 
   return (
     <ScrollRootProvider value={scrollRef}>
@@ -307,27 +363,20 @@ function Landing() {
         {t('landing.a11y.skip')}
       </a>
 
-      {/*
-        Transparent header: no fill at the top of the page. Once content
-        scrolls under it, it frosts with the page's own cream (not a new
-        color) so text stays legible. z-[1000] keeps every page layer —
-        Leaflet panes, map cards, transformed sections — underneath it.
-      */}
       <header
         className={`sticky top-0 z-[1000] w-full border-b transition-[background-color,border-color,backdrop-filter] duration-500 ${EASE_CSS} ${scrolled
           ? 'border-black/[0.06] bg-[#FBF3E7]/75 backdrop-blur-xl backdrop-saturate-150 dark:border-white/[0.06] dark:bg-[#12100E]/75'
           : 'border-transparent bg-transparent'}`}
       >
-        <nav aria-label="MapForAll" className="mx-auto flex h-[68px] w-full max-w-[1440px] items-center justify-between px-5 sm:px-8 lg:px-12">
+        <nav aria-label={BRAND} className="mx-auto flex h-[68px] w-full max-w-[1440px] items-center justify-between px-5 sm:px-8 lg:px-12">
           <div className="flex items-center gap-8 xl:gap-10">
             <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-full">
               <Mark />
               <span className="text-[15px] font-semibold tracking-[-0.015em] text-[#1A1614] dark:text-gray-100">
-                MapForAll
-                <span className="ml-2 hidden text-[11px] font-normal tracking-normal text-[#6E5B50] dark:text-gray-400 xl:inline">Ikarita ya Bose</span>
+                ConnectRwanda <span className="text-[#D4581F] dark:text-[#FF9A63]">AI</span>
               </span>
             </Link>
-            <div className="hidden items-center gap-6 lg:flex xl:gap-8">
+            <div className="hidden items-center gap-6 lg:flex xl:gap-7">
               {nav.map((l) => (
                 <Link
                   key={l.href}
@@ -347,7 +396,7 @@ function Landing() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#E8672A] opacity-60 motion-reduce:animate-none" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#E8672A]" />
               </span>
-              <span className="hidden xl:inline">{t('landing.nav.live')}</span>
+              <span className="hidden 2xl:inline">{t('landing.nav.live')}</span>
               <span className="font-medium text-[#1A1614] dark:text-gray-100">
                 <LiveClock timeZone="Africa/Kigali" bare />
               </span>
@@ -413,12 +462,7 @@ function Landing() {
 
       <main id="main" tabIndex={-1} className="outline-none">
         {/* ── Hero ─────────────────────────────────────────────────────── */}
-        {/* Pulled up under the transparent header so the glow runs behind it
-            instead of stopping at a hard line. */}
         <section id="top" ref={heroRef} className="relative -mt-[69px] overflow-hidden pb-16 pt-[69px] sm:pb-20">
-          {/* Downtown Kigali at dusk, drifting slowly. A cream veil keeps the
-              headline area almost solid and lets the city show through
-              behind the phone; the bottom fades into the ticker. */}
           <div aria-hidden className="pointer-events-none absolute inset-0">
             <img
               src="/landing/kigali-city-real.jpg"
@@ -433,29 +477,29 @@ function Landing() {
             <div className="mf-glow-drift h-full w-full rounded-full bg-[radial-gradient(closest-side,rgba(232,103,42,0.22),transparent)] blur-2xl dark:bg-[radial-gradient(closest-side,rgba(232,103,42,0.18),transparent)]" />
           </div>
 
-          <HeroLayer target={heroRef} variant="copy" className="relative z-10 mx-auto max-w-[860px] px-5 pt-8 text-center sm:px-8 sm:pt-12">
+          <HeroLayer target={heroRef} variant="copy" className="relative z-10 mx-auto max-w-[900px] px-5 pt-8 text-center sm:px-8 sm:pt-12">
             <IntroIn delay={0}>
               <Link
-                href="#how"
-                onClick={goHow}
+                href="#transit"
+                onClick={(e) => { if (scrollToHash('#transit')) e.preventDefault() }}
                 className="group mx-auto mb-6 inline-flex max-w-full items-center gap-2 rounded-full border border-black/[0.06] bg-white/75 py-1 pl-1 pr-3 text-[12px] font-medium text-[#1A1614] shadow-[0_6px_20px_-10px_rgba(90,40,10,0.35)] backdrop-blur-xl transition-colors duration-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-100 sm:text-[13px]"
               >
-                <span className="rounded-full bg-[#1A1614] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-white dark:bg-white dark:text-[#1A1614]">{t('landing.hero2.pillNew')}</span>
-                <span className="truncate">{t('landing.hero2.pill')}</span>
+                <span className="rounded-full bg-[#1A1614] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-white dark:bg-white dark:text-[#1A1614]">{t('landing.hero3.pillNew')}</span>
+                <span className="truncate">{t('landing.hero3.pill')}</span>
                 <ChevronRight size={15} className={`shrink-0 transition-transform duration-300 ${EASE_CSS} group-hover:translate-x-0.5`} />
               </Link>
             </IntroIn>
-            <h1 className="text-[clamp(2.5rem,6.4vw,5rem)] font-semibold leading-[1] tracking-[-0.042em] text-[#1A1614] dark:text-gray-50">
-              <BlurInWords key={`a-${t('landing.hero2.titleA')}`} as="span" className="block" text={t('landing.hero2.titleA')} delay={0.1} />
+            <h1 className="text-[clamp(2.4rem,6vw,4.7rem)] font-semibold leading-[1.02] tracking-[-0.042em] text-[#1A1614] dark:text-gray-50">
+              <BlurInWords key={`a-${t('landing.hero3.titleA')}`} as="span" className="block" text={t('landing.hero3.titleA')} delay={0.1} />
               {' '}
-              <BlurInWords key={`b-${t('landing.hero2.titleB')}`} as="span" className="block pb-[0.08em]" wordClassName="mf-gradient-text" text={t('landing.hero2.titleB')} delay={0.35} />
+              <BlurInWords key={`b-${t('landing.hero3.titleB')}`} as="span" className="block pb-[0.08em]" wordClassName="mf-gradient-text" text={t('landing.hero3.titleB')} delay={0.4} />
             </h1>
             <IntroIn delay={0.75}>
-              <p className={`mx-auto mt-5 max-w-[40ch] sm:mt-6 ${LEAD}`}>{t('landing.hero2.sub')}</p>
+              <p className={`mx-auto mt-5 max-w-[46ch] sm:mt-6 ${LEAD}`}>{t('landing.hero3.sub')}</p>
             </IntroIn>
             <IntroIn delay={0.9} className="mt-7 flex flex-col items-center justify-center gap-2 sm:mt-8 sm:flex-row sm:gap-5">
               <PillButton href={ctaHref} label={t('landing.hero.cta')} size="lg" />
-              <TextLink href="#how" label={t('landing.hero2.secondary')} onClick={goHow} />
+              <TextLink href="#solution" label={t('landing.hero3.secondary')} onClick={goSolution} />
             </IntroIn>
           </HeroLayer>
 
@@ -468,7 +512,7 @@ function Landing() {
                   </IntroIn>
                   <IntroIn delay={1.45} className="hero-chip-float mr-10">
                     <span className="flex items-center gap-3 rounded-[20px] border border-black/[0.05] bg-white px-4 py-3 shadow-[0_16px_40px_-18px_rgba(90,40,10,0.35)] dark:border-white/10 dark:bg-[#1C1916]">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#FBF3E7] text-[#D4581F] dark:bg-white/10"><MapPin size={17} /></span>
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1A1614] text-white dark:bg-white dark:text-[#1A1614]"><Bus size={17} /></span>
                       <span>
                         <span className="block text-[14px] font-semibold text-[#1A1614] dark:text-gray-50">{t('landing.hero.card1Title')}</span>
                         <span className="block text-[12px] text-[#6E5B50] dark:text-gray-400">{t('landing.hero.card1Meta')}</span>
@@ -506,70 +550,134 @@ function Landing() {
 
         <CommunityTicker />
 
-        {/* ── The gap (quote) ──────────────────────────────────────────── */}
-        <section id="about" className={`bg-[#FFF9F2] px-5 dark:bg-[#1A1614] sm:px-8 lg:px-12 ${SECTION_Y}`}>
-          <div className="mx-auto max-w-[900px] text-center">
+        {/* ── The problem ──────────────────────────────────────────────── */}
+        <section id="problem" className={`bg-[#FFF9F2] px-5 dark:bg-[#1A1614] sm:px-8 lg:px-12 ${SECTION_Y}`}>
+          <div className="mx-auto max-w-[920px] text-center">
             <ScrollReveal exit={false}>
-              <p className={EYEBROW}>{t('landing.about.badge')}</p>
+              <p className={EYEBROW}>{t('landing.problem.eyebrow')}</p>
             </ScrollReveal>
             <ScrollHighlight
-              text={`« ${t('landing.about.quote')} »`}
-              className="text-[clamp(1.7rem,3.6vw,2.9rem)] font-semibold leading-[1.12] tracking-[-0.03em] text-[#1A1614] dark:text-gray-50"
+              text={`« ${t('landing.problem.quote')} »`}
+              className="text-[clamp(1.6rem,3.4vw,2.7rem)] font-semibold leading-[1.14] tracking-[-0.03em] text-[#1A1614] dark:text-gray-50"
             />
-            <ScrollReveal stagger={0.05} className="mx-auto mt-8 max-w-[56ch]">
-              <p className={LEAD}>{t('landing.about.body')}</p>
-              <div className="mt-6 flex justify-center">
-                <TextLink href={ctaHref} label={t('landing.about.cta')} />
-              </div>
+            <ScrollReveal stagger={0.05} className="mx-auto mt-8 max-w-[58ch]">
+              <p className={LEAD}>{t('landing.problem.body')}</p>
             </ScrollReveal>
           </div>
-          <div className="mx-auto mt-12 grid max-w-[1120px] gap-4 sm:mt-16 sm:grid-cols-2">
+          <div className="mx-auto mt-12 grid max-w-[1120px] gap-4 sm:mt-16 sm:grid-cols-2 lg:grid-cols-4">
+            {problems.map(({ Icon, n }, i) => (
+              <ScrollReveal key={n} stagger={i * 0.05} exit={false}>
+                <article className={TILE}>
+                  <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-[14px] bg-[#FBF3E7] text-[#D4581F] dark:bg-white/[0.06] dark:text-[#FF9A63]">
+                    <Icon size={21} strokeWidth={2.1} aria-hidden />
+                  </span>
+                  <h3 className="text-[19px] font-semibold leading-[1.2] tracking-[-0.02em] text-[#1A1614] dark:text-gray-50">{t(`landing.problem.p${n}Title`)}</h3>
+                  <p className={TILE_BODY}>{t(`landing.problem.p${n}Body`)}</p>
+                </article>
+              </ScrollReveal>
+            ))}
+          </div>
+          <div className="mx-auto mt-4 grid max-w-[1120px] gap-4 sm:grid-cols-2">
             <ScrollZoom>
-              <ParallaxImage src="/landing/kigali-market-real.jpg" alt={t('landing.about.marketAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
+              <ParallaxImage src="/landing/kigali-market-real.jpg" alt={t('landing.problem.marketAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
             </ScrollZoom>
             <ScrollZoom>
-              <ParallaxImage src="/landing/kigali-view-real.jpg" alt={t('landing.about.aerialAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
+              <ParallaxImage src="/landing/kigali-view-real.jpg" alt={t('landing.problem.aerialAlt')} className="aspect-[3/2] w-full rounded-[26px]" />
             </ScrollZoom>
           </div>
-          <p className="mx-auto mt-3 max-w-[1120px] text-[12px] text-[#6E5B50] dark:text-gray-400">{t('landing.about.credit')}</p>
         </section>
 
-        {/* ── Numbers ──────────────────────────────────────────────────── */}
-        <section aria-labelledby="stats-title" className={`px-5 sm:px-8 lg:px-12 ${SECTION_Y}`}>
+        {/* ── The solution ─────────────────────────────────────────────── */}
+        <section id="solution" aria-labelledby="solution-title" className={`px-5 sm:px-8 lg:px-12 ${SECTION_Y}`}>
           <div className="mx-auto max-w-[1080px]">
-            <ScrollReveal exit={false} className="text-center">
-              <p className={EYEBROW}>{t('landing.stats.eyebrow')}</p>
-              <h2 id="stats-title" className={H2}>{t('landing.stats.title')}</h2>
+            <ScrollReveal exit={false} className="mx-auto max-w-[760px] text-center">
+              <p className={EYEBROW}>{t('landing.solution.eyebrow')}</p>
+              <h2 id="solution-title" className={H2}>{t('landing.solution.title')}</h2>
+              <p className={`mx-auto mt-5 max-w-[58ch] ${LEAD}`}>{t('landing.solution.body')}</p>
             </ScrollReveal>
-            <dl className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-3">
-              {[
-                { value: <CountUp to={3} />, label: t('landing.stats.s1') },
-                { value: <CountUp from={99} to={0} />, label: t('landing.stats.s2') },
-                { value: <CountUp to={50} suffix=" m" />, label: t('landing.stats.s3') },
-              ].map((s, i) => (
-                <ScrollReveal key={i} stagger={i * 0.04} exit={false}>
-                  <div className={TILE}>
-                    <dt className="sr-only">{s.label}</dt>
-                    <dd>
-                      <span className="mf-gradient-text block text-[clamp(3rem,5.5vw,4.25rem)] font-semibold leading-none tracking-[-0.05em]">{s.value}</span>
-                      <span className="mt-3 block text-[15px] leading-snug text-[#1A1614] dark:text-gray-200">{s.label}</span>
-                    </dd>
-                  </div>
+            <div className="mt-10 grid gap-4 sm:mt-14 sm:grid-cols-2 lg:grid-cols-4">
+              {pillars.map(({ Icon, n }, i) => (
+                <ScrollReveal key={n} stagger={i * 0.05} exit={false}>
+                  <article className={`${TILE} relative overflow-hidden`}>
+                    <span aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[radial-gradient(closest-side,rgba(232,103,42,0.18),transparent)]" />
+                    <span className="mb-5 flex h-12 w-12 items-center justify-center rounded-[15px] bg-[#E8672A] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_10px_24px_-10px_rgba(232,103,42,0.7)]">
+                      <Icon size={22} strokeWidth={2.1} aria-hidden />
+                    </span>
+                    <h3 className={TILE_TITLE}>{t(`landing.solution.s${n}Title`)}</h3>
+                    <p className={TILE_BODY}>{t(`landing.solution.s${n}Body`)}</p>
+                  </article>
                 </ScrollReveal>
               ))}
-            </dl>
+            </div>
+            <ScrollReveal exit={false} className="mx-auto mt-6 max-w-[760px]">
+              <p className="rounded-[22px] border border-[#E8672A]/25 bg-[#FBF3E7] px-5 py-4 text-center text-[15px] font-medium leading-relaxed text-[#1A1614] dark:border-[#FF9A63]/25 dark:bg-white/[0.05] dark:text-gray-100 sm:text-[16px]">
+                <Sparkles size={16} className="mr-1.5 inline -translate-y-px text-[#D4581F] dark:text-[#FF9A63]" aria-hidden />
+                {t('landing.solution.innovation')}
+              </p>
+            </ScrollReveal>
+            <ScrollReveal exit={false} className="mt-8 flex flex-wrap items-center justify-center gap-2.5">
+              {tech.map(({ Icon, label }) => (
+                <span key={label} className="flex items-center gap-2 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[14px] font-medium text-[#1A1614] shadow-[0_6px_18px_-12px_rgba(90,40,10,0.4)] dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-100">
+                  <Icon size={16} className="text-[#D4581F] dark:text-[#FF9A63]" aria-hidden />
+                  {label}
+                </span>
+              ))}
+            </ScrollReveal>
           </div>
         </section>
 
-        {/* ── Bento ────────────────────────────────────────────────────── */}
-        <section aria-labelledby="bento-title" className={`bg-[#F3E6D4] px-5 dark:bg-[#0E0C0A] sm:px-8 lg:px-12 ${SECTION_Y}`}>
+        {/* ── Real-time transport ──────────────────────────────────────── */}
+        <section id="transit" className={`overflow-hidden bg-[#F3E6D4] px-5 dark:bg-[#0E0C0A] sm:px-8 lg:px-12 ${SECTION_Y}`}>
+          <div className="mx-auto grid max-w-[1120px] items-center gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-14">
+            <div>
+              <ScrollReveal exit={false}>
+                <p className={EYEBROW}>{t('landing.transit.eyebrow')}</p>
+                <h2 className={H2}>{t('landing.transit.title')}</h2>
+                <p className={`mt-5 max-w-[44ch] ${LEAD}`}>{t('landing.transit.body')}</p>
+              </ScrollReveal>
+              {checkList(transitList, 'orange')}
+              <ScrollReveal exit={false} className="mt-8">
+                <PillButton href={ctaHref} label={t('landing.transit.cta')} />
+              </ScrollReveal>
+            </div>
+            <ScrollZoom>
+              <div className="relative">
+                <BusLiveMap className="aspect-[640/380] w-full" />
+                <div className="relative mx-auto -mt-16 w-[92%] max-w-[380px] sm:absolute sm:-bottom-10 sm:right-[-12px] sm:mt-0 sm:w-[330px]">
+                  <ArrivalsBoard />
+                </div>
+              </div>
+            </ScrollZoom>
+          </div>
+        </section>
+
+        {/* ── Inclusive AI search (bento) ──────────────────────────────── */}
+        <section id="search" aria-labelledby="bento-title" className={`px-5 sm:px-8 lg:px-12 ${SECTION_Y}`}>
           <div className="mx-auto max-w-[1080px]">
-            <ScrollReveal exit={false} className="mx-auto max-w-[720px] text-center">
+            <ScrollReveal exit={false} className="mx-auto max-w-[760px] text-center">
               <p className={EYEBROW}>{t('landing.bento.eyebrow')}</p>
               <h2 id="bento-title" className={H2}>{t('landing.bento.title')}</h2>
             </ScrollReveal>
+            <ScrollReveal exit={false} className="mt-8 flex flex-col items-center gap-3">
+              <span className="text-[13px] font-semibold text-[#6E5B50] dark:text-gray-400">{t('landing.bento.factorsTitle')}</span>
+              <div className="flex flex-wrap justify-center gap-2">
+                {factors.map(({ Icon, label }, i) => (
+                  <motion.span
+                    key={label}
+                    initial={{ opacity: 0, y: 10, scale: 0.96 }}
+                    whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                    viewport={{ amount: 0.8 }}
+                    transition={{ duration: 0.55, delay: i * 0.08, ease: APPLE_EASE }}
+                    className="flex items-center gap-2 rounded-full bg-[#1A1614] px-4 py-2 text-[14px] font-medium text-white dark:bg-white dark:text-[#1A1614]"
+                  >
+                    <Icon size={15} className="text-[#E8672A]" aria-hidden />
+                    {label}
+                  </motion.span>
+                ))}
+              </div>
+            </ScrollReveal>
 
-            <div className="mt-10 grid gap-4 sm:mt-14 lg:grid-cols-6">
+            <div className="mt-10 grid gap-4 sm:mt-12 lg:grid-cols-6">
               <ScrollReveal exit={false} className="lg:col-span-4">
                 <article className={`${TILE} grid items-center gap-8 md:grid-cols-2`}>
                   <div>
@@ -649,7 +757,29 @@ function Landing() {
 
         <HowItWorks />
 
-        {/* ── Businesses ───────────────────────────────────────────────── */}
+        {/* ── Accessibility ────────────────────────────────────────────── */}
+        <section id="access" className={`bg-[#FFF9F2] px-5 dark:bg-[#1A1614] sm:px-8 lg:px-12 ${SECTION_Y}`}>
+          <div className="mx-auto grid max-w-[1080px] items-center gap-12 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <ScrollReveal exit={false}>
+                <p className={EYEBROW}>{t('landing.nav.access')}</p>
+                <h2 className={H2}>{t('landing.access2.title')}</h2>
+                <p className={`mt-5 max-w-[44ch] ${LEAD}`}>{t('landing.access2.body')}</p>
+              </ScrollReveal>
+              {checkList(accessList)}
+              <ScrollReveal exit={false} className="mt-8">
+                <PillButton href={ctaHref} label={t('landing.demo.cta')} />
+              </ScrollReveal>
+            </div>
+            <ScrollZoom>
+              <div className="overflow-hidden rounded-[28px] shadow-[0_30px_80px_-30px_rgba(90,40,10,0.45)] [&>div]:h-[400px] [&>div]:max-w-none [&>div]:rounded-[28px]">
+                <DistrictMap bubble={t('landing.demo.bubble')} />
+              </div>
+            </ScrollZoom>
+          </div>
+        </section>
+
+        {/* ── Businesses & transport operators ─────────────────────────── */}
         <section id="businesses" className={`overflow-hidden bg-[#F3E6D4] dark:bg-[#0E0C0A] ${SECTION_Y}`}>
           <div className="mx-auto grid max-w-[1080px] items-center gap-12 px-5 sm:px-8 lg:grid-cols-2 lg:gap-16 lg:px-12">
             <ScrollReveal exit={false}>
@@ -688,10 +818,31 @@ function Landing() {
                 </div>
                 <span className="hero-chip-float absolute -right-3 -top-5 flex items-center gap-2 rounded-full bg-[#1A1614] px-3.5 py-2 text-[12px] font-semibold text-white shadow-xl dark:bg-white dark:text-[#1A1614] sm:-right-8">
                   <MapPin size={13} className="text-[#E8672A]" />
-                  {t('landing.hero.card1Title')}
+                  {t('landing.hero.card2Title')}
                 </span>
               </div>
             </ScrollZoom>
+          </div>
+
+          {/* Transport operators */}
+          <div className="mx-auto mt-20 max-w-[1080px] px-5 sm:mt-24 sm:px-8 lg:px-12">
+            <ScrollReveal exit={false} className="mx-auto max-w-[720px] text-center">
+              <p className={EYEBROW}>{t('landing.ops.eyebrow')}</p>
+              <h2 className={H2}>{t('landing.ops.title')}</h2>
+            </ScrollReveal>
+            <div className="mt-10 grid gap-4 md:grid-cols-3">
+              {ops.map(({ Icon, n }, i) => (
+                <ScrollReveal key={n} stagger={i * 0.05} exit={false}>
+                  <article className={TILE}>
+                    <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-[14px] bg-[#1A1614] text-white dark:bg-white dark:text-[#1A1614]">
+                      <Icon size={20} strokeWidth={2.1} aria-hidden />
+                    </span>
+                    <h3 className="text-[19px] font-semibold leading-[1.2] tracking-[-0.02em] text-[#1A1614] dark:text-gray-50">{t(`landing.ops.o${n}Title`)}</h3>
+                    <p className={TILE_BODY}>{t(`landing.ops.o${n}Body`)}</p>
+                  </article>
+                </ScrollReveal>
+              ))}
+            </div>
           </div>
 
           <div className="mt-16">
@@ -701,41 +852,30 @@ function Landing() {
           </div>
         </section>
 
-        {/* ── Accessibility ────────────────────────────────────────────── */}
-        <section id="access" className={`bg-[#FFF9F2] px-5 dark:bg-[#1A1614] sm:px-8 lg:px-12 ${SECTION_Y}`}>
-          <div className="mx-auto grid max-w-[1080px] items-center gap-12 lg:grid-cols-2 lg:gap-16">
-            <div>
-              <ScrollReveal exit={false}>
-                <p className={EYEBROW}>{t('landing.nav.access')}</p>
-                <h2 className={H2}>{t('landing.access2.title')}</h2>
-                <p className={`mt-5 max-w-[42ch] ${LEAD}`}>{t('landing.access2.body')}</p>
-              </ScrollReveal>
-              <ul className="mt-7 flex flex-col gap-2.5">
-                {accessList.map((item, i) => (
-                  <motion.li
-                    key={item}
-                    initial={{ opacity: 0, x: -16 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    viewport={{ amount: 0.8 }}
-                    transition={{ duration: 0.6, delay: i * 0.1, ease: APPLE_EASE }}
-                    className="flex items-center gap-3 text-[15px] font-medium text-[#1A1614] dark:text-gray-100"
-                  >
-                    <span aria-hidden className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#1F8A5B] text-white">
-                      <Check size={13} strokeWidth={3} />
-                    </span>
-                    {item}
-                  </motion.li>
-                ))}
-              </ul>
-              <ScrollReveal exit={false} className="mt-8">
-                <PillButton href={ctaHref} label={t('landing.demo.cta')} />
-              </ScrollReveal>
-            </div>
-            <ScrollZoom>
-              <div className="overflow-hidden rounded-[28px] shadow-[0_30px_80px_-30px_rgba(90,40,10,0.45)] [&>div]:h-[400px] [&>div]:max-w-none [&>div]:rounded-[28px]">
-                <DistrictMap bubble={t('landing.demo.bubble')} />
-              </div>
-            </ScrollZoom>
+        {/* ── Why / numbers ────────────────────────────────────────────── */}
+        <section aria-labelledby="stats-title" className={`px-5 sm:px-8 lg:px-12 ${SECTION_Y}`}>
+          <div className="mx-auto max-w-[1080px]">
+            <ScrollReveal exit={false} className="text-center">
+              <p className={EYEBROW}>{t('landing.stats.eyebrow')}</p>
+              <h2 id="stats-title" className={H2}>{t('landing.stats.title')}</h2>
+            </ScrollReveal>
+            <dl className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-3">
+              {[
+                { value: <CountUp to={4} />, label: t('landing.stats.s1') },
+                { value: <CountUp from={99} to={0} />, label: t('landing.stats.s2') },
+                { value: <CountUp to={3} />, label: t('landing.stats.s3') },
+              ].map((s, i) => (
+                <ScrollReveal key={i} stagger={i * 0.04} exit={false}>
+                  <div className={TILE}>
+                    <dt className="sr-only">{s.label}</dt>
+                    <dd>
+                      <span className="mf-gradient-text block text-[clamp(3rem,5.5vw,4.25rem)] font-semibold leading-none tracking-[-0.05em]">{s.value}</span>
+                      <span className="mt-3 block text-[15px] leading-snug text-[#1A1614] dark:text-gray-200">{s.label}</span>
+                    </dd>
+                  </div>
+                </ScrollReveal>
+              ))}
+            </dl>
           </div>
         </section>
 
@@ -743,9 +883,6 @@ function Landing() {
         <section className="px-3 py-14 sm:px-8 sm:py-20 lg:px-12">
           <ScrollZoom>
             <div className="relative mx-auto max-w-[1120px] overflow-hidden rounded-[34px] bg-[#0E0C0A] px-6 py-20 text-center sm:py-24">
-              {/* Kigali Convention Centre at night (Wikimedia Commons, IGANZE,
-                  CC0), drifting slowly. The veil is darkest in the middle,
-                  where the white text sits, so it always reads clearly. */}
               <div aria-hidden className="pointer-events-none absolute inset-0">
                 <img
                   src="/landing/kigali-convention-center.jpg"
@@ -763,10 +900,10 @@ function Landing() {
               </div>
               <div className="relative">
                 <div className="flex justify-center"><Mark /></div>
-                <h2 className="mx-auto mt-6 max-w-[14ch] text-[clamp(2.2rem,5vw,4rem)] font-semibold leading-[1.02] tracking-[-0.042em] text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.45)]">
+                <h2 className="mx-auto mt-6 max-w-[16ch] text-[clamp(2.1rem,4.8vw,3.8rem)] font-semibold leading-[1.04] tracking-[-0.042em] text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.45)]">
                   {t('landing.final.title')}
                 </h2>
-                <p className="mx-auto mt-5 max-w-[36ch] text-[16px] leading-relaxed text-white/90 [text-shadow:0_1px_12px_rgba(0,0,0,0.5)] sm:text-[18px]">{t('landing.final.body')}</p>
+                <p className="mx-auto mt-5 max-w-[40ch] text-[16px] leading-relaxed text-white/90 [text-shadow:0_1px_12px_rgba(0,0,0,0.5)] sm:text-[18px]">{t('landing.final.body')}</p>
                 <div className="mt-8 flex flex-col items-center justify-center gap-2 sm:flex-row sm:gap-5">
                   <PillButton href={ctaHref} label={t('landing.hero.cta')} size="lg" variant="light" />
                   <TextLink href={ctaHref} label={t('landing.about.cta')} tone="light" />

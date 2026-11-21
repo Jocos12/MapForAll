@@ -11,7 +11,7 @@ from ..tools.maps_mcp import create_maps_toolset
 from ..tools.mongo_tools import find_similar_preferences
 from ..tools.places_tools import find_places_by_vector
 
-EXPLORER_INSTRUCTION = """You are the Explorer for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
+EXPLORER_INSTRUCTION = """You are the Explorer for ConnectRwanda AI, a guide to accessible places and local businesses.
 
 You have access to:
   • find_similar_preferences  — MongoDB vector search: retrieve the user's past taste signals
@@ -50,7 +50,7 @@ STEPS (follow in order):
          find_similar_preferences actually returned a related signal.
    - Deduplicate by name similarity — if a local result and a Maps result refer to the
      same venue, keep the one with more detail (usually the local result).
-   - INCLUSION SCORE (MapForAll / Ikarita ya Bose). Keep local_business and accessible
+   - INCLUSION SCORE (ConnectRwanda AI). Keep local_business and accessible
      on every candidate you return (false when unknown).
        • prefer_local: the user asked for local / informal / neighbourhood businesses
          ("commerces locaux", "prefer_local"). Rank those places above formal chains

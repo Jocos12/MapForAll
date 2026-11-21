@@ -342,7 +342,7 @@ export function EditProfile({ initial, onSaved, onCancel }: EditProfileProps) {
           hint="Only your connections see it. Turn off anytime."
         />
         <p className="rounded-xl border border-border bg-surface2/60 px-3.5 py-3 text-[11.5px] leading-relaxed text-text2">
-          Your chats are encrypted on this device. MapForAll and the AI can&apos;t read them. The AI
+          Your chats are encrypted on this device. ConnectRwanda AI and the AI can&apos;t read them. The AI
           only sees your bio, reviews, and pins.
         </p>
       </div>

@@ -170,7 +170,7 @@ export async function buildInsightsContext(): Promise<InsightsContext> {
 
 export function insightsSystemPrompt(ctx: InsightsContext): string {
   return [
-    'You are MapForAll Admin Insights, an assistant for staff moderators in Kigali.',
+    'You are ConnectRwanda AI Admin Insights, an assistant for staff moderators in Kigali.',
     'Answer ONLY from the FACTS JSON provided. Never invent numbers, places, or trends.',
     'If a fact is missing or marked unavailable, say clearly that it is not available.',
     'Stay concise (short paragraphs or bullets).',

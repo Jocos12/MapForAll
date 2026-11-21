@@ -2194,7 +2194,7 @@ export default function LandingPage() {
                 <>
                   {pinsMismatch && (
                     <div className="ios-glass-strong pointer-events-auto max-w-md rounded-2xl px-4 py-2 text-[13px] text-[var(--ios-label)]">
-                      Les repères semblent loin de ta position. Demande à MapForAll de chercher dans ta ville.
+                      Les repères semblent loin de ta position. Demande à ConnectRwanda AI de chercher dans ta ville.
                     </div>
                   )}
                   {routeActive && routeError && (

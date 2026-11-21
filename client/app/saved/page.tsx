@@ -146,7 +146,7 @@ export default function SavedPage() {
       title: item.place_name,
       date: (item.visit_date ?? '').slice(0, 10),
       location: item.city || undefined,
-      description: item.note || `Planned with MapForAll`,
+      description: item.note || `Planned with ConnectRwanda AI`,
     }
     if (!ev.date) return
     if (calendarConnected) {

@@ -129,7 +129,7 @@ export default function BillingPage() {
           <Link href="/" className="flex items-center gap-2.5 pl-1">
             <MapForAllLogo />
             <span className="font-display text-[14px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-              MapForAll
+              ConnectRwanda AI
             </span>
           </Link>
           <div className="flex items-center gap-3 sm:gap-4">
@@ -152,7 +152,7 @@ export default function BillingPage() {
         {/* Heading */}
         <div className="max-w-[620px]">
           <p className="text-[13px] tracking-wide text-gray-500 dark:text-gray-400">
-            MapForAll · Credits &amp; usage
+            ConnectRwanda AI · Credits &amp; usage
           </p>
           <h1 className="mt-3 font-display text-[clamp(1.9rem,4.4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-gray-900 dark:text-gray-50">
             Keep planning without limits.

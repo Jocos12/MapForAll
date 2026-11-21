@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600&display=swap');
+/* Fonts are self-hosted with next/font (app/layout.tsx): no render-blocking Google Fonts request. */
 
 @tailwind base;
 @tailwind components;
@@ -712,7 +712,7 @@ html.biz-theming #biz-scroll * {
 .prose-hodari ol > li:last-child { margin-bottom: 0; }
 
 .prose-hodari h1, .prose-hodari h2, .prose-hodari h3 {
-  font-family: 'Playfair Display', Georgia, serif;
+  font-family: var(--font-playfair), 'Playfair Display', Georgia, serif;
   font-weight: 600;
   color: var(--text-primary);
   margin-top: 0.75rem;
@@ -720,10 +720,10 @@ html.biz-theming #biz-scroll * {
 }
 .prose-hodari h1 { font-size: 1rem; }
 .prose-hodari h2 { font-size: 0.9375rem; }
-.prose-hodari h3 { font-size: 0.8125rem; font-family: 'DM Mono', Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; color: #F56A00; font-weight: 500; }
+.prose-hodari h3 { font-size: 0.8125rem; font-family: var(--font-dm-mono), 'DM Mono', Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; color: #F56A00; font-weight: 500; }
 
 .prose-hodari code {
-  font-family: 'DM Mono', Menlo, monospace;
+  font-family: var(--font-dm-mono), 'DM Mono', Menlo, monospace;
   font-size: 0.75rem;
   background: rgb(var(--color-surface2));
   border-radius: 0.25rem;

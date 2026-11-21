@@ -1,5 +1,5 @@
 /**
- * HTML emails in the MapForAll style: table layout and inline styles so they
+ * HTML emails in the ConnectRwanda AI style: table layout and inline styles so they
  * render in Gmail, Outlook and phone clients. The logo is the same "MF" badge
  * as the site, drawn in HTML so it shows even when images are blocked.
  */
@@ -28,71 +28,71 @@ function fill(template: string, vars: Record<string, string>): string {
 
 const WELCOME = {
   fr: {
-    subject: 'Bienvenue sur MapForAll, {name} !',
+    subject: 'Bienvenue sur ConnectRwanda AI, {name} !',
     preheader: 'Votre compte est prêt. Connectez-vous pour commencer.',
     heading: 'Bienvenue, {name} !',
-    intro: 'Merci d’avoir rejoint MapForAll — Ikarita ya Bose, la carte des commerces locaux et des lieux accessibles de Kigali.',
+    intro: 'Merci d’avoir rejoint ConnectRwanda AI, la carte des commerces locaux et des lieux accessibles de Kigali.',
     roleTitle: 'Ce que vous pouvez faire',
     client: 'Trouvez des commerces locaux et accessibles près de vous, enregistrez vos lieux préférés et confirmez l’accessibilité d’un lieu pour aider les autres.',
     owner: 'Ajoutez votre commerce et faites-le connaître : créez votre fiche, suivez vos visites et répondez aux avis de vos clients.',
     cta: 'Se connecter',
     security: 'Pour votre sécurité, un code à 6 chiffres vous sera envoyé par email à chaque connexion.',
-    footer: 'Vous recevez cet email car un compte MapForAll vient d’être créé avec cette adresse. Si ce n’est pas vous, ignorez simplement ce message.',
+    footer: 'Vous recevez cet email car un compte ConnectRwanda AI vient d’être créé avec cette adresse. Si ce n’est pas vous, ignorez simplement ce message.',
   },
   en: {
-    subject: 'Welcome to MapForAll, {name}!',
+    subject: 'Welcome to ConnectRwanda AI, {name}!',
     preheader: 'Your account is ready. Sign in to get started.',
     heading: 'Welcome, {name}!',
-    intro: 'Thanks for joining MapForAll — Ikarita ya Bose, the map of local businesses and accessible places in Kigali.',
+    intro: 'Thanks for joining ConnectRwanda AI, the map of local businesses and accessible places in Kigali.',
     roleTitle: 'What you can do',
     client: 'Find local, accessible businesses near you, save your favourite places, and confirm a place’s accessibility to help others.',
     owner: 'Add your business and get it known: create your listing, follow your visits and reply to your customers’ reviews.',
     cta: 'Sign in',
     security: 'For your security, a 6-digit code will be emailed to you each time you sign in.',
-    footer: 'You are receiving this email because a MapForAll account was just created with this address. If this wasn’t you, simply ignore this message.',
+    footer: 'You are receiving this email because a ConnectRwanda AI account was just created with this address. If this wasn’t you, simply ignore this message.',
   },
   // Kinyarwanda: approximate, to be reviewed by a native speaker.
   rw: {
-    subject: 'Murakaza neza kuri MapForAll, {name}!',
+    subject: 'Murakaza neza kuri ConnectRwanda AI, {name}!',
     preheader: 'Konti yawe iriteguye. Injira utangire.',
     heading: 'Murakaza neza, {name}!',
-    intro: 'Murakoze kwinjira muri MapForAll — Ikarita ya Bose, ikarita y’amaduka yo mu gace n’ahantu hagerwaho byoroshye i Kigali.',
+    intro: 'Murakoze kwinjira muri ConnectRwanda AI, ikarita y’amaduka yo mu gace n’ahantu hagerwaho byoroshye i Kigali.',
     roleTitle: 'Ibyo ushobora gukora',
     client: 'Shakisha amaduka yo mu gace kandi agerwaho byoroshye hafi yawe, ubike ahantu ukunda, kandi wemeze niba ahantu hagerwaho kugira ngo ufashe abandi.',
     owner: 'Ongeraho ubucuruzi bwawe kandi ubumenyekanishe: kora ifishi yawe, ukurikirane abagusura, kandi usubize ibitekerezo by’abakiriya bawe.',
     cta: 'Injira',
     security: 'Kubw’umutekano wawe, uzajya wohererezwa kode y’imibare 6 kuri imeri igihe cyose winjira.',
-    footer: 'Wakiriye iyi imeri kuko konti ya MapForAll imaze gufungurwa hakoreshejwe iyi aderesi. Niba atari wowe, wirengagize ubu butumwa.',
+    footer: 'Wakiriye iyi imeri kuko konti ya ConnectRwanda AI imaze gufungurwa hakoreshejwe iyi aderesi. Niba atari wowe, wirengagize ubu butumwa.',
   },
 } satisfies Record<MailLang, Record<string, string>>
 
 const OTP = {
   fr: {
-    subject: '{code} est votre code de connexion MapForAll',
+    subject: '{code} est votre code de connexion ConnectRwanda AI',
     preheader: 'Code valable {minutes} minutes.',
     heading: 'Votre code de connexion',
-    intro: 'Bonjour {name}, voici votre code pour terminer la connexion à MapForAll :',
+    intro: 'Bonjour {name}, voici votre code pour terminer la connexion à ConnectRwanda AI :',
     expiry: 'Ce code expire dans {minutes} minutes et ne peut être utilisé qu’une seule fois.',
-    warning: 'Ne partagez jamais ce code : l’équipe MapForAll ne vous le demandera jamais. Si vous n’avez pas essayé de vous connecter, changez votre mot de passe.',
+    warning: 'Ne partagez jamais ce code : l’équipe ConnectRwanda AI ne vous le demandera jamais. Si vous n’avez pas essayé de vous connecter, changez votre mot de passe.',
     footer: 'Email automatique, merci de ne pas y répondre.',
   },
   en: {
-    subject: '{code} is your MapForAll sign-in code',
+    subject: '{code} is your ConnectRwanda AI sign-in code',
     preheader: 'Code valid for {minutes} minutes.',
     heading: 'Your sign-in code',
-    intro: 'Hello {name}, here is your code to finish signing in to MapForAll:',
+    intro: 'Hello {name}, here is your code to finish signing in to ConnectRwanda AI:',
     expiry: 'This code expires in {minutes} minutes and can only be used once.',
-    warning: 'Never share this code: the MapForAll team will never ask for it. If you didn’t try to sign in, change your password.',
+    warning: 'Never share this code: the ConnectRwanda AI team will never ask for it. If you didn’t try to sign in, change your password.',
     footer: 'Automated email, please do not reply.',
   },
   // Kinyarwanda: approximate, to be reviewed by a native speaker.
   rw: {
-    subject: '{code} ni kode yawe yo kwinjira muri MapForAll',
+    subject: '{code} ni kode yawe yo kwinjira muri ConnectRwanda AI',
     preheader: 'Kode imara iminota {minutes}.',
     heading: 'Kode yawe yo kwinjira',
-    intro: 'Muraho {name}, dore kode yo kurangiza kwinjira muri MapForAll:',
+    intro: 'Muraho {name}, dore kode yo kurangiza kwinjira muri ConnectRwanda AI:',
     expiry: 'Iyi kode irangira mu minota {minutes} kandi ikoreshwa rimwe gusa.',
-    warning: 'Ntuzigere usangiza abandi iyi kode: itsinda rya MapForAll ntirizigera riyigusaba. Niba atari wowe wagerageje kwinjira, hindura ijambo ry’ibanga ryawe.',
+    warning: 'Ntuzigere usangiza abandi iyi kode: itsinda rya ConnectRwanda AI ntirizigera riyigusaba. Niba atari wowe wagerageje kwinjira, hindura ijambo ry’ibanga ryawe.',
     footer: 'Iyi ni imeri yikora, ntuyisubize.',
   },
 } satisfies Record<MailLang, Record<string, string>>
@@ -104,7 +104,7 @@ function layout({ lang, preheader, content, footer }: { lang: MailLang; preheade
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>MapForAll</title>
+<title>ConnectRwanda AI</title>
 </head>
 <body style="margin:0;padding:0;background:${CREAM};">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(preheader)}</div>
@@ -115,8 +115,8 @@ function layout({ lang, preheader, content, footer }: { lang: MailLang; preheade
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
         <td style="width:40px;height:40px;border-radius:20px;background:${ORANGE};color:#ffffff;font:700 13px ${FONT};text-align:center;vertical-align:middle;">MF</td>
         <td style="padding-left:12px;font-family:${FONT};">
-          <div style="font-size:17px;font-weight:600;color:${INK};line-height:1.2;">MapForAll</div>
-          <div style="font-size:12px;color:${MUTED};line-height:1.3;">Ikarita ya Bose</div>
+          <div style="font-size:17px;font-weight:600;color:${INK};line-height:1.2;">ConnectRwanda AI</div>
+          <div style="font-size:12px;color:${MUTED};line-height:1.3;">Mobilité inclusive · Rwanda</div>
         </td>
       </tr></table>
     </td></tr>
@@ -124,7 +124,7 @@ function layout({ lang, preheader, content, footer }: { lang: MailLang; preheade
       ${content}
     </td></tr>
     <tr><td style="padding:18px 8px 0;font:12px/1.5 ${FONT};color:${MUTED};text-align:center;">
-      ${esc(footer)}<br>© MapForAll · Kigali
+      ${esc(footer)}<br>© ConnectRwanda AI · Kigali
     </td></tr>
   </table>
 </td></tr>
@@ -165,61 +165,61 @@ export function welcomeEmail({ name, role, lang, loginUrl }: { name: string; rol
 
 const PLACE_VALIDATED = {
   fr: {
-    subject: 'Votre lieu « {place} » est en ligne sur MapForAll',
+    subject: 'Votre lieu « {place} » est en ligne sur ConnectRwanda AI',
     preheader: 'La modération a approuvé votre fiche.',
     heading: 'Fiche approuvée',
-    intro: 'Bonjour {name}, bonne nouvelle : « {place} » est maintenant visible sur MapForAll.',
+    intro: 'Bonjour {name}, bonne nouvelle : « {place} » est maintenant visible sur ConnectRwanda AI.',
     cta: 'Voir sur la carte',
-    footer: 'Vous recevez cet email car vous avez ajouté ou revendiqué ce lieu sur MapForAll.',
+    footer: 'Vous recevez cet email car vous avez ajouté ou revendiqué ce lieu sur ConnectRwanda AI.',
   },
   en: {
-    subject: 'Your place “{place}” is live on MapForAll',
+    subject: 'Your place “{place}” is live on ConnectRwanda AI',
     preheader: 'Moderation approved your listing.',
     heading: 'Listing approved',
-    intro: 'Hello {name}, good news: “{place}” is now visible on MapForAll.',
+    intro: 'Hello {name}, good news: “{place}” is now visible on ConnectRwanda AI.',
     cta: 'View on the map',
-    footer: 'You are receiving this email because you added or claimed this place on MapForAll.',
+    footer: 'You are receiving this email because you added or claimed this place on ConnectRwanda AI.',
   },
   rw: {
-    subject: 'Ahantu hawe « {place} » hashyizwe ku MapForAll',
+    subject: 'Ahantu hawe « {place} » hashyizwe ku ConnectRwanda AI',
     preheader: 'Abagenzura bemeranyije ifishi yawe.',
     heading: 'Ifishi yemejwe',
-    intro: 'Muraho {name}, amakuru meza: « {place} » ubu iboneka kuri MapForAll.',
+    intro: 'Muraho {name}, amakuru meza: « {place} » ubu iboneka kuri ConnectRwanda AI.',
     cta: 'Reba ku ikarita',
-    footer: 'Wakiriye iyi imeri kuko wongeyeho cyangwa wemeje iri ahantu kuri MapForAll.',
+    footer: 'Wakiriye iyi imeri kuko wongeyeho cyangwa wemeje iri ahantu kuri ConnectRwanda AI.',
   },
 } satisfies Record<MailLang, Record<string, string>>
 
 const PLACE_REJECTED = {
   fr: {
-    subject: 'Mise à jour pour « {place} » sur MapForAll',
+    subject: 'Mise à jour pour « {place} » sur ConnectRwanda AI',
     preheader: 'Votre fiche n’a pas été publiée.',
     heading: 'Fiche non publiée',
     intro: 'Bonjour {name}, nous n’avons pas pu publier « {place} » pour le moment.',
     reasonTitle: 'Motif',
     reasonEmpty: 'Les informations ne correspondaient pas à nos critères de qualité.',
     cta: 'Corriger et renvoyer',
-    footer: 'Vous recevez cet email car vous avez soumis ce lieu sur MapForAll.',
+    footer: 'Vous recevez cet email car vous avez soumis ce lieu sur ConnectRwanda AI.',
   },
   en: {
-    subject: 'Update about “{place}” on MapForAll',
+    subject: 'Update about “{place}” on ConnectRwanda AI',
     preheader: 'Your listing was not published.',
     heading: 'Listing not published',
     intro: 'Hello {name}, we could not publish “{place}” at this time.',
     reasonTitle: 'Reason',
     reasonEmpty: 'The details did not meet our quality guidelines.',
     cta: 'Fix and resubmit',
-    footer: 'You are receiving this email because you submitted this place on MapForAll.',
+    footer: 'You are receiving this email because you submitted this place on ConnectRwanda AI.',
   },
   rw: {
-    subject: 'Amakuru kuri « {place} » kuri MapForAll',
+    subject: 'Amakuru kuri « {place} » kuri ConnectRwanda AI',
     preheader: 'Ifishi yawe ntiyashyizwe ahagaragara.',
     heading: 'Ifishi ntiyashyizwe ahagaragara',
     intro: 'Muraho {name}, ntitwashoboye gushyira « {place} » ahagaragara muri iki gihe.',
     reasonTitle: 'Impamvu',
     reasonEmpty: 'Amakuru ntahuye n’ibisabwa by’ubuziranenge.',
     cta: 'Kosora ongera uohereze',
-    footer: 'Wakiriye iyi imeri kuko wohereje iri ahantu kuri MapForAll.',
+    footer: 'Wakiriye iyi imeri kuko wohereje iri ahantu kuri ConnectRwanda AI.',
   },
 } satisfies Record<MailLang, Record<string, string>>
 
@@ -249,34 +249,34 @@ export function placeValidatedEmail({
 
 const PLACE_SUSPENDED = {
   fr: {
-    subject: 'Suspension temporaire de « {place} » sur MapForAll',
+    subject: 'Suspension temporaire de « {place} » sur ConnectRwanda AI',
     preheader: 'Votre fiche commerce est masquée.',
     heading: 'Fiche suspendue',
     intro: 'Bonjour {name}, « {place} » a été temporairement retirée de la carte.',
     reasonTitle: 'Motif',
     reasonEmpty: 'Non-respect des conditions d’utilisation ou signalements répétés.',
     cta: 'Contacter le support',
-    footer: 'Vous recevez cet email car vous gérez ce commerce sur MapForAll.',
+    footer: 'Vous recevez cet email car vous gérez ce commerce sur ConnectRwanda AI.',
   },
   en: {
-    subject: 'Temporary suspension of “{place}” on MapForAll',
+    subject: 'Temporary suspension of “{place}” on ConnectRwanda AI',
     preheader: 'Your business listing is hidden.',
     heading: 'Listing suspended',
     intro: 'Hello {name}, “{place}” has been temporarily removed from the map.',
     reasonTitle: 'Reason',
     reasonEmpty: 'Terms of use or repeated reports.',
     cta: 'Contact support',
-    footer: 'You are receiving this email because you manage this business on MapForAll.',
+    footer: 'You are receiving this email because you manage this business on ConnectRwanda AI.',
   },
   rw: {
-    subject: '« {place} » yahagaritswe by’agateganyo kuri MapForAll',
+    subject: '« {place} » yahagaritswe by’agateganyo kuri ConnectRwanda AI',
     preheader: 'Ifishi y’ubucuruzi yihishijwe.',
     heading: 'Ifishi yahagaritswe',
     intro: 'Muraho {name}, « {place} » yakuwe ku ikarita by’agateganyo.',
     reasonTitle: 'Impamvu',
     reasonEmpty: 'Kutubahiriza amabwiriza cyangwa raporo nyinshi.',
     cta: 'Vugana n’itsinda',
-    footer: 'Wakiriye iyi imeri kuko ucunga ubu bucuruzi kuri MapForAll.',
+    footer: 'Wakiriye iyi imeri kuko ucunga ubu bucuruzi kuri ConnectRwanda AI.',
   },
 } satisfies Record<MailLang, Record<string, string>>
 
@@ -315,27 +315,27 @@ export function placeSuspendedEmail({
 
 const REPORT_RESOLVED = {
   fr: {
-    subject: 'Votre signalement MapForAll a été traité',
+    subject: 'Votre signalement ConnectRwanda AI a été traité',
     preheader: 'Merci pour votre vigilance.',
     heading: 'Signalement traité',
     intro: 'Bonjour, nous avons examiné votre signalement concernant « {place} ».',
-    body: 'Notre équipe a pris les mesures nécessaires. Merci d’aider la communauté MapForAll.',
+    body: 'Notre équipe a pris les mesures nécessaires. Merci d’aider la communauté ConnectRwanda AI.',
     footer: 'Email automatique — merci de ne pas répondre.',
   },
   en: {
-    subject: 'Your MapForAll report was handled',
+    subject: 'Your ConnectRwanda AI report was handled',
     preheader: 'Thank you for helping the community.',
     heading: 'Report handled',
     intro: 'Hello, we reviewed your report about “{place}”.',
-    body: 'Our team took appropriate action. Thank you for helping the MapForAll community.',
+    body: 'Our team took appropriate action. Thank you for helping the ConnectRwanda AI community.',
     footer: 'Automated email — please do not reply.',
   },
   rw: {
-    subject: 'Raporo yawe ya MapForAll yitaweho',
+    subject: 'Raporo yawe ya ConnectRwanda AI yitaweho',
     preheader: 'Murakoze gufasha abaturage.',
     heading: 'Raporo yitaweho',
     intro: 'Muraho, twisuzumiye raporo yawe kuri « {place} ».',
-    body: 'Itsinda ryacu ryafashe ingamba zikwiye. Murakoze gufasha abaturage ba MapForAll.',
+    body: 'Itsinda ryacu ryafashe ingamba zikwiye. Murakoze gufasha abaturage ba ConnectRwanda AI.',
     footer: 'Imeri yikora — ntusubize.',
   },
 } satisfies Record<MailLang, Record<string, string>>
@@ -402,7 +402,7 @@ const PLACE_CHANGES = {
     reasonTitle: 'Commentaire',
     reasonEmpty: 'Merci de compléter la fiche.',
     cta: 'Mettre à jour ma fiche',
-    footer: 'Vous recevez cet email car vous gérez ce lieu sur MapForAll.',
+    footer: 'Vous recevez cet email car vous gérez ce lieu sur ConnectRwanda AI.',
   },
   en: {
     subject: 'Changes requested for “{place}”',
@@ -412,7 +412,7 @@ const PLACE_CHANGES = {
     reasonTitle: 'Comment',
     reasonEmpty: 'Please complete the listing.',
     cta: 'Update my listing',
-    footer: 'You are receiving this email because you manage this place on MapForAll.',
+    footer: 'You are receiving this email because you manage this place on ConnectRwanda AI.',
   },
   rw: {
     subject: 'Harasabwa impinduka kuri « {place} »',
@@ -422,7 +422,7 @@ const PLACE_CHANGES = {
     reasonTitle: 'Igitekerezo',
     reasonEmpty: 'Nyamuneka uzuze ifishi.',
     cta: 'Vugurura ifishi',
-    footer: 'Wakiriye iyi imeri kuko ucunga iri ahantu kuri MapForAll.',
+    footer: 'Wakiriye iyi imeri kuko ucunga iri ahantu kuri ConnectRwanda AI.',
   },
 } satisfies Record<MailLang, Record<string, string>>
 

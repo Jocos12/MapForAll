@@ -134,7 +134,7 @@ export function SharePinDialog({ place, conversationId, candidatePlaces = [], on
             </p>
             {candidates.length === 0 ? (
               <p className="text-[12.5px] leading-relaxed text-text3">
-                No places yet. Ask MapForAll to find some first.
+                No places yet. Ask ConnectRwanda AI to find some first.
               </p>
             ) : (
               <ul className="flex max-h-64 flex-col gap-2 overflow-y-auto scrollbar-hide">

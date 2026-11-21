@@ -200,7 +200,7 @@ function localFallbackReply(message: string, ctx: InsightsCtx, lang: ReplyLang):
 
   if (lang === 'en') {
     return [
-      `MapForAll snapshot (Kigali):`,
+      `ConnectRwanda AI snapshot (Kigali):`,
       `- Places: ${totals.places} (validated ${totals.validated}, pending ${totals.pending})`,
       `- Approval rate: ${approvalRate}%`,
       `- Local / formal / accessible: ${totals.local} / ${totals.formal} / ${totals.accessible}`,
@@ -212,7 +212,7 @@ function localFallbackReply(message: string, ctx: InsightsCtx, lang: ReplyLang):
   }
   if (lang === 'rw') {
     return [
-      `Incamake ya MapForAll (Kigali):`,
+      `Incamake ya ConnectRwanda AI (Kigali):`,
       `- Ahantu: ${totals.places} (byemejwe ${totals.validated}, bitegereje ${totals.pending})`,
       `- Igipimo cyemeza: ${approvalRate}%`,
       `- Aho / formels / bishoboka: ${totals.local} / ${totals.formal} / ${totals.accessible}`,
@@ -223,7 +223,7 @@ function localFallbackReply(message: string, ctx: InsightsCtx, lang: ReplyLang):
     ].join('\n')
   }
   return [
-    `Instantané MapForAll (Kigali) :`,
+    `Instantané ConnectRwanda AI (Kigali) :`,
     `- Lieux : ${totals.places} (validés ${totals.validated}, pending ${totals.pending})`,
     `- Taux de validation : ${approvalRate}%`,
     `- Locaux / formels / accessibles : ${totals.local} / ${totals.formal} / ${totals.accessible}`,

@@ -1,5 +1,5 @@
 /**
- * Text relevance for MapForAll catalog search: name + tags + description,
+ * Text relevance for ConnectRwanda AI catalog search: name + tags + description,
  * with light synonym expansion so "tranquille / travailler / wifi" can match
  * a local listing whose description says "calme, idéal pour travailler, wifi".
  *

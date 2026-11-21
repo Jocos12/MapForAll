@@ -40,7 +40,7 @@ export function TypingIndicator() {
   return (
     <div
       className="inline-flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-gray-200/80 bg-white px-4 py-3.5 shadow-[0_2px_12px_rgba(0,0,0,0.05)] dark:border-white/[0.08] dark:bg-[#15151a] dark:shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
-      aria-label="MapForAll is thinking"
+      aria-label="ConnectRwanda AI is thinking"
     >
       <WaveDots />
       <style>{TYPING_STYLE}</style>

@@ -35,7 +35,7 @@ const res = await users.updateOne(
     $set: { role: 'admin', status: 'active', password_hash: hash(pass), email_verified: true },
     $setOnInsert: {
       user_id: `admin_${crypto.randomBytes(6).toString('hex')}`,
-      email, name: 'Admin MapForAll', token_version: 0,
+      email, name: 'Admin ConnectRwanda AI', token_version: 0,
       languages: ['fr', 'en', 'rw'], lang: 'fr', budget_tier: 'moderate', home_country: 'RW',
       created_at: now, last_active_at: now,
     },

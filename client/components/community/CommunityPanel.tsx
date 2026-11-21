@@ -325,7 +325,7 @@ export function CommunityPanel(props: CommunityPanelProps) {
             <p className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12px] leading-relaxed text-text2">
               <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" aria-hidden />
               <span>
-                {e2eeNotice} You can still browse. Sending stays off, MapForAll never sends unencrypted
+                {e2eeNotice} You can still browse. Sending stays off, ConnectRwanda AI never sends unencrypted
                 messages.
               </span>
             </p>

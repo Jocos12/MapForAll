@@ -3,7 +3,7 @@ import { requestedCategory } from '@/lib/placeCategory'
 import { dedupePlaces } from '@/lib/placeDedupe'
 
 /**
- * Fetch validated MapForAll listings that match the user ask.
+ * Fetch validated ConnectRwanda AI listings that match the user ask.
  * Ensures owner-published businesses appear even when the agent/Maps path
  * returns nothing or an incomplete set (cahier §4.2 / §4.3).
  */

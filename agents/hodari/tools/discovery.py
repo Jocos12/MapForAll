@@ -52,7 +52,7 @@ _PRICE_RANK = {
     "PRICE_LEVEL_VERY_EXPENSIVE": 4,
 }
 
-# Public MapForAll visibility (cahier §4.2): validated (or legacy missing status), not paused.
+# Public ConnectRwanda AI visibility (cahier §4.2): validated (or legacy missing status), not paused.
 _PUBLIC_STATUS = {
     "$or": [
         {"status": "validated"},

@@ -22,7 +22,7 @@ export interface OwnerStats {
   reviewCount: number
   average: number | null
   histogram: number[]
-  /** All-time views by origin: inside MapForAll (map, search, chat) or a shared link / QR code. */
+  /** All-time views by origin: inside ConnectRwanda AI (map, search, chat) or a shared link / QR code. */
   reach: { app: number; link: number }
   actions?: { route: number; call: number; website: number; save: number; unique: number }
 }

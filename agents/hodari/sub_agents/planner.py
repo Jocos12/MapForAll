@@ -1,7 +1,7 @@
 from google.adk.agents import LlmAgent
 from ..llm import on_model_error_callback, resolve_agent_model
 
-PLANNER_INSTRUCTION = """You are the Planner for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
+PLANNER_INSTRUCTION = """You are the Planner for ConnectRwanda AI, a guide to accessible places and local businesses.
 
 Your only job is to parse the user's request into a structured plan. No tool calls. Pure reasoning.
 

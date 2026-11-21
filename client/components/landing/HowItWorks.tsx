@@ -43,7 +43,7 @@ function Screen({ step }: { step: number }) {
       {step === 0 && (
         <motion.div key="ask" {...fade} className="absolute inset-0 flex flex-col justify-end gap-3 bg-gradient-to-b from-[#FBF3E7] to-[#F3E6D4] px-4 pb-6 pt-16">
           <span className="mb-auto mt-8 text-center">
-            <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[#E8672A] text-[15px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.3)]">MF</span>
+            <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[#E8672A] text-[15px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.3)]">CR</span>
             <span className="block text-[22px] font-semibold tracking-[-0.02em] text-[#1A1614]">Muraho 👋</span>
           </span>
           <motion.span

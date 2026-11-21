@@ -61,7 +61,7 @@ const SLIDE_MS = 6500
 function Mark() {
   return (
     <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#E8672A] text-[11px] font-bold tracking-tight text-white">
-      MF
+      CR
     </span>
   )
 }
@@ -224,7 +224,7 @@ function Rule({ met, children, srMet, srUnmet }: { met: boolean; children: React
 }
 
 /**
- * "How will you use MapForAll?" choice. The orange highlight is one shared
+ * "How will you use ConnectRwanda AI?" choice. The orange highlight is one shared
  * element that glides between the two cards (like the segmented control),
  * and a check badge pops onto the chosen card's icon. Visible text is short;
  * screen readers get the full title and description.
@@ -664,8 +664,8 @@ function LoginScreen({ googleEnabled }: { googleEnabled: boolean }) {
               <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-full">
                 <Mark />
                 <span className="whitespace-nowrap leading-tight">
-                  <span className="block text-[15px] font-semibold tracking-[-0.015em] text-[#1A1614] dark:text-gray-100">MapForAll</span>
-                  <span className="block text-[11px] text-[#6E5B50] dark:text-gray-400">Ikarita ya Bose</span>
+                  <span className="block text-[15px] font-semibold tracking-[-0.015em] text-[#1A1614] dark:text-gray-100">ConnectRwanda AI</span>
+                  <span className="block text-[11px] text-[#6E5B50] dark:text-gray-400">Mobilité inclusive · Rwanda</span>
                 </span>
               </Link>
               <Link

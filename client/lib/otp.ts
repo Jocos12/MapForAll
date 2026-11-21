@@ -208,3 +208,17 @@ export async function dropChallenge(challengeId: string): Promise<void> {
   const sid = await mcpConnected()
   await mcpCall(sid, 'delete-many', { database: DB, collection: COLLECTION, filter: { challenge_id: challengeId } })
 }
+
+
+/**
+ * Send the code without making the visitor wait for the mail server.
+ * Returns 'demo' (with the code) only when the on-screen demo fallback is
+ * enabled, because then the result must be known before answering.
+ */
+export async function sendCodeFast(to: string, name: string, code: string, lang: MailLang, challengeId: string): Promise<Delivery> {
+  if (demoFallbackAllowed()) return deliverCode(to, name, code, lang)
+  void deliverCode(to, name, code, lang)
+    .then((r) => { if (r.delivery === 'failed') console.error(`[otp] code email failed for challenge ${challengeId.slice(0, 8)}; the user can ask for a new code`) })
+    .catch((err) => console.error('[otp] code email error', err))
+  return { delivery: 'email' }
+}

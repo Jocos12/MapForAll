@@ -1,4 +1,4 @@
-"""Shared LLM resolution for MapForAll ADK agents (Gemini → Groq → Claude → OpenAI)."""
+"""Shared LLM resolution for ConnectRwanda AI ADK agents (Gemini → Groq → Claude → OpenAI)."""
 
 from .resolve import (
     call_llm_with_fallback,

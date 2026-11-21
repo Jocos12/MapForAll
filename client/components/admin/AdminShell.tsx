@@ -188,10 +188,10 @@ export function AdminShell({
       className={`flex h-full flex-col border-r border-black/[0.06] bg-[#141210] text-[#FBF3E7] transition-[width] duration-200 ${collapsed ? 'w-[72px]' : 'w-[248px]'}`}
     >
       <div className={`flex items-center gap-3 px-4 py-5 ${collapsed ? 'justify-center' : ''}`}>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E8672A] text-[11px] font-bold text-white">MF</span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E8672A] text-[11px] font-bold text-white">CR</span>
         {!collapsed && (
           <div className="min-w-0">
-            <p className="truncate text-[14px] font-semibold tracking-tight">MapForAll</p>
+            <p className="truncate text-[14px] font-semibold tracking-tight">ConnectRwanda AI</p>
             <p className="truncate text-[11px] text-white/50">{t('admin.shell.console')}</p>
           </div>
         )}

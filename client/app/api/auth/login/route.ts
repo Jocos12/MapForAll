@@ -4,7 +4,7 @@ import { isValidEmail } from '@/lib/password'
 import { isMcpUnavailable } from '@/lib/mcp'
 import { maskEmail } from '@/lib/mailer'
 import { mailLang } from '@/lib/emailTemplates'
-import { OTP_COOKIE, OTP_COOKIE_OPTS, OTP_RESEND_SEC, OTP_TTL_MIN, deliverCode, dropChallenge, startChallenge } from '@/lib/otp'
+import { OTP_COOKIE, OTP_COOKIE_OPTS, OTP_RESEND_SEC, OTP_TTL_MIN, dropChallenge, sendCodeFast, startChallenge } from '@/lib/otp'
 import { clientIp, rateLimit } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const sent = await deliverCode(user.email, user.name ?? user.email.split('@')[0], started.code, mailLang(body.lang))
+    const sent = await sendCodeFast(user.email, user.name ?? user.email.split('@')[0], started.code, mailLang(body.lang), started.challengeId)
     if (sent.delivery === 'failed') {
       await dropChallenge(started.challengeId).catch(() => {})
       return NextResponse.json({ error: 'Could not send the email. Please try again.', code: 'email_failed' }, { status: 502 })

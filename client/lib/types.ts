@@ -34,7 +34,7 @@ export interface Place {
   /** Legacy photo references or absolute URLs */
   photos?: string[]
   photo_reference?: string
-  /** Informal / neighbourhood business (MapForAll). */
+  /** Informal / neighbourhood business (ConnectRwanda AI). */
   local_business?: boolean
   /** True only when the inclusion bonus moved this place up in the current result list. */
   prioritized?: boolean

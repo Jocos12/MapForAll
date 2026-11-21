@@ -351,7 +351,7 @@ export function MapSheet({
       {/* Top bar */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[600] flex items-center justify-between gap-3 p-3 pt-[calc(env(safe-area-inset-top,0px)+12px)] sm:p-4">
         <div className="ios-glass-strong pointer-events-auto flex min-w-0 items-center gap-2 rounded-full py-1.5 pl-1.5 pr-4">
-          <span className="ios-avatar-ai h-7 w-7 text-[10px]">MF</span>
+          <span className="ios-avatar-ai h-7 w-7 text-[10px]">CR</span>
           <span className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[var(--ios-label)]">{title}</span>
         </div>
         <button

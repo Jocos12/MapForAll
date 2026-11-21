@@ -1,5 +1,5 @@
 /**
- * MapForAll admin_settings documents (MongoDB via MCP), with ~30s process cache.
+ * ConnectRwanda AI admin_settings documents (MongoDB via MCP), with ~30s process cache.
  */
 import { extractDocs, mcpCall, mcpConnected } from '@/lib/mcp'
 

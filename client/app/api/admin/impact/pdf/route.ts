@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
     let y = 800
 
-    page.drawText('MapForAll — Inclusion impact report', { x: 48, y, size: 18, font: bold, color: BRAND })
+    page.drawText('ConnectRwanda AI — Inclusion impact report', { x: 48, y, size: 18, font: bold, color: BRAND })
     y -= 28
     page.drawText(`Generated ${new Date().toISOString().slice(0, 10)}`, { x: 48, y, size: 10, font, color: rgb(0.4, 0.35, 0.32) })
     y -= 36

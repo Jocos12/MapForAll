@@ -1,5 +1,5 @@
 /**
- * Demo seed for MapForAll admin console (Kigali).
+ * Demo seed for ConnectRwanda AI admin console (Kigali).
  * Usage: npm run seed:demo
  * Reads MONGODB_URI / ADMIN_EMAIL / ADMIN_PASSWORD from client/.env.local
  * (falls back to agents/.env for MONGODB_URI).
@@ -133,7 +133,7 @@ async function main() {
       await db.collection('users').insertOne({
         user_id: `admin_${crypto.randomBytes(6).toString('hex')}`,
         email: adminEmail,
-        name: 'Admin MapForAll',
+        name: 'Admin ConnectRwanda AI',
         password_hash: hashPassword(adminPass),
         role: 'admin',
         status: 'active',
@@ -382,10 +382,10 @@ async function main() {
         default_lang: 'fr',
         demo_mode: false,
         email: {
-          welcome_subject: 'Welcome to MapForAll, {name}!',
-          otp_subject: '{code} is your MapForAll sign-in code',
-          validate_subject: 'Your place was approved on MapForAll',
-          reject_subject: 'Update needed for your MapForAll submission',
+          welcome_subject: 'Welcome to ConnectRwanda AI, {name}!',
+          otp_subject: '{code} is your ConnectRwanda AI sign-in code',
+          validate_subject: 'Your place was approved on ConnectRwanda AI',
+          reject_subject: 'Update needed for your ConnectRwanda AI submission',
         },
         updated_at: new Date().toISOString(),
       },

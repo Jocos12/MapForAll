@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       headers: {
         Accept: 'application/json',
         'Accept-Language': 'en,fr',
-        'User-Agent': 'MapForAll/1.0 (business-onboarding; contact@mapforall.local)',
+        'User-Agent': 'ConnectRwandaAI/1.0 (business-onboarding; contact@connectrwanda.local)',
       },
       signal: AbortSignal.timeout(8000),
       next: { revalidate: 0 },

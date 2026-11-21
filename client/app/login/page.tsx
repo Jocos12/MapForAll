@@ -1,22 +1,24 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import LoginView from '@/components/landing/LoginView'
+import { Inter, Space_Grotesk } from 'next/font/google'
+import AuthView from '@/components/landing/AuthView'
 import { isGoogleOAuthConfigured } from '@/lib/oauth'
+import { warmMailer } from '@/lib/mailer'
 
 export const dynamic = 'force-dynamic'
 
-// Same typeface as the landing page (closest open font to Apple's SF Pro).
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+const display = Space_Grotesk({ subsets: ['latin'], variable: '--font-display', display: 'swap' })
 
 export const metadata: Metadata = {
-  title: 'Connexion — MapForAll',
-  description: 'Connecte-toi pour chercher des lieux ou revendiquer ton commerce.',
+  title: 'Connexion · ConnectRwanda AI',
+  description: 'Connectez-vous ou créez votre compte ConnectRwanda AI.',
 }
 
 export default function LoginPage() {
+  warmMailer()
   return (
-    <div className={inter.variable}>
-      <LoginView googleEnabled={isGoogleOAuthConfigured()} />
+    <div className={`${inter.variable} ${display.variable}`}>
+      <AuthView googleEnabled={isGoogleOAuthConfigured()} />
     </div>
   )
 }

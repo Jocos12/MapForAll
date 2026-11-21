@@ -19,6 +19,7 @@ import {
 import {
   Accessibility,
   ArrowUp,
+  Bus,
   Camera,
   Check,
   MapPin,
@@ -176,7 +177,7 @@ const REPORTS = [
 
 /**
  * What makes the map feel live: the visitor's blue dot breathing, community
- * reports rippling in, and — once MapForAll answers — a walking route that
+ * reports rippling in, and — once ConnectRwanda AI answers — a walking route that
  * draws itself to the place, with a light travelling along it.
  */
 function MapLiveLayer({ phase }: { phase: number }) {
@@ -379,7 +380,7 @@ export function NotificationBanner({ offset = 0, className = '', compact = false
   const items = [1, 2, 3].map((n) => ({ title: t(`landing.talk.n${n}Title`), meta: t(`landing.talk.n${n}Meta`), n }))
   const i = (useStepper(items.length, 3800, running) + offset) % items.length
   const item = items[i]
-  const Icon = item.n === 1 ? Accessibility : item.n === 2 ? MapPin : Check
+  const Icon = item.n === 1 ? Bus : item.n === 2 ? MapPin : Accessibility
 
   return (
     <div ref={ref} aria-hidden className={`relative h-[74px] ${className}`}>
@@ -400,7 +401,7 @@ export function NotificationBanner({ offset = 0, className = '', compact = false
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[13px] font-semibold text-[#1A1614] dark:text-gray-50">{item.title}</span>
-              {!compact && <span className="shrink-0 text-[11px] text-[#6E5B50] dark:text-gray-400">MapForAll</span>}
+              {!compact && <span className="shrink-0 text-[11px] text-[#6E5B50] dark:text-gray-400">ConnectRwanda AI</span>}
             </span>
             <span className="block truncate text-[12px] text-[#6E5B50] dark:text-gray-400">{item.meta}</span>
           </span>
@@ -412,7 +413,7 @@ export function NotificationBanner({ offset = 0, className = '', compact = false
 
 // ── Community ticker ─────────────────────────────────────────────────────────
 
-const TICKER_ICONS = [Accessibility, MapPin, Accessibility, Check, Accessibility, MapPin, Check]
+const TICKER_ICONS = [Bus, Accessibility, MapPin, Bus, Check, Accessibility, MapPin]
 
 /** Endless belt of the kinds of things the community reports, with a pause button. */
 export function CommunityTicker() {

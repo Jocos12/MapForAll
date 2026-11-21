@@ -70,7 +70,7 @@ def inclusion_bonus(place: dict[str, Any], *, prefer_local: bool) -> float:
     surface at equal relevance without drowning an unrelated query.
     Accessible places always receive ACCESS_BONUS. A strict accessibility
     filter is applied by the caller (drop non-accessible places) before scoring.
-    Owner-claimed MapForAll listings get an extra boost so they are not buried
+    Owner-claimed ConnectRwanda AI listings get an extra boost so they are not buried
     by Google Maps ratings when the catalog and Maps results are merged.
     """
     bonus = 0.0

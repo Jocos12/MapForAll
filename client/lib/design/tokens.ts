@@ -35,9 +35,9 @@ export const accents = {
 } as const
 
 export const fonts = {
-  display: '"Playfair Display", Georgia, serif', // headings
-  mono: '"DM Mono", Menlo, monospace', // micro-labels, uppercase tags
-  sans: 'Outfit, system-ui, sans-serif', // body
+  display: 'var(--font-playfair), "Playfair Display", Georgia, serif', // headings
+  mono: 'var(--font-dm-mono), "DM Mono", Menlo, monospace', // micro-labels, uppercase tags
+  sans: 'var(--font-outfit), Outfit, system-ui, sans-serif', // body
 } as const
 
 /** 4/8 spacing scale (px) — never hand-pick `13px`. */

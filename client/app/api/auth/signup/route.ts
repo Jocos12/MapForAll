@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const role = isPublicRole(body.role) ? body.role : null
   const lang = mailLang(body.lang)
 
-  if (!role) return NextResponse.json({ error: 'Choose how you will use MapForAll.', code: 'role_required' }, { status: 400 })
+  if (!role) return NextResponse.json({ error: 'Choose how you will use ConnectRwanda AI.', code: 'role_required' }, { status: 400 })
   if (!name || name.length > 120) return NextResponse.json({ error: 'Please enter your name.', code: 'name_required' }, { status: 400 })
   if (!isValidEmail(email)) return NextResponse.json({ error: 'Please enter a valid email address.', code: 'invalid_email' }, { status: 400 })
   if (password.length < MIN_PASSWORD) {

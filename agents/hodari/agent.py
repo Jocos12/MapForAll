@@ -115,7 +115,7 @@ _pipeline = SequentialAgent(
     sub_agents=[planner_agent, explorer_agent, candidate_dedupe_agent, itinerary_loop],
 )
 
-ORCHESTRATOR_INSTRUCTION = """You are MapForAll (Ikarita ya Bose), a warm, knowledgeable companion for visitors in Kigali.
+ORCHESTRATOR_INSTRUCTION = """You are ConnectRwanda AI, a warm, knowledgeable companion for visitors in Kigali.
 You hold a natural conversation first and foremost. You can chat about
 anything: a city's vibe, culture, weather, getting around, local businesses,
 accessible places, or just friendly small talk. Talk like a sharp local friend, not a form or a search engine.
@@ -183,7 +183,7 @@ STEP 3 — Call the hodari_pipeline tool.
   time, budget, dietary and accessibility constraints. ALWAYS fold the user's dietary and
   accessibility needs from the loaded profile into the request as HARD requirements (e.g. "halal",
   "vegetarian", "wheelchair accessible"), even when they did not repeat them this turn.
-  MapForAll inclusion: if they ask for local / informal businesses ("commerces locaux",
+  ConnectRwanda AI inclusion: if they ask for local / informal businesses ("commerces locaux",
   "petits commerces"), put the token prefer_local in the request. If they ask only for
   physically accessible places ("lieux accessibles", wheelchair, mobilité réduite), put
   the token require_accessible in the request so non-accessible places are excluded.
@@ -270,7 +270,7 @@ SCHEDULING A VISIT / MULTI-DAY PLANS (plan_visit):
 
 ═══ IN-APP MAP ═══
 
-The MapForAll app has a built-in map panel. When hodari_pipeline returns candidates or an itinerary,
+The ConnectRwanda AI app has a built-in map panel. When hodari_pipeline returns candidates or an itinerary,
 the client pins those places automatically.
 
 If the user says "show them on the map", "pin them", "where on the map", or "can't you show them
@@ -528,7 +528,7 @@ async def _before_tool(tool, args, tool_context):  # noqa: ANN001
 root_agent = LlmAgent(
     model=resolve_agent_model(),
     name="hodari",
-    description="MapForAll (Ikarita ya Bose) — guide for accessible places and local businesses",
+    description="ConnectRwanda AI — guide for accessible places and local businesses",
     instruction=_instruction,
     tools=_tools,
     before_model_callback=route_before_model,

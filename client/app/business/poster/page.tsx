@@ -58,9 +58,9 @@ export default function BusinessPoster() {
         <header className="flex flex-col items-center">
           <div className="flex items-center gap-2 text-[#E8672A]">
             <MapPin size={34} strokeWidth={2.2} />
-            <span className="font-display text-[34px] font-semibold tracking-tight">MapForAll</span>
+            <span className="font-display text-[34px] font-semibold tracking-tight">ConnectRwanda AI</span>
           </div>
-          <p className="mt-1 text-[15px] tracking-wide text-[#6E5B50]">Ikarita ya Bose</p>
+          <p className="mt-1 text-[15px] tracking-wide text-[#6E5B50]">Mobilité inclusive · Rwanda</p>
         </header>
 
         <div className="flex flex-col items-center">

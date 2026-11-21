@@ -15,7 +15,7 @@ from ..llm import on_model_error_callback, resolve_agent_model
 
 logger = logging.getLogger(__name__)
 
-ITINERARY_INSTRUCTION = """You are the Itinerary builder for MapForAll (Ikarita ya Bose), a guide to accessible places and local businesses.
+ITINERARY_INSTRUCTION = """You are the Itinerary builder for ConnectRwanda AI, a guide to accessible places and local businesses.
 
 The user's plan and candidate places are in context (session state keys: "plan", "candidates").
 

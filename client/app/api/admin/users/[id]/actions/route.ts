@@ -77,7 +77,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx) {
         const lang = mailLang(doc.lang)
         const loginUrl = appUrl(req, `/login?email=${encodeURIComponent(user.email)}`)
         const mail = await sendMail(user.email, {
-          subject: lang === 'fr' ? 'Nouveau mot de passe MapForAll' : 'Your MapForAll temporary password',
+          subject: lang === 'fr' ? 'Nouveau mot de passe ConnectRwanda AI' : 'Your ConnectRwanda AI temporary password',
           html: `<p>${user.name ?? user.email},</p><p>Your temporary password: <strong>${plain}</strong></p><p><a href="${loginUrl}">Sign in</a></p>`,
           text: `Temporary password: ${plain}\nSign in: ${loginUrl}`,
         })

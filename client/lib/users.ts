@@ -384,3 +384,24 @@ export async function isCalendarConnected(userId: string): Promise<boolean> {
   )
   return Boolean(docs[0]?.google_calendar_connected)
 }
+
+
+/** Account lookup by email (password reset). Null when no account exists. */
+export async function findUserByEmail(email: string): Promise<HodariUser | null> {
+  const sid = await mcpConnected()
+  const docs = extractDocs(
+    await mcpCall(sid, 'find', { database: DB, collection: 'users', filter: { email: email.trim().toLowerCase() }, limit: 1 }),
+  )
+  return docs[0] ? publicUser(docs[0]) : null
+}
+
+/** Set a new password after a verified reset code (no current password needed). */
+export async function setNewPassword(userId: string, next: string): Promise<void> {
+  const sid = await mcpConnected()
+  await mcpCall(sid, 'update-many', {
+    database: DB,
+    collection: 'users',
+    filter: { user_id: userId },
+    update: { $set: { password_hash: hashPassword(next), password_changed_at: new Date().toISOString() } },
+  })
+}

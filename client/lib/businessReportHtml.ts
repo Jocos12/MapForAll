@@ -13,7 +13,7 @@ export type BusinessReportStats = {
   status: string
 }
 
-export function businessReportHtml(stats: BusinessReportStats, title = 'MapForAll — Business report'): string {
+export function businessReportHtml(stats: BusinessReportStats, title = 'ConnectRwanda AI — Business report'): string {
   const sources = Object.entries(stats.views_by_source)
     .map(([k, v]) => `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;">${esc(k)}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">${v}</td></tr>`)
     .join('')
@@ -43,7 +43,7 @@ export function businessReportHtml(stats: BusinessReportStats, title = 'MapForAl
   <table><thead><tr><th>Source</th><th style="text-align:right">Count</th></tr></thead><tbody>
   ${sources || '<tr><td colspan="2" style="padding:12px;">No view data</td></tr>'}
   </tbody></table>
-  <p class="meta" style="margin-top:32px;">MapForAll · Ikarita ya Bose</p>
+  <p class="meta" style="margin-top:32px;">ConnectRwanda AI</p>
 </body>
 </html>`
 }

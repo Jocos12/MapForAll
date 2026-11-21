@@ -43,8 +43,8 @@ export default function PublicPlacePage() {
   const brand = (
     <Link href="/" className="inline-flex items-center gap-1.5 text-[#E8672A]">
       <MapPin size={18} />
-      <span className="font-display text-[17px] font-semibold">MapForAll</span>
-      <span className="text-[12px] text-[#6E5B50]">· Ikarita ya Bose</span>
+      <span className="font-display text-[17px] font-semibold">ConnectRwanda AI</span>
+      <span className="text-[12px] text-[#6E5B50]">· Mobilité inclusive · Rwanda</span>
     </Link>
   )
 

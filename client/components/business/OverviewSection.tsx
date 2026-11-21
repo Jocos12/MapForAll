@@ -239,7 +239,7 @@ function TodoCard({ data, go, jump, style }: { data: OwnerDashboard; go: Go; jum
 }
 
 /**
- * Ties the owner's numbers to the mission: views MapForAll itself brought in, where the
+ * Ties the owner's numbers to the mission: views ConnectRwanda AI itself brought in, where the
  * ranking lifts Local and Accessible businesses, next to the reach of their own link.
  */
 function ImpactCard({ data, go, jump, style }: { data: OwnerDashboard; go: Go; jump: (anchor: string) => void; style?: CSSProperties }) {

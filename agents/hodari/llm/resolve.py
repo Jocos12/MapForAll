@@ -1,4 +1,4 @@
-"""Shared LLM resolution for all MapForAll ADK agents.
+"""Shared LLM resolution for all ConnectRwanda AI ADK agents.
 
 Primary: Gemini (Vertex / GEMINI_MODEL).
 Fallbacks on 429 / 5xx: Groq → Claude → OpenAI (same order as the Next.js cascade).
@@ -219,7 +219,7 @@ async def call_llm_with_fallback(
     import urllib.error
     import urllib.request
 
-    system_text = (system or "You are MapForAll. Reply briefly and helpfully.").strip()
+    system_text = (system or "You are ConnectRwanda AI. Reply briefly and helpfully.").strip()
     errors: list[str] = []
 
     # 1) Gemini Developer API key (optional) — skip if in cooldown

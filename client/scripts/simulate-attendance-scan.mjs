@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Simulate an ESP32 RFID scan against the local MapForAll server.
+ * Simulate an ESP32 RFID scan against the local ConnectRwanda AI server.
  *
  *   curl -X POST http://localhost:3001/api/business/attendance/scan \
  *     -H "X-RFID-API-KEY: $RFID_API_KEY" \

@@ -229,13 +229,13 @@ export function OtpStep({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, ease: APPLE_EASE }}
     >
-      <span aria-hidden className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FDE8DC] text-[#E8672A] dark:bg-[#E8672A]/20">
+      <span aria-hidden className="mx-auto flex h-16 w-16 items-center justify-center rounded-[18px] bg-[var(--accent)] text-white">
         <Mail size={22} strokeWidth={2} />
       </span>
-      <h1 className="mt-4 text-[26px] font-semibold leading-[1.08] tracking-[-0.03em] text-[#1A1614] dark:text-gray-50">
+      <h1 className="mt-4 text-[28px] font-semibold text-center leading-[1.08] tracking-[-0.03em] text-[var(--text)]">
         {t('auth.otp.title')}
       </h1>
-      <p className="mt-1.5 text-[14px] leading-snug text-[#6E5B50] dark:text-gray-400">
+      <p className="mt-2 text-center text-[15px] leading-snug text-[var(--muted)]">
         {t('auth.otp.body').replace('{email}', challenge.email).replace('{minutes}', minutes)}
       </p>
 
@@ -249,7 +249,7 @@ export function OtpStep({
             transition={{ duration: 0.3, ease: APPLE_EASE }}
             className="overflow-hidden"
           >
-            <div role="status" className="mt-4 flex items-start gap-2.5 rounded-[14px] border border-[#F2C94C]/60 bg-[#FFF7DB] px-3.5 py-3 text-[13px] leading-snug text-[#6B4E00] dark:border-[#F2C94C]/30 dark:bg-[#F2C94C]/10 dark:text-[#F5D77A]">
+            <div role="status" className="mt-4 flex items-start gap-2.5 rounded-[14px] border border-[#F2C94C]/60 bg-[#FFF7DB] px-3.5 py-3 text-[13px] leading-snug text-[#6B4E00]">
               <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">{t('auth.otp.demoTitle')}</p>
@@ -262,7 +262,7 @@ export function OtpStep({
                 type="button"
                 onClick={() => fillFrom(0, demoCode)}
                 disabled={disabled}
-                className="shrink-0 rounded-full bg-[#6B4E00]/10 px-3 py-1.5 text-[12.5px] font-semibold transition-colors hover:bg-[#6B4E00]/20 disabled:opacity-50 dark:bg-white/10 dark:hover:bg-white/20"
+                className="shrink-0 rounded-full bg-[#6B4E00]/10 px-3 py-1.5 text-[12.5px] font-semibold transition-colors hover:bg-[#6B4E00]/20 disabled:opacity-50"
               >
                 {t('auth.otp.demoUse')}
               </button>
@@ -289,11 +289,11 @@ export function OtpStep({
               aria-invalid={Boolean(error)}
               aria-describedby={error ? 'otp-error' : undefined}
               disabled={disabled}
-              className={`h-14 w-full min-w-0 rounded-[14px] border bg-white text-center text-[22px] font-semibold text-[#1A1614] outline-none transition-[border-color,box-shadow] duration-200 disabled:opacity-60 dark:bg-white/[0.04] dark:text-gray-50 ${error
-                ? 'border-[#B42318] shadow-[0_0_0_4px_rgba(180,35,24,0.10)] dark:border-[#FF8A7A]'
+              className={`h-14 w-full min-w-0 rounded-2xl border bg-[var(--field)] text-center text-[22px] font-semibold text-[var(--text)] outline-none transition-[border-color,box-shadow] duration-200 disabled:opacity-60 ${error
+                ? 'border-[#B42318] shadow-[0_0_0_4px_rgba(180,35,24,0.10)]'
                 : done
                   ? 'border-[#1F8A5B] shadow-[0_0_0_4px_rgba(31,138,91,0.14)]'
-                  : 'border-black/[0.09] hover:border-black/20 focus:!border-[#E8672A] focus:shadow-[0_0_0_4px_rgba(232,103,42,0.16)] dark:border-white/10 dark:hover:border-white/20'}`}
+                  : 'border-[var(--line)] hover:border-[var(--muted)] focus:!border-[var(--blue)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--blue)_18%,transparent)]'}`}
             />
           ))}
         </div>
@@ -301,22 +301,22 @@ export function OtpStep({
 
       <div className="mt-2 min-h-[20px]" aria-live="polite">
         {error ? (
-          <p id="otp-error" role="alert" className="flex items-start gap-1.5 text-[12.5px] leading-snug text-[#B42318] dark:text-[#FF8A7A]">
+          <p id="otp-error" role="alert" className="flex items-start gap-1.5 text-[12.5px] leading-snug text-[var(--red)]">
             <AlertCircle size={13} className="mt-px shrink-0" aria-hidden />
             {error}
           </p>
         ) : busy || done ? (
-          <p className="flex items-center gap-1.5 text-[12.5px] text-[#6E5B50] dark:text-gray-400">
-            {done ? <Check size={13} className="text-[#1F8A5B]" aria-hidden /> : <Loader2 size={13} className="animate-spin motion-reduce:animate-none" aria-hidden />}
+          <p className="flex items-center gap-1.5 text-[12.5px] text-[var(--muted)]">
+            {done ? <Check size={13} className="text-[var(--green)]" aria-hidden /> : <Loader2 size={13} className="animate-spin motion-reduce:animate-none" aria-hidden />}
             {done ? t('auth.otp.success') : t('auth.otp.verifying')}
           </p>
         ) : info ? (
-          <p className="flex items-center gap-1.5 text-[12.5px] text-[#1F8A5B] dark:text-[#5BD49A]">
+          <p className="flex items-center gap-1.5 text-[12.5px] text-[var(--green)]">
             <Check size={13} aria-hidden />
             {info}
           </p>
         ) : (
-          <p className="text-[12.5px] text-[#6E5B50] dark:text-gray-400">{t('auth.otp.spam')}</p>
+          <p className="text-[12.5px] text-[var(--muted)]">{t('auth.otp.spam')}</p>
         )}
       </div>
 
@@ -324,7 +324,7 @@ export function OtpStep({
         type="button"
         onClick={() => void submit(digits.join(''))}
         disabled={disabled || digits.join('').length < LENGTH}
-        className={`mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium text-white transition-[background-color,opacity] duration-300 disabled:cursor-default ${done ? 'bg-[#1F8A5B]' : 'bg-[#1A1614] enabled:hover:bg-black disabled:opacity-50 dark:bg-white dark:text-[#1A1614] dark:enabled:hover:bg-gray-100'}`}
+        className={`mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-full text-[17px] font-medium text-white transition-[background-color,opacity] duration-300 disabled:cursor-default ${done ? 'bg-[#1F8A5B]' : 'bg-[var(--accent)] !text-white font-semibold enabled:hover:brightness-110 disabled:opacity-50'}`}
       >
         {done ? <Check size={18} strokeWidth={2.75} aria-hidden /> : busy ? <Loader2 size={16} className="animate-spin motion-reduce:animate-none" aria-hidden /> : null}
         {done ? t('auth.otp.success') : busy ? t('auth.otp.verifying') : t('auth.otp.verify')}
@@ -335,7 +335,7 @@ export function OtpStep({
           type="button"
           onClick={() => onRestart('')}
           disabled={busy || done}
-          className="flex min-h-[36px] items-center gap-1 rounded-full px-1 text-[13px] font-medium text-[#6E5B50] transition-colors hover:text-[#1A1614] disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-100"
+          className="flex min-h-[36px] items-center gap-1 rounded-full px-1 text-[13px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--text)] disabled:opacity-50"
         >
           <ArrowLeft size={14} aria-hidden />
           {t('auth.otp.back')}
@@ -344,7 +344,7 @@ export function OtpStep({
           type="button"
           onClick={() => void resend()}
           disabled={sending || cooldown > 0 || locked || done}
-          className="flex min-h-[36px] items-center gap-1.5 rounded-full px-1 text-[13px] font-medium text-[#B8441A] underline-offset-4 enabled:hover:underline disabled:text-[#6E5B50] dark:text-[#FF9A63] dark:disabled:text-gray-500"
+          className="flex min-h-[36px] items-center gap-1.5 rounded-full px-1 text-[13px] font-medium text-[var(--blue)] underline-offset-4 enabled:hover:underline disabled:text-[var(--muted)]"
         >
           {sending ? <Loader2 size={13} className="animate-spin motion-reduce:animate-none" aria-hidden /> : <RotateCcw size={13} aria-hidden />}
           {sending

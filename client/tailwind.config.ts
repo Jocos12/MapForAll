@@ -56,9 +56,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        display: ['"Playfair Display"', 'Georgia', 'serif'],
-        mono:    ['"DM Mono"', 'Menlo', 'monospace'],
-        sans:    ['Outfit', 'system-ui', 'sans-serif'],
+        display: ['var(--font-playfair)', '"Playfair Display"', 'Georgia', 'serif'],
+        mono:    ['var(--font-dm-mono)', '"DM Mono"', 'Menlo', 'monospace'],
+        sans:    ['var(--font-outfit)', 'Outfit', 'system-ui', 'sans-serif'],
       },
       // Entrance/loop animation classes live in app/globals.css (single source —
       // see the "Motion system" section there). This file previously duplicated

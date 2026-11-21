@@ -32,7 +32,7 @@ export async function ensureAdminFromEnv(): Promise<{ created: boolean; email: s
         {
           user_id,
           email,
-          name: 'Admin MapForAll',
+          name: 'Admin ConnectRwanda AI',
           password_hash: hashPassword(password),
           role: 'admin',
           status: 'active',

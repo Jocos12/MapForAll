@@ -28,7 +28,7 @@ _OVERPASS_URLS = [
     if u.strip()
 ]
 _NOMINATIM_URL = os.getenv("OSM_NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
-_UA = os.getenv("OSM_USER_AGENT", "MapForAll-local-demo/1.0 (https://github.com/Jocos12/MapForAll)")
+_UA = os.getenv("OSM_USER_AGENT", "ConnectRwandaAI-local-demo/1.0 (https://github.com/Jocos12/MapForAll)")
 
 # Google place type -> (OSM tag filters, Google-style categories to report)
 _TYPE_TAGS: dict[str, tuple[list[str], list[str]]] = {

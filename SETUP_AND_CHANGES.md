@@ -1,4 +1,4 @@
-# MapForAll — Local setup guide & change log
+# ConnectRwanda AI (repo: MapForAll) — Local setup guide & change log
 
 This file explains **how to run MapForAll on your own computer** after a `git pull`,
 and **everything that changed** in this update (new chat design, free maps,
@@ -172,6 +172,42 @@ Files: `client/components/ChatPanel.tsx`, `InlinePlaceGallery.tsx`, `InlineMapPr
 - **Gemini fallback model** default `gemini-2.0-flash` (retired, 404) → `gemini-3.6-flash`
   (`agents/hodari/llm/resolve.py`).
 - Map tiles collapsing to 0 px when switching styles (React overwrote Leaflet's classes) — fixed + CSS guard.
+
+### 5.7 ConnectRwanda AI — new landing page and new name
+- **New landing page** (`client/components/landing/ConnectRwandaLanding.tsx`, used by `client/app/page.tsx`):
+  a brand-new dark "smart mobility" design (navy background, Rwanda blue / yellow / green accents,
+  Space Grotesk headlines). All visuals are drawn in code, no photos or phone mockups: animated Kigali
+  bus network with moving buses, typing "Ask ConnectRwanda AI" card, 4 problems, AI-core platform
+  diagram (smart navigation, public transport guidance, voice assistant, accessible mapping),
+  LED departures board, route drawn step by step, voice waveform with Kinyarwanda/French/English
+  transcripts, filterable accessibility map, transparent business ranking, audiences, bus→AI→phone
+  data flow. Texts in FR/EN/RW under `cr.*` in `client/locales/*.json`.
+  Dark and light themes (toggle in the header/footer, remembered per browser), scroll-spy menu,
+  scroll progress bar, full footer. **Real Leaflet maps of Kigali** (`client/components/landing/CityMap.tsx`):
+  bus lines follow real roads (OSRM), buses move along them, and an accessibility layer with filters
+  (illustrative data). Every "movement" scene uses this real map from a different angle: the hero
+  **presentation film** (7 coded scenes with the Rwanda flag, captions in RW/FR/EN, play/pause and
+  chapters), live buses (follow a bus), navigation (tilted door-to-door journey), accessibility.
+  The page scrolls inside its own container because `html, body` are
+  `overflow: hidden` for the chat screens. The previous landing
+  (`MapForAllLanding.tsx`) is kept only because the login page reuses its language menu.
+- **Whole app renamed to "ConnectRwanda AI"**: landing, login, chat, sidebar, admin/business spaces,
+  emails, page titles, PWA manifest, AI agent prompts. Code identifiers (`MapForAllLanding`, …) and the
+  GitHub repo name are unchanged. Locally set `SMTP_FROM_NAME=ConnectRwanda AI` in `client/.env.local`.
+- Note: bus tracking is shown on the landing page as a product feature (demo animation);
+  live GPS/IoT bus data is not wired into the app yet.
+
+### 5.8 ConnectRwanda AI sign-in, sign-up and password reset
+- New auth screen `client/components/landing/AuthView.tsx` (used by `/login`), shared tokens in
+  `client/components/landing/crTheme.tsx`: live Kigali map panel (tilted, buses moving, rotating live
+  updates, Rwanda flag stripe), dark/light theme shared with the landing, language switch, password
+  strength meter, role cards. `/login?mode=signup` and `/login?mode=forgot` open those steps directly.
+  The sign-in code step (`OtpStep.tsx`) uses the same theme.
+- **Working password reset** (before, "Forgot password?" only said it was not available):
+  `POST /api/auth/reset/request` (email a 6-digit code; same answer whether the email exists or not),
+  `POST /api/auth/reset/resend`, `POST /api/auth/reset/confirm` (code + new password; signs out every
+  other session). Helpers `findUserByEmail` and `setNewPassword` in `client/lib/users.ts`, cookie
+  `hodari_reset` (`client/lib/resetCookie.ts`). The email uses the existing code template.
 
 ### 5.6 New developer tools
 | File | Purpose |

@@ -507,7 +507,7 @@ export function ChatPanel({
               : voiceState === 'thinking' ? t('composer.thinking')
               : voiceState === 'speaking' ? t('composer.speaking')
               : voiceState === 'paused' ? t('composer.paused')
-              : tr('Demande un lieu à MapForAll…', 'Ask MapForAll for a place…', 'Baza MapForAll ahantu…')
+              : tr('Demande un lieu à ConnectRwanda AI…', 'Ask ConnectRwanda AI for a place…', 'Baza ConnectRwanda AI ahantu…')
             }
             aria-label={t('composer.placeholder')}
             className="min-w-0 flex-1 bg-transparent px-1 py-2 text-[16px] tracking-[-0.02em] text-[var(--ios-label)] outline-none placeholder:text-[var(--ios-label-3)] md:text-[16px]"
@@ -536,7 +536,7 @@ export function ChatPanel({
         </div>
       </form>
       <p className="mt-2 hidden text-center text-[11px] text-[var(--ios-label-3)] md:block">
-        {tr('MapForAll peut se tromper. Vérifie les horaires et l’accessibilité sur place.', 'MapForAll can make mistakes. Check hours and access on site.')}
+        {tr('ConnectRwanda AI peut se tromper. Vérifie les horaires et l’accessibilité sur place.', 'ConnectRwanda AI can make mistakes. Check hours and access on site.')}
       </p>
     </div>
   )
@@ -549,7 +549,7 @@ export function ChatPanel({
             {isEmpty && (
               <div className="ios-rise flex flex-col items-center px-2 pb-4 pt-[7vh] text-center sm:pt-[11vh]">
                 <div className="ios-glass mb-5 flex h-[68px] w-[68px] items-center justify-center rounded-[22px]">
-                  <span className="ios-avatar-ai h-12 w-12 rounded-[15px] text-[15px]">MF</span>
+                  <span className="ios-avatar-ai h-12 w-12 rounded-[15px] text-[15px]">CR</span>
                 </div>
                 <h1 className="ios-large-title text-[var(--ios-label)]">
                   {userName ? tr(`Bonjour, ${userName.split(' ')[0]}`, `Hi, ${userName.split(' ')[0]}`, `Muraho, ${userName.split(' ')[0]}`) : t('empty.title')}
@@ -635,9 +635,9 @@ export function ChatPanel({
                   )
                 ) : (
                   <div className="flex w-full min-w-0 gap-3">
-                    <span className="ios-avatar-ai mt-0.5 hidden sm:inline-flex">MF</span>
+                    <span className="ios-avatar-ai mt-0.5 hidden sm:inline-flex">CR</span>
                     <div className="min-w-0 flex-1">
-                      <p className="mb-1 text-[13px] font-semibold tracking-[-0.01em] text-[var(--ios-label)]">MapForAll</p>
+                      <p className="mb-1 text-[13px] font-semibold tracking-[-0.01em] text-[var(--ios-label)]">ConnectRwanda AI</p>
                       {msg.content ? (
                         <div className="text-[16px] leading-[24px] tracking-[-0.015em] text-[var(--ios-label)] [&_a]:text-[var(--ios-tint)]">
                           <CollapsibleMessage
@@ -694,9 +694,9 @@ export function ChatPanel({
 
             {showThinking && (
               <div className="flex w-full gap-3">
-                <span className="ios-avatar-ai mt-0.5 hidden sm:inline-flex">MF</span>
+                <span className="ios-avatar-ai mt-0.5 hidden sm:inline-flex">CR</span>
                 <div className="min-w-0 flex-1">
-                  <p className="mb-1 text-[13px] font-semibold text-[var(--ios-label)]">MapForAll</p>
+                  <p className="mb-1 text-[13px] font-semibold text-[var(--ios-label)]">ConnectRwanda AI</p>
                   <div className="ios-glass ios-rise inline-block rounded-[18px] px-3.5 py-2.5">
                     <ThinkingTrace steps={thinkingSteps} />
                   </div>
@@ -763,9 +763,9 @@ export function ChatPanel({
   const sidebar = (
     <div className="flex h-full w-[280px] flex-col">
       <div className="flex shrink-0 items-center gap-2.5 px-4 pb-2 pt-[calc(env(safe-area-inset-top,0px)+14px)]">
-        <span className="ios-avatar-ai h-8 w-8 rounded-[10px]">MF</span>
+        <span className="ios-avatar-ai h-8 w-8 rounded-[10px]">CR</span>
         <div className="min-w-0 flex-1 leading-tight">
-          <p className="truncate text-[17px] font-semibold tracking-[-0.02em] text-[var(--ios-label)]">MapForAll</p>
+          <p className="truncate text-[17px] font-semibold tracking-[-0.02em] text-[var(--ios-label)]">ConnectRwanda AI</p>
           <p className="truncate text-[12px] text-[var(--ios-label-2)]">{t('app.subtitle')}</p>
         </div>
         <button type="button" onClick={() => setHistoryOpen(false)} aria-label={tr('Masquer la barre latérale', 'Hide sidebar')} className="ios-icon-btn text-[var(--ios-label-2)]">

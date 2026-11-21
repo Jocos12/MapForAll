@@ -1,20 +1,20 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import MapForAllLanding from '@/components/landing/MapForAllLanding'
+import { Inter, Space_Grotesk } from 'next/font/google'
+import ConnectRwandaLanding from '@/components/landing/ConnectRwandaLanding'
 
-// Inter is the closest open font to Apple's SF Pro; the landing uses it for
-// both headlines and body so the page reads like an iOS product page.
+// Inter for body text, Space Grotesk for headlines (ConnectRwanda AI identity).
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+const display = Space_Grotesk({ subsets: ['latin'], variable: '--font-display', display: 'swap' })
 
 export const metadata: Metadata = {
-  title: 'MapForAll — Ikarita ya Bose',
-  description: 'La carte qui rend visible ce que la ville oublie.',
+  title: 'ConnectRwanda AI · Mobilité intelligente et accessible',
+  description: 'Navigation intelligente, bus en temps réel, assistant vocal et cartes accessibles au Rwanda : une plateforme IA de mobilité inclusive.',
 }
 
 export default function HomePage() {
   return (
-    <div className={inter.variable}>
-      <MapForAllLanding />
+    <div className={`${inter.variable} ${display.variable}`}>
+      <ConnectRwandaLanding />
     </div>
   )
 }

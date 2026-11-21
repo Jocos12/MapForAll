@@ -73,14 +73,16 @@ function transport(): Transporter {
     },
     connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT) || 10_000,
     greetingTimeout: 10_000,
-    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT) || 10_000,
+    // Keep the authenticated connection open between emails: no new TLS +
+    // login handshake (1-3 s with Gmail) for every sign-in code.
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT) || 5 * 60_000,
     tls: {
       // Keep certificate verification on. Do not set rejectUnauthorized: false.
       minVersion: 'TLSv1.2',
       servername: process.env.SMTP_HOST,
     },
   }
-  transporter = nodemailer.createTransport(options)
+  transporter = nodemailer.createTransport({ ...options, pool: true, maxConnections: 2, maxMessages: 200 } as SMTPTransport.Options)
   return transporter
 }
 
@@ -90,7 +92,7 @@ function fromAddress(): string {
 }
 
 function fromName(): string {
-  return (process.env.SMTP_FROM_NAME || 'MapForAll').replace(/"/g, '')
+  return (process.env.SMTP_FROM_NAME || 'ConnectRwanda AI').replace(/"/g, '')
 }
 
 async function ensureVerified(): Promise<void> {
@@ -146,4 +148,11 @@ export async function sendMail(to: string, content: MailContent): Promise<SendRe
     verified = false
     return { ok: false, reason: 'failed' }
   }
+}
+
+
+/** Open (and verify) the SMTP connection ahead of time, e.g. when the sign-in page loads. */
+export function warmMailer(): void {
+  if (!isSmtpConfigured() || verified) return
+  void ensureVerified().catch(() => {})
 }

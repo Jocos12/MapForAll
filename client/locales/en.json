@@ -1,8 +1,8 @@
 {
   "app": {
-    "name": "MapForAll",
-    "subtitle": "Ikarita ya Bose",
-    "tagline": "The map that makes visible what the city forgets."
+    "name": "ConnectRwanda AI",
+    "subtitle": "Inclusive mobility · Rwanda",
+    "tagline": "Real-time buses, local businesses and accessible places."
   },
   "errors": {
     "retry": "Something went wrong. Try again in a moment.",
@@ -111,7 +111,7 @@
     "ttsUnavailable": "Voice playback is temporarily unavailable",
     "ttsBrowserFallback": "Using your browser’s voice (Gemini TTS unavailable)",
     "noSpeech": "No speech detected. Try speaking clearly in Chrome or Edge.",
-    "speaking": "MapForAll is speaking…",
+    "speaking": "ConnectRwanda AI is speaking…",
     "paused": "Paused",
     "hideMap": "Hide map",
     "showMap": "Show map"
@@ -174,7 +174,7 @@
   "mapsChooser": {
     "button": "Maps",
     "title": "Open this place",
-    "inApp": "View in MapForAll",
+    "inApp": "View in ConnectRwanda AI",
     "google": "Continue on Google Maps",
     "close": "Close"
   },
@@ -225,7 +225,7 @@
   },
   "saved": {
     "title": "Saved places",
-    "subtitle": "Ikarita ya Bose · My list",
+    "subtitle": "My list",
     "places": "Places",
     "plan": "Planned visits",
     "empty": "No saved places yet",
@@ -236,7 +236,7 @@
     "signIn": "Sign in to see your saved places.",
     "signInAction": "Sign in",
     "explore": "Explore places",
-    "ask": "Ask MapForAll",
+    "ask": "Ask ConnectRwanda AI",
     "noVisits": "No visits planned yet",
     "noVisitsHint": "On Places, use “Plan a visit” to schedule a stop.",
     "viewPlaces": "View saved places"
@@ -317,7 +317,7 @@
     "welcome": "Welcome back",
     "createTitle": "Create your account",
     "welcomeBody": "Sign in with the email and password for your account.",
-    "createBody": "Tell us how you will use MapForAll, then choose a password.",
+    "createBody": "Tell us how you will use ConnectRwanda AI, then choose a password.",
     "clientTitle": "I am looking for places",
     "clientBody": "Search, filter, and add a missing place.",
     "ownerTitle": "I have a business to share",
@@ -405,7 +405,7 @@
     },
     "forkLabel": "Choose your path",
     "joinTitle": "Join the map",
-    "roleLegend": "How will you use MapForAll?",
+    "roleLegend": "How will you use ConnectRwanda AI?",
     "showPassword": "Show password",
     "hidePassword": "Hide password",
     "ruleMet": "(met)",
@@ -503,7 +503,7 @@
       "archivedHint": "This listing is archived and hidden.",
       "publishedIncomplete": "Published — complete it to rank higher",
       "validated": "Published",
-      "validatedHint": "Your listing is visible to everyone on the MapForAll map.",
+      "validatedHint": "Your listing is visible to everyone on the ConnectRwanda AI map.",
       "rejected": "Rejected",
       "reason": "Reason:",
       "noReason": "no reason given.",
@@ -589,17 +589,27 @@
       "range": "Period",
       "export": "Export (CSV)",
       "vsPrevious": "vs previous period",
-      "kpi": { "views": "Views in period", "perDay": "Views per day (avg.)" },
-      "sourceApp": "Via MapForAll",
+      "kpi": {
+        "views": "Views in period",
+        "perDay": "Views per day (avg.)"
+      },
+      "sourceApp": "Via ConnectRwanda AI",
       "sourceLink": "Via link or QR code",
-      "sourceAppLong": "Inside MapForAll (map, search, chat)",
+      "sourceAppLong": "Inside ConnectRwanda AI (map, search, chat)",
       "sourceLinkLong": "Shared link or in-store QR code",
       "sourcesTitle": "Where your visits come from",
       "shareHint": "Share your link or QR code to bring in more visitors →",
       "weekdayTitle": "Your best days",
       "weekdayBest": "{day} is your most viewed day in this period.",
       "reviewsCount": "{n} reviews",
-      "csv": { "date": "Date", "total": "Views", "app": "Inside MapForAll", "link": "Link or QR code", "stars": "Stars", "count": "Reviews" },
+      "csv": {
+        "date": "Date",
+        "total": "Views",
+        "app": "Inside ConnectRwanda AI",
+        "link": "Link or QR code",
+        "stars": "Stars",
+        "count": "Reviews"
+      },
       "empty": {
         "draft": {
           "views": "Complete your listing to start showing up on the map.",
@@ -723,7 +733,7 @@
       "resumeBody": "Your listing is hidden. Reactivate it to show up in results again.",
       "resume": "Reactivate my listing",
       "closeTitle": "Delete permanently",
-      "closeBody": "Removes the listing from MapForAll. This cannot be undone.",
+      "closeBody": "Removes the listing from ConnectRwanda AI. This cannot be undone.",
       "close": "Delete permanently",
       "step": "Step {n} of 2",
       "confirmTitle": "Permanently delete this business?",
@@ -757,27 +767,27 @@
       "copy": "Copy",
       "copied": "Copied",
       "more": "Other apps",
-      "message": "Find {name} on MapForAll:",
+      "message": "Find {name} on ConnectRwanda AI:",
       "posterHint": "Print a poster with your QR code: customers scan it, see your listing and leave a review.",
       "poster": "Print the poster",
       "downloadQr": "Download the QR code",
-      "qrAlt": "QR code to the MapForAll listing",
+      "qrAlt": "QR code to the ConnectRwanda AI listing",
       "scan": "Scan to test",
       "subtitle": "A unique link and QR code to your public listing.",
       "link": "Your public listing link",
-      "qrCaption": "Display it in your shop: “Find us and leave a review on MapForAll”"
+      "qrCaption": "Display it in your shop: “Find us and leave a review on ConnectRwanda AI”"
     },
     "poster": {
       "back": "Back to dashboard",
       "print": "Print",
-      "headline": "Find us and leave a review on MapForAll",
+      "headline": "Find us and leave a review on ConnectRwanda AI",
       "scan": "Scan to see our listing, hours and reviews",
       "footer": "The map of neighbourhood businesses, accessible to all."
     },
     "public": {
       "missing": "Listing unavailable",
       "missingHint": "This business is not published yet, or it has been removed from the map.",
-      "openMap": "Open the MapForAll map",
+      "openMap": "Open the ConnectRwanda AI map",
       "directions": "Directions"
     },
     "sections": {
@@ -974,7 +984,7 @@
       "localOnly": "highlighted as a local business",
       "accessOnly": "highlighted as an accessible place",
       "none": "fill in your strengths to be highlighted",
-      "whyLocal": "Local business: MapForAll puts neighbourhood shops ahead of big chains, especially when a visitor looks for something local.",
+      "whyLocal": "Local business: ConnectRwanda AI puts neighbourhood shops ahead of big chains, especially when a visitor looks for something local.",
       "whyAccess": "Accessible: a step-free entrance gives a ranking bonus; adapted toilets and parking add to it.",
       "moreAccess": "If you have adapted toilets or nearby parking, add them to increase this bonus.",
       "tellClients": "Tell your customers: your listing carries these badges on the map and on your shared link.",
@@ -982,7 +992,7 @@
     },
     "settings": {
       "language": "Dashboard language",
-      "languageHint": "Applies to all of MapForAll on this device.",
+      "languageHint": "Applies to all of ConnectRwanda AI on this device.",
       "account": "Account",
       "name": "Name",
       "email": "Email",
@@ -1008,12 +1018,12 @@
     "impact": {
       "kicker": "Your impact",
       "headline": "Your business contributes to local economic inclusion.",
-      "appViews": "views generated by MapForAll, which highlights your {status} status",
-      "appViewsPlain": "views generated by the MapForAll map and search",
-      "how": "MapForAll ranks neighbourhood businesses and accessible places higher. This number counts visits from the map, search and assistant, not from your own link.",
+      "appViews": "views generated by ConnectRwanda AI, which highlights your {status} status",
+      "appViewsPlain": "views generated by the ConnectRwanda AI map and search",
+      "how": "ConnectRwanda AI ranks neighbourhood businesses and accessible places higher. This number counts visits from the map, search and assistant, not from your own link.",
       "addAccess": "Declare an accessible entrance to strengthen this boost",
       "emptyTitle": "Your impact starts here",
-      "emptyBody": "As soon as your listing is published and viewed, we'll count here the visits MapForAll brings you.",
+      "emptyBody": "As soon as your listing is published and viewed, we'll count here the visits ConnectRwanda AI brings you.",
       "linkViews": "views via link / QR",
       "backers": "businesses recommend you",
       "reviews": "customer reviews"
@@ -1036,7 +1046,7 @@
         "admin": "Administrator",
         "client": "Client"
       },
-      "roleHint": "The account role is assigned by the MapForAll team and can't be changed here.",
+      "roleHint": "The account role is assigned by the ConnectRwanda AI team and can't be changed here.",
       "name": "Full name",
       "phone": "Phone",
       "optional": "optional",
@@ -1133,7 +1143,7 @@
       "settings": "Settings"
     },
     "insights": {
-      "subtitle": "Ask factual questions about MapForAll data in Kigali.",
+      "subtitle": "Ask factual questions about ConnectRwanda AI data in Kigali.",
       "welcome": "Admin insights assistant",
       "welcomeHint": "Answers use live MongoDB snapshots only — no invented stats.",
       "placeholder": "Ask about places, accessibility gaps, searches…",
@@ -1166,13 +1176,13 @@
       "closeMenu": "Close",
       "noResults": "No results.",
       "comingSoon": "This section arrives in the next build step. Navigation and security are already in place.",
-      "deniedBody": "You do not have permission to open the MapForAll admin console.",
+      "deniedBody": "You do not have permission to open the ConnectRwanda AI admin console.",
       "businessDenied": "This area is only for the business that belongs to your account.",
       "backApp": "Back to the app",
       "loadError": "Could not load the data."
     },
     "dashboard": {
-      "subtitle": "Overview of MapForAll in Kigali.",
+      "subtitle": "Overview of ConnectRwanda AI in Kigali.",
       "queueTitle": "Handle now",
       "queueBody": "{n} place(s) waiting for review.",
       "openModeration": "Open moderation",
@@ -1218,10 +1228,18 @@
           "hide": "Review hidden",
           "delete": "Review deleted"
         },
-        "scoring": { "update": "Scoring updated" },
-        "settings": { "update": "Settings updated" },
-        "demo": { "start": "Demo started" },
-        "category": { "update": "Category updated" }
+        "scoring": {
+          "update": "Scoring updated"
+        },
+        "settings": {
+          "update": "Settings updated"
+        },
+        "demo": {
+          "start": "Demo started"
+        },
+        "category": {
+          "update": "Category updated"
+        }
       },
       "range": {
         "7": "7 days",
@@ -1636,65 +1654,67 @@
   "landing": {
     "nav": {
       "how": "How it works",
-      "businesses": "For businesses",
+      "businesses": "Businesses & operators",
       "access": "Accessibility",
       "menu": "Menu",
       "close": "Close",
       "live": "Live in Kigali",
-      "open": "Open MapForAll",
-      "lang": "Language"
+      "open": "Open ConnectRwanda AI",
+      "lang": "Language",
+      "transit": "Live buses",
+      "search": "Places & AI"
     },
     "hero": {
-      "kicker": "MapForAll, the map that makes visible what the city forgets.",
+      "kicker": "ConnectRwanda AI, the map that makes visible what the city forgets.",
       "title": "Find the small businesses and accessible places near you.",
-      "body": "MapForAll puts local traders and places that welcome wheelchair users first — not only the big chains that are already everywhere. Any missing place can be added by the community in a few seconds.",
+      "body": "ConnectRwanda AI puts local traders and places that welcome wheelchair users first, not only the big chains that are already everywhere. Any missing place can be added by the community in a few seconds.",
       "cta": "Explore the map",
-      "badge": "Enriched by the community",
+      "badge": "Built for everyone",
       "live": "Live",
-      "card1Title": "Kimisagara Market",
-      "card1Meta": "Local market · 6 min walk",
+      "card1Title": "Bus 302 · in 4 min",
+      "card1Meta": "Remera → Nyabugogo · low floor",
       "card2Title": "Duka rya Jean · Accessible",
       "card2Meta": "Confirmed by 12 people"
     },
     "about": {
       "badge": "The gap",
-      "quote": "A small shop, fifty metres away. Invisible on every other app. Not on MapForAll.",
+      "quote": "A small shop, fifty metres away. Invisible on every other app. Not on ConnectRwanda AI.",
       "body": "Real local businesses and accessible places, added by the community and checked, ranked by relevance and lifted for economic inclusion.",
-      "cta": "Add a place",
+      "cta": "Get started for free",
       "marketAlt": "A busy neighbourhood market street",
       "aerialAlt": "Kigali hills from above",
       "credit": "Photographs: Wikimedia Commons"
     },
     "work": {
       "badge": "For businesses",
-      "title": "From invisible to visible",
-      "body": "Every business counts. MapForAll makes room for the places other algorithms forget.",
-      "cta": "Open the map"
+      "title": "Your business, finally visible.",
+      "body": "Create your listing for free, add photos, opening hours and accessibility. Customers nearby find you, even without a website.",
+      "cta": "List my business"
     },
     "cards": {
-      "localKicker": "Local business",
-      "localTitle": "The neighbourhood market",
-      "tableKicker": "The table",
-      "tableTitle": "A dish, a local story",
+      "localKicker": "Local businesses",
+      "localTitle": "The neighbourhood market, on the map",
+      "tableKicker": "Small businesses",
+      "tableTitle": "Visible without a website",
       "accessKicker": "Accessibility",
-      "accessTitle": "A doorway without a step",
-      "missionKicker": "The mission",
-      "missionTitle": "Narrow the urban gap",
-      "sceneKicker": "The stage",
-      "sceneTitle": "Kigali, Rwanda"
+      "accessTitle": "Trips without bad surprises",
+      "missionKicker": "Transport",
+      "missionTitle": "Kigali’s buses in real time",
+      "sceneKicker": "Rwanda",
+      "sceneTitle": "Better connected cities"
     },
     "demo": {
       "badge": "See it in action",
-      "title": "Watch MapForAll read the city",
-      "body": "Ask for what you need in plain words. MapForAll finds local businesses and accessible places around you, each with a clear badge. Never invented. Checked by the community.",
-      "cta": "Try it yourself",
-      "bubble": "Find a local business near the stadium"
+      "title": "Watch ConnectRwanda AI read the city",
+      "body": "Ask for what you need in plain words. ConnectRwanda AI finds local businesses and accessible places around you, each with a clear badge. Never invented. Checked by the community.",
+      "cta": "Find an accessible place",
+      "bubble": "Step-free entrance · confirmed"
     },
     "a11y": {
       "skip": "Skip to content",
       "pause": "Pause animations",
       "play": "Play animations",
-      "deviceDesc": "Demo: you ask for an accessible shop near Kimisagara, and MapForAll answers with Duka rya Jean, a step-free entrance 4 minutes away on foot."
+      "deviceDesc": "Demo: you ask for an accessible shop near Kimisagara, and ConnectRwanda AI answers with Duka rya Jean, a step-free entrance 4 minutes away on foot."
     },
     "hero2": {
       "pillNew": "New",
@@ -1706,70 +1726,75 @@
       "scroll": "Scroll"
     },
     "talk": {
-      "app": "MapForAll",
-      "ask": "Find an accessible shop near Kimisagara",
-      "thinking": "Looking around you",
-      "answer": "I found 3 places. Duka rya Jean has a step-free entrance, 4 min away on foot.",
-      "placeholder": "Ask the map…",
-      "n1Title": "Access ramp reported",
-      "n1Meta": "Step-free entrance · Nyamirambo",
+      "app": "ConnectRwanda AI",
+      "ask": "An accessible restaurant in Remera, and the bus to get there?",
+      "thinking": "Checking places and buses around you",
+      "answer": "I found 3 places. Duka rya Jean has a step-free entrance. Bus 302 reaches Remera stop in 4 min.",
+      "placeholder": "Ask ConnectRwanda AI…",
+      "n1Title": "Bus 302 arriving in 4 min",
+      "n1Meta": "Remera stop · to Nyabugogo",
       "n2Title": "New business added",
       "n2Meta": "Tailor’s workshop · Kimisagara",
-      "n3Title": "Opening hours confirmed",
-      "n3Meta": "Kimironko Market · 7 am – 7 pm"
+      "n3Title": "Accessibility confirmed",
+      "n3Meta": "Kimironko Market · step-free entrance"
     },
     "ticker": {
-      "label": "What the community reports",
-      "i1": "A ramp at the entrance",
-      "i2": "A new stall at the market",
-      "i3": "Accessible toilets",
-      "i4": "Updated opening hours",
-      "i5": "A door wide enough for a wheelchair",
-      "i6": "A reserved parking space",
-      "i7": "Staff who sign"
+      "label": "Live on the platform",
+      "i1": "Bus 302 on time at Remera",
+      "i2": "A ramp at the entrance",
+      "i3": "A new stall at the market",
+      "i4": "An accessible bus stop",
+      "i5": "Updated opening hours",
+      "i6": "A door wide enough for a wheelchair",
+      "i7": "A new local business"
     },
     "stats": {
-      "eyebrow": "By the numbers",
-      "title": "Built for the whole city.",
-      "s1": "languages: Kinyarwanda, French and English.",
-      "s2": "invented places. Every place is checked by the community.",
-      "s3": "The shop next door, finally on the map."
+      "eyebrow": "Why ConnectRwanda AI",
+      "title": "A connected city, for everyone.",
+      "s1": "needs in one app: where to go, how, when, and whether it is accessible",
+      "s2": "franc to list a small business",
+      "s3": "languages: Kinyarwanda, French, English"
     },
     "bento": {
-      "eyebrow": "Everything you need",
-      "title": "A map that listens. And answers.",
+      "eyebrow": "Inclusive AI search",
+      "title": "Recommendations that think about you, not popularity.",
       "localTitle": "Local businesses first.",
-      "localBody": "The neighborhood shop ranks ahead of the big chains.",
+      "localBody": "The neighbourhood duka ranks above the big chain that is already everywhere.",
       "rank1": "Duka rya Jean",
       "rank2": "Corner shop",
       "rank3": "Big chain",
       "localTag": "Local",
-      "accessTitle": "Verified accessibility.",
-      "accessBody": "Ramps, wide doors, accessible toilets: confirmed by the people who go there.",
-      "accessBadge": "Step-free entrance",
-      "voiceTitle": "Talk naturally.",
-      "voiceBody": "Type or say what you need, like you would to a friend.",
+      "accessTitle": "Know before you go.",
+      "accessBody": "Step-free entrance, accessible toilets, reserved parking: confirmed by the community.",
+      "accessBadge": "Access verified",
+      "voiceTitle": "Speak, the map answers.",
+      "voiceBody": "Ask for a place or a bus out loud, handy on the move or when the screen is hard to read.",
       "voicePrompt": "Where can I eat near the stadium?",
-      "langTitle": "Three languages.",
-      "langBody": "The map speaks your language.",
-      "addTitle": "Add a place in seconds.",
+      "langTitle": "In three languages.",
+      "langBody": "Kinyarwanda, French or English: the assistant answers in yours.",
+      "addTitle": "A place is missing? Add it in seconds.",
       "addStep1": "Drop the pin",
       "addStep2": "Add a photo",
       "addStep3": "It’s live",
-      "trustTitle": "Checked by the community.",
-      "trustBody": "Every confirmation makes the map safer for everyone.",
-      "trustCount": "confirmations"
+      "trustTitle": "Checked by the neighbourhood.",
+      "trustBody": "Every accessibility detail gains trust with each confirmation.",
+      "trustCount": "confirmations",
+      "factorsTitle": "What the AI weighs",
+      "f1": "Distance",
+      "f2": "Accessibility",
+      "f3": "Local business",
+      "f4": "Your needs"
     },
     "how": {
       "title": "Three steps. No detours.",
       "s1Title": "Ask.",
-      "s1Body": "Type what you need, in Kinyarwanda, French or English.",
-      "s2Title": "MapForAll searches.",
-      "s2Body": "Local businesses and accessible places come first, checked by the community.",
+      "s1Body": "A place, a service or a bus: type it or say it, in Kinyarwanda, French or English.",
+      "s2Title": "ConnectRwanda AI finds it.",
+      "s2Body": "Accessible places and local businesses come first, with the bus that takes you there.",
       "s3Title": "Go.",
-      "s3Body": "Walking route, accessible entrance, opening hours: all ready.",
+      "s3Body": "Route, bus arrival time, accessible entrance: all ready before you leave.",
       "found": "3 places found",
-      "walk": "4 min walk",
+      "walk": "Bus 302 · 4 min",
       "go": "Go"
     },
     "biz": {
@@ -1779,22 +1804,339 @@
       "visible": "Visible on the map"
     },
     "access2": {
-      "title": "Accessibility at a glance.",
-      "body": "Every place shows clearly what has been checked. You know before you go.",
-      "l1": "Step-free entrance",
-      "l2": "Wide door",
-      "l3": "Accessible toilets",
-      "l4": "Reserved parking space"
+      "title": "Accessibility, checked before the trip.",
+      "body": "For wheelchair users, older people and anyone with reduced mobility, details matter. ConnectRwanda AI shows what is truly accessible, places, stops and buses, thanks to the community.",
+      "l1": "Step-free entrances and ramps",
+      "l2": "Low-floor buses and accessible stops",
+      "l3": "Accessible toilets and parking",
+      "l4": "Information confirmed by users"
     },
     "final": {
-      "title": "Your city is waiting.",
-      "body": "Explore, add, share. Every place counts."
+      "title": "Find the right place. Get there more easily.",
+      "body": "Smart navigation, real-time buses, a voice assistant and accessible maps: ConnectRwanda AI helps everyone move around the city independently."
     },
     "footer": {
-      "copy": "© 2026 MapForAll (Ikarita ya Bose). Built for a more inclusive city.",
+      "copy": "© 2026 ConnectRwanda AI. Connected, inclusive and accessible mobility.",
       "signin": "Sign in",
       "top": "Back to top",
       "unipod": "For UR UNIPOD / timbuktoo"
+    },
+    "hero3": {
+      "pillNew": "New",
+      "pill": "Navigation, buses, voice and accessible maps, one app",
+      "titleA": "Where to go. How to get there.",
+      "titleB": "When to leave.",
+      "sub": "ConnectRwanda AI brings smart navigation, public transport guidance, a voice assistant and accessible maps together, so everyone can move around Rwanda, discover places and reach essential services on their own.",
+      "secondary": "Discover the platform"
+    },
+    "problem": {
+      "eyebrow": "The problem",
+      "quote": "Where to go, how to get there, when the bus comes, and whether the place is accessible: four questions, no single place to answer them.",
+      "body": "Rwanda’s cities are growing fast, but urban information is scattered. Finding a destination, a reliable bus or a nearby service is hard, and harder still for people with disabilities.",
+      "p1Title": "Hard to find the way",
+      "p1Body": "Finding a destination and navigating unfamiliar places is difficult without clear, local directions.",
+      "p2Title": "Unreliable transport info",
+      "p2Body": "Without real-time bus locations or arrival times, waiting at the stop is long and uncertain.",
+      "p3Title": "Services out of sight",
+      "p3Body": "Nearby businesses and essential services are hard to locate, and many small shops have no digital presence.",
+      "p4Title": "Barriers for people with disabilities",
+      "p4Body": "Maps rarely say whether a place or route is accessible, so moving around independently is a challenge.",
+      "marketAlt": "A local market in Kigali",
+      "aerialAlt": "View over Kigali and its hills"
+    },
+    "solution": {
+      "eyebrow": "The solution",
+      "title": "One AI platform to move, discover and get there.",
+      "body": "ConnectRwanda AI combines GPS, IoT devices, AI and community data in a single app that guides you from the question to the destination.",
+      "s1Title": "Smart navigation",
+      "s1Body": "Find your destination and get clear step-by-step directions, on foot or by bus.",
+      "s2Title": "Public transport guidance",
+      "s2Body": "Nearby buses, routes and estimated arrival times, live on the map.",
+      "s3Title": "Voice assistant",
+      "s3Body": "Just ask out loud in Kinyarwanda, French or English, and listen to the answer.",
+      "tech1": "GPS",
+      "tech2": "IoT devices",
+      "tech3": "Artificial intelligence",
+      "tech4": "Community",
+      "s4Title": "Accessible mapping",
+      "s4Body": "Accessible entrances, ramps and routes shown before you leave, improved by the community.",
+      "innovation": "Our innovation: all of these services in one platform, so people can move around, discover places and access essential services more easily and independently."
+    },
+    "transit": {
+      "eyebrow": "Real-time transport",
+      "title": "Know exactly when your bus arrives.",
+      "body": "GPS and IoT trackers on board stream every bus position. AI estimates the arrival time at each stop, even in traffic.",
+      "l1": "Buses around you, live on the map",
+      "l2": "Estimated arrival time at your stop",
+      "l3": "Routes and the best way to your destination",
+      "l4": "Accessible buses and stops highlighted",
+      "stop": "Remera stop",
+      "stopMeta": "Next departures · live",
+      "min": "min",
+      "now": "Now",
+      "lowFloor": "Low floor",
+      "gps": "Live GPS position",
+      "cta": "See buses near me"
+    },
+    "ops": {
+      "eyebrow": "For transport operators",
+      "title": "Informed passengers, a more efficient fleet.",
+      "o1Title": "Live fleet",
+      "o1Body": "GPS/IoT trackers show every bus on the map, in real time.",
+      "o2Title": "Predicted arrivals",
+      "o2Body": "AI computes arrival times and shares them with passengers automatically.",
+      "o3Title": "Useful data",
+      "o3Body": "Ridership, delays, busy routes: what you need to plan better service."
+    }
+  },
+  "cr": {
+    "skip": "Skip to content",
+    "nav": {
+      "platform": "Platform",
+      "transit": "Live buses",
+      "navigate": "Navigation",
+      "voice": "Voice",
+      "access": "Accessibility",
+      "signin": "Sign in",
+      "open": "Open the app",
+      "businesses": "Businesses"
+    },
+    "hero": {
+      "badge": "AI mobility platform · Rwanda",
+      "title1": "Move through Rwanda.",
+      "title2": "Independently.",
+      "cta": "Open ConnectRwanda AI",
+      "secondary": "See the platform",
+      "live": "Live network",
+      "ask": "Ask ConnectRwanda AI",
+      "q1": "Accessible pharmacy near Remera",
+      "a1": "Ubumwe Pharmacy · step-free entrance · bus 302 in 3 min",
+      "q2": "How do I get to Kimironko market?",
+      "a2": "Walk 250 m, then bus 302 (3 stops) · 18 min total",
+      "q3": "Local restaurant open now, wheelchair friendly",
+      "a3": "Inzozi Café · 450 m · ramp confirmed by the community",
+      "point1": "4 services, 1 app",
+      "point2": "Kinyarwanda · Français · English",
+      "point3": "Designed for people with disabilities",
+      "scroll": "Scroll to explore"
+    },
+    "problem": {
+      "title": "Four obstacles between people and their city.",
+      "label": "Problem",
+      "p1Tag": "Unfamiliar areas",
+      "p1Fix": "Solved by smart navigation",
+      "p2Tag": "No arrival times",
+      "p2Fix": "Solved by live buses",
+      "p3Tag": "No online presence",
+      "p3Fix": "Solved by local search",
+      "p4Tag": "Accessibility unknown",
+      "p4Fix": "Solved by accessible maps"
+    },
+    "platform": {
+      "eyebrow": "The platform",
+      "core": "AI core",
+      "d1": "Routing combines walking paths, bus lines and accessibility data, so the suggested journey is one a person can actually complete.",
+      "d2": "Vehicle positions from on-board GPS and IoT trackers feed an arrival-time model that updates continuously at every stop.",
+      "d3": "Speech recognition and synthesis in Kinyarwanda, French and English make every feature usable without a screen or keyboard.",
+      "d4": "Venue and route accessibility is mapped, verified by the community and used as a ranking signal, not an afterthought."
+    },
+    "transit": {
+      "board": "Departures",
+      "b1": "Live vehicle positions from on-board GPS and IoT trackers",
+      "b2": "Arrival estimates that adapt to traffic, stop by stop",
+      "b3": "Low-floor buses and accessible stops clearly identified",
+      "all": "All lines",
+      "follow": "Follow",
+      "via": "via"
+    },
+    "navigate": {
+      "title": "From “where?” to “I’m here”.",
+      "body": "Tell ConnectRwanda AI where you want to go. It finds the place, plans the walk and the bus, and guides you step by step, with step-free options when you need them.",
+      "step1": "Walk 250 m to Remera stop",
+      "step2": "Bus 302 · 3 stops · arrives in 3 min",
+      "step3": "Walk 80 m · step-free entrance",
+      "total": "Door to door",
+      "you": "You",
+      "dest": "Destination",
+      "b1": "Door-to-door journeys that combine walking and public transport",
+      "b2": "Step-free alternatives whenever a route includes stairs",
+      "b3": "Clear, sequenced instructions, on screen or read aloud"
+    },
+    "voice": {
+      "title": "Just say it. In your language.",
+      "body": "An interactive voice assistant for everyone, including people with visual impairments or who prefer not to type. Ask, listen, and go.",
+      "listening": "Listening",
+      "b1": "Natural speech in Kinyarwanda, French and English",
+      "b2": "Spoken answers for people with visual impairments",
+      "b3": "The same results as typed search: places, buses and routes"
+    },
+    "access": {
+      "title": "See accessibility before you go.",
+      "body": "Step-free entrances, ramps, accessible toilets and stairs-only places are on the map, confirmed by the community every day.",
+      "stepfree": "Step-free",
+      "ramp": "Ramp",
+      "toilet": "Accessible toilet",
+      "stairs": "Stairs only",
+      "confirmed": "Confirmed by the community",
+      "add": "Add or confirm a place",
+      "b1": "Entrances, ramps, toilets and stairs mapped place by place",
+      "b2": "Information confirmed and corrected by the community",
+      "b3": "Accessibility used as a ranking factor in every search"
+    },
+    "biz": {
+      "eyebrow": "Local businesses & services",
+      "title": "Found because they fit you, not because they paid.",
+      "body": "The AI ranks restaurants, shops, markets and services by distance, accessibility, local ownership and your needs. Small businesses get seen, and owners manage their own listing.",
+      "query": "Restaurant · accessible · Kimironko",
+      "b1": "Transparent ranking: distance, accessibility, local ownership, needs",
+      "b2": "Owners create and update their own listing at no cost",
+      "b3": "Small and informal businesses gain real digital visibility"
+    },
+    "who": {
+      "eyebrow": "For everyone",
+      "title": "Built for everyone who moves.",
+      "w1Title": "Passengers",
+      "w1Body": "Know when the bus comes and the best way to get there.",
+      "w2Title": "People with disabilities",
+      "w2Body": "Accessible routes, places and buses, plus a voice assistant.",
+      "w3Title": "Local businesses",
+      "w3Body": "A free listing so nearby customers can find you.",
+      "w4Title": "Transport operators",
+      "w4Body": "Live fleet data and a direct line to passengers.",
+      "body": "ConnectRwanda AI serves the people who travel, the people who need accessible information, and the businesses and operators who keep the city moving.",
+      "w1a": "Live arrival times at every stop",
+      "w1b": "Door-to-door routes on foot and by bus",
+      "w2a": "Step-free routes and venues",
+      "w2b": "Full voice control in three languages",
+      "w3a": "Free listing managed by the owner",
+      "w3b": "Ranked fairly, next to larger brands",
+      "w4a": "Real-time view of the whole fleet",
+      "w4b": "Service updates sent to passengers"
+    },
+    "tech": {
+      "eyebrow": "How it works",
+      "title": "From the bus to your pocket, in seconds.",
+      "n1": "On the bus",
+      "n1s": "GPS + IoT tracker",
+      "n2": "ConnectRwanda AI",
+      "n2s": "Predicts arrivals, ranks places",
+      "n3": "Your phone",
+      "n3s": "Map, voice and directions",
+      "body": "A simple chain of data, designed to stay reliable on mobile networks across the country.",
+      "n1d": "Each bus sends its position every few seconds through a GPS and IoT tracker.",
+      "n2d": "The AI predicts arrival times, reads traffic and ranks places for each person.",
+      "n3d": "You see the result on the map, hear it by voice and follow the directions."
+    },
+    "footer": {
+      "tagline": "Inclusive mobility for Rwanda",
+      "top": "Back to top",
+      "about": "An AI platform that brings navigation, public transport, voice assistance and accessible mapping together, so everyone can move around Rwanda independently.",
+      "product": "Platform",
+      "for": "Built for",
+      "start": "Get started",
+      "listBiz": "List your business",
+      "data": "Map data © OpenStreetMap contributors",
+      "made": "Made in Rwanda"
+    },
+    "theme": {
+      "light": "Switch to light mode",
+      "dark": "Switch to dark mode"
+    },
+    "map": {
+      "sim": "Live simulation on real Kigali roads",
+      "demo": "Illustrative data for the presentation"
+    },
+    "stats": {
+      "s1": "integrated services in a single application",
+      "s2": "languages supported, by text and by voice",
+      "s3": "cost for a local business to be listed",
+      "s4": "live transport information, every day of the week",
+      "eyebrow": "In figures",
+      "title": "Designed for everyday life in Rwanda.",
+      "aerial": "Aerial view of Kigali",
+      "free": "Free listing"
+    },
+    "film": {
+      "label": "ConnectRwanda AI presentation film",
+      "play": "Play",
+      "pause": "Pause",
+      "n1": "Kigali",
+      "n2": "The challenge",
+      "n3": "Live buses",
+      "n4": "Navigation",
+      "n5": "Voice",
+      "n6": "Accessibility",
+      "n7": "ConnectRwanda AI",
+      "c1": "Kigali, 7:30 a.m. Thousands of people set out to work, study and shop.",
+      "c2": "Too often, the questions come before the journey: where is the bus, which way, is it accessible?",
+      "c3": "ConnectRwanda AI shows every bus live, with arrival times predicted by AI.",
+      "c4": "It plans the whole journey, door to door, on foot and by bus.",
+      "c5": "Ask out loud in Kinyarwanda, French or English, and hear the answer.",
+      "c6": "Step-free entrances, ramps and accessible toilets are visible before you leave.",
+      "c7": "One platform, so everyone can move around Rwanda independently.",
+      "q1": "Where is my bus?",
+      "q2": "Which way to the market?",
+      "q3": "Is the entrance step-free?",
+      "eta": "AI arrival estimate",
+      "outro": "Move through Rwanda, independently."
+    },
+    "ticker": {
+      "live": "Live",
+      "network": "Kigali network",
+      "onTime": "On time",
+      "m1": "Remera stop: step-free access confirmed by the community",
+      "m2": "Kimironko Market: 3 accessible shops added today",
+      "m3": "Line 205: low-floor bus approaching Sonatubes"
+    },
+    "auth": {
+      "panelTitle": "Your city, connected.",
+      "panelBody": "Live buses, accessible places and local businesses across Kigali, in one secure account.",
+      "trust1": "Two-step sign-in",
+      "trust2": "Kinyarwanda · Français · English",
+      "trust3": "Built for accessibility",
+      "live1t": "Bus 302 arriving in 3 min",
+      "live1s": "Remera stop · towards Kimironko",
+      "live2t": "Step-free entrance confirmed",
+      "live2s": "Kigali Convention Centre · just now",
+      "live3t": "New local business listed",
+      "live3s": "Tailor’s workshop · Kimisagara",
+      "live4t": "Route ready in 18 min",
+      "live4s": "Remera → Kimironko Market · on foot and by bus",
+      "secureIn": "Protected by a 6-digit code sent to your email",
+      "secureUp": "Free account. You can update your details at any time.",
+      "stepOf": "Step {n} of {m}",
+      "strength": {
+        "weak": "Weak",
+        "fair": "Fair",
+        "good": "Good",
+        "strong": "Strong"
+      },
+      "forgot": {
+        "title": "Reset your password",
+        "body": "Enter the email of your account. We will send you a 6-digit code to choose a new password.",
+        "send": "Send the code",
+        "sending": "Sending the code",
+        "back": "Back to sign in"
+      },
+      "reset": {
+        "title": "Choose a new password",
+        "body": "Enter the code we sent to",
+        "code": "Verification code",
+        "resend": "Send a new code",
+        "resendIn": "New code in {s} s",
+        "newPassword": "New password",
+        "submit": "Update my password",
+        "busy": "Updating",
+        "changeEmail": "Use another email",
+        "expired": "This reset request expired. Please ask for a new code."
+      },
+      "done": {
+        "title": "Password updated",
+        "body": "Your new password is active and you were signed out of your other devices. Sign in to continue.",
+        "cta": "Sign in"
+      },
+      "voiceT": "Voice question answered",
+      "voiceS": "“Bisi ijya i Kimironko?” · Kinyarwanda"
     }
   }
 }

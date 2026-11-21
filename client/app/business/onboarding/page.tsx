@@ -85,7 +85,7 @@ export default function BusinessOnboarding() {
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
           <span className="flex items-center gap-2">
             <MapPin size={16} className="text-[#E8672A]" aria-hidden />
-            <span className="text-[14.5px] font-semibold text-white">MapForAll</span>
+            <span className="text-[14.5px] font-semibold text-white">ConnectRwanda AI</span>
             <span className="rounded-md bg-[#E8672A] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#1A1614]">Business</span>
           </span>
           {hasPlaces && (

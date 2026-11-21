@@ -1,11 +1,17 @@
 import type { Metadata, Viewport } from 'next'
 import { cookies } from 'next/headers'
+import { DM_Mono, Outfit, Playfair_Display } from 'next/font/google'
 import { I18nProvider, type Lang } from '@/components/I18nProvider'
 import './globals.css'
 
+// Self-hosted by next/font at build time: no blocking request to Google on page load.
+const playfair = Playfair_Display({ subsets: ['latin'], weight: ['400', '600', '700'], style: ['normal', 'italic'], variable: '--font-playfair', display: 'swap' })
+const dmMono = DM_Mono({ subsets: ['latin'], weight: ['300', '400', '500'], variable: '--font-dm-mono', display: 'swap' })
+const outfit = Outfit({ subsets: ['latin'], weight: ['300', '400', '500', '600'], variable: '--font-outfit', display: 'swap' })
+
 export const metadata: Metadata = {
-  title: 'Ikarita ya Bose — MapForAll',
-  description: 'La carte qui rend visible ce que la ville oublie.',
+  title: 'ConnectRwanda AI',
+  description: 'Bus en temps réel, commerces locaux et lieux accessibles au Rwanda — une plateforme IA de mobilité inclusive.',
   manifest: '/manifest.json',
 }
 
@@ -26,7 +32,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const saved = jar.get('hodari_lang')?.value
   const lang: Lang = saved === 'en' || saved === 'rw' || saved === 'fr' ? saved : 'fr'
   return (
-    <html lang={lang} suppressHydrationWarning>
+    <html lang={lang} suppressHydrationWarning className={`${playfair.variable} ${dmMono.variable} ${outfit.variable}`}>
       <head>
         <script
           dangerouslySetInnerHTML={{

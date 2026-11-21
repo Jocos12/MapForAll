@@ -387,7 +387,7 @@ export function BizShell({ section, onSection, places, placesLoading, activeId, 
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col bg-[#1A1614] text-[#E7E5E4] md:flex" aria-label={t('biz.nav.kicker')}>
         <div className="flex h-16 items-center gap-2 border-b border-white/10 px-5">
           <MapPin size={17} className="text-[#E8672A]" aria-hidden />
-          <span className="text-[15px] font-semibold tracking-tight text-white">MapForAll</span>
+          <span className="text-[15px] font-semibold tracking-tight text-white">ConnectRwanda AI</span>
           <span className="rounded-md bg-[#E8672A] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#1A1614]">Business</span>
         </div>
         <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
